@@ -39,11 +39,16 @@ func (c *Contract) Generate(dir string) error {
 	if err != nil {
 		return err
 	}
+	runtime, err := c.RuntimeJSON("  ")
+	if err != nil {
+		return err
+	}
 	for _, file := range []struct {
 		name string
 		data []byte
 	}{
 		{"types.ts", ts}, {"schema.pb", descriptor}, {"contract.json", append(manifest, '\n')}, {"PROTOCOL.md", []byte(c.Markdown())}, {"protocol.gd", gd}, {"wire_schema.json", append(wire, '\n')},
+		{"runtime.json", append(runtime, '\n')},
 	} {
 		if err := atomicWrite(filepath.Join(dir, file.name), file.data); err != nil {
 			return err
@@ -247,7 +252,7 @@ func (c *Contract) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\nProtocol version: `%s`; contract format: `%s`.\n\nSchema hash: `%s`.\n\n", md(c.Manifest.Name), md(c.Manifest.Version), SchemaVersion, c.Fingerprint())
 	b.WriteString("Generated from Proto + manifest. All endpoints use POST with `Content-Type: application/json` and ProtoJSON request bodies. A version mismatch returns HTTP 409.\n\n")
-	b.WriteString("Headers: `X-Protocol-Version` and `X-Protocol-Schema` (required by default), `X-Request-ID` (optional; server creates one if absent), and `Authorization: Bearer …` when declared. Authentication must be implemented by the application. Envelope responses also include `schemaHash`. The hash is contract identity, not authentication. Generated `wireSchema` validates ProtoJSON fields in TypeScript and Godot.\n\n")
+	b.WriteString("Headers: `X-Protocol-Version` and `X-Protocol-Schema` (required by default), `X-Request-ID` (optional; server creates one if absent), and `Authorization: Bearer …` when declared. Authentication must be implemented by the application. Envelope responses also include `schemaHash`. The hash is contract identity, not authentication. Generated `wireSchema` validates ProtoJSON fields in all supplied SDKs; `runtime.json` supplies contract metadata to Unity and Unreal.\n\n")
 	b.WriteString("ProtoJSON uses lowerCamelCase (or explicit json_name), decimal strings for 64-bit integers, base64 bytes, enum names, omitted defaults, and at most one member per oneof. Typescript types describe the emitted wire shape, not binary Protobuf objects.\n\n")
 	for _, e := range c.Endpoints {
 		fmt.Fprintf(&b, "## %s\n\n- Route: `POST %s`\n- Transport: `%s`\n- Auth: `%s`\n- Timeout: %d ms (whole request/stream)\n- RPC: `%s`\n- Request: `%s`\n- Response: `%s`\n\n", md(e.ID), e.Path, e.Transport, e.Auth, e.TimeoutMS, e.RPC, e.Input.FullName(), e.Output.FullName())

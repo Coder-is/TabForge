@@ -15,7 +15,7 @@ for await (const event of client.stream("chatStream", { prompt: "你好" })) {
 
 AbortSignal 可取消请求，退出流迭代会中止请求。failed 等业务事件由应用处理；传输错误抛出 ProtocolError。默认字段可能被 ProtoJSON 省略。
 
-FetchTransport 要求 ES2022、fetch、ReadableStream、TextDecoder 和 AbortController。schemaHash 与 wireSchema 从生成的 types.ts 导入，分别校验协议身份和请求/响应字段。普通响应默认限制为 1 MiB 字节，SSE 默认限制单帧为 1 MiB JS 字符，可通过 FetchOptions 配置。小程序或引擎用其他网络 API 时实现 Transport，可复用 SSEParser、StreamValidator、SchemaValidator：
+FetchTransport 要求 ES2022、fetch、ReadableStream、TextDecoder 和 AbortController。schemaHash 与 wireSchema 从生成的 types.ts 导入，分别校验协议身份和请求/响应字段。普通响应默认限制为 1 MiB 字节，SSE 默认限制单帧为 1 MiB JS 字符，可通过 FetchOptions 配置。微信与 Cocos 可直接使用 [WechatTransport](../wechat/README.md) / [CocosTransport](../cocos/README.md)，它们不依赖 TextDecoder。其他平台可实现 CallbackNetwork 并使用 CallbackTransport，或者自行实现 Transport，复用 SSEParser、StreamValidator、SchemaValidator：
 
 1. 将网络 bytes **增量解码**为 UTF-8 字符串，不能逐分片独立解码。
 2. 字符串交给 SSEParser.feed，对返回的完整帧调用 StreamValidator.accept。

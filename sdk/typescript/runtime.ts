@@ -13,7 +13,12 @@ export interface Operation {
 }
 export interface FetchOptions { schemaHash?: string; wireSchema?: WireSchema; maxResponseBytes?: number; maxFrameChars?: number }
 export interface TransportError { code: string; message: string; retryable: boolean }
-export interface CallOptions { signal?: AbortSignal; token?: string; requestId?: string }
+export interface CancellationSignal {
+  readonly aborted: boolean;
+  addEventListener(type: "abort", listener: () => void, options?: { once?: boolean }): void;
+  removeEventListener(type: "abort", listener: () => void): void;
+}
+export interface CallOptions { signal?: CancellationSignal; token?: string; requestId?: string }
 export interface StreamEvent<T> { name: string; requestId: string; sequence: string; payload: T }
 export interface Transport {
   call(operation: Operation, request: unknown, options?: CallOptions): Promise<unknown>;
@@ -187,7 +192,7 @@ export function parseUnary(value: unknown, version: string, requestID?: string, 
   return body.data;
 }
 
-function validateMessage(options: FetchOptions, type: string | undefined, value: unknown): void {
+export function validateMessage(options: FetchOptions, type: string | undefined, value: unknown): void {
   if (!options.wireSchema || !type) return;
   try { new SchemaValidator(options.wireSchema).validate(type, value); }
   catch (error) { throw new ProtocolError("invalid_message", error instanceof Error ? error.message : "Invalid ProtoJSON"); }

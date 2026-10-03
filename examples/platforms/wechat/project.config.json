@@ -1,0 +1,14 @@
+{
+  "appid": "touristappid",
+  "projectname": "tabforge-platform-smoke",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "./",
+  "libVersion": "3.11.2",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "minified": false,
+    "minifyWXML": true
+  }
+}

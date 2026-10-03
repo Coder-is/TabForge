@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "com.tabforge.protocol": "file:../../../../sdk/unity",
+    "com.unity.test-framework": "1.1.33"
+  },
+  "testables": ["com.tabforge.protocol"]
+}

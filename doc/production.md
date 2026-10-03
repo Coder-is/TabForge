@@ -1,12 +1,12 @@
 # 协议模块生产部署与验收
 
-本次加固覆盖 HTTP ProtoJSON/SSE、Go 服务端、TypeScript fetch 客户端及 Godot 原生 GDScript 客户端。它提供生产部署需要的传输边界与回归测试；业务容量、认证策略、模型供应商和实际目标平台仍由接入项目验证。
+加固覆盖 HTTP ProtoJSON/SSE、Go 服务端和各客户端；已加入 Unity、Unreal、Cocos 与微信专用适配，实际验证边界见 [平台验收](platform-validation.md)。它提供生产部署需要的传输边界与回归测试；业务容量、认证策略、模型供应商和实际目标平台仍由接入项目验证。
 
 ## 固定协议身份
 
-生成包现在包含 contract.json、schema.pb、types.ts、PROTOCOL.md、wire_schema.json 和 protocol.gd。schema hash 对清单与描述文件计算 SHA-256，排除描述文件的路径和源注释；包括语言选项在内的其他描述内容仍参与身份计算。
+生成包现在包含 contract.json、schema.pb、types.ts、PROTOCOL.md、wire_schema.json、protocol.gd 和 runtime.json。schema hash 对清单与描述文件计算 SHA-256，排除描述文件的路径和源注释；包括语言选项在内的其他描述内容仍参与身份计算。
 
-Go 服务端默认要求 X-Protocol-Version 与 X-Protocol-Schema 一致，否则 409。所有响应包络增加 schemaHash；TS/Godot 检查包络与字段规则，拒绝类型错误、溢出、未知字段和 oneof 冲突。Hash 用于发现部署差异，不是鉴权或签名。
+Go 服务端默认要求 X-Protocol-Version 与 X-Protocol-Schema 一致，否则 409。所有响应包络增加 schemaHash；各客户端检查包络与字段规则，拒绝类型错误、溢出、未知字段和 oneof 冲突。Hash 用于发现部署差异，不是鉴权或签名。
 
 这是相对于上一版的接入约定变化。升级时要同时部署客户端生成文件和服务端。临时兼容旧客户端可设 RequireSchemaHash=false，但仍会拒绝显式填写错误 hash 的请求；不能用它替代明确的版本发布策略。
 
@@ -64,8 +64,8 @@ GODOT_BIN=/absolute/path/to/godot go test -race -count=1 ./protocol/httptranspor
 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 ```
 
-CI 在 Linux/macOS/Windows 检查 Go 与 TS，另外用经过 SHA-512 验证的 Godot 4.5.1 Linux 运行时测试 GDScript。当前本地 Godot 实测是 macOS arm64 原生 headless；Godot Web 流、移动导出、Unity、Unreal、小程序适配和真实模型服务没有据此获得验证。
+CI 在 Linux/macOS/Windows 检查 Go 与 TS，另外用经过 SHA-512 验证的 Godot 4.5.1 Linux 运行时测试 GDScript。当前本地 Godot 实测是 macOS arm64 原生 headless；Godot Web 流、移动导出及真实模型服务没有据此获得验证。新增四端专用适配的独立核心和网络后端结果，与编辑器/真机结果分别记录在 [平台验收](platform-validation.md)。
 
-2026-10-03 本地验收通过：完整 Go 竞态测试、TypeScript 类型检查与 15 项测试、Godot 单元测试及真实 Go 服务联调、CLI 六类产物生成与升级拦截。最后的 HTTP 大小限制修改另通过协议模块竞态回归和 Godot 联调。Go 1.26.8 下 govulncheck 未发现已知可达漏洞；远程 CI 结果仍需提交后确认。
+2026-10-03 本地验收通过：完整 Go 竞态测试、TypeScript 类型检查与 24 项测试、Godot 单元测试及真实 Go 服务联调、CLI 七类产物生成与升级拦截。最后的 HTTP 大小限制修改另通过协议模块竞态回归和 Godot 联调。Go 1.26.8 下 govulncheck 未发现已知可达漏洞；另通过 Chromium Fetch/XHR 各 12 项、微信开发者工具 12 项、C# 核心 Go HTTP/SSE 联调、C++ 核心 sanitizer 测试；SDK 开发依赖 npm audit 未发现已知漏洞。远程 CI 结果仍需提交后确认。
 
 上线项目还需根据自身目标流数量和消息大小做容量测试，配置 TLS、鉴权/配额、代理禁用 SSE 缓冲与合适的流超时，并测试滚动部署期间的旧客户端。这里没有内置自动重连、回放、幂等重试、WebSocket 或供应商转换；配置依然由原有 V3 导表入口导出。

@@ -3,12 +3,16 @@ export interface FieldShape { kind: string; type?: string; list?: boolean; mapKe
 export interface MessageShape { fields: Readonly<Record<string, FieldShape>>; oneofs?: readonly (readonly string[])[] }
 export interface WireSchema { messages: Readonly<Record<string, MessageShape>>; enums: Readonly<Record<string, readonly string[]>> }
 
+const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
+const fullMatch = (pattern: RegExp, value: string): boolean => pattern.exec(value)?.[0] === value;
 const signed64 = new Set(["int64", "sint64", "sfixed64"]);
 const unsigned64 = new Set(["uint64", "fixed64"]);
 const signed32 = new Set(["int32", "sint32", "sfixed32"]);
 const unsigned32 = new Set(["uint32", "fixed32"]);
 export function validIntegerString(value: unknown, signed: boolean, bits = 64): boolean {
-  if (typeof value !== "string" || !/^-?(0|[1-9][0-9]*)$/.test(value) || value === "-0") return false;
+  if (typeof value !== "string" || value === "-0") return false;
+  const match = /^-?(0|[1-9][0-9]*)$/.exec(value);
+  if (!match || match[0] !== value) return false;
   const negative = value.startsWith("-");
   if (negative && !signed) return false;
   const digits = negative ? value.slice(1) : value;
@@ -35,27 +39,27 @@ export class SchemaValidator {
     if (type.startsWith(prefix)) {
       const name = type.slice(prefix.length);
       const wrappers: Record<string, string> = { DoubleValue: "double", FloatValue: "float", Int64Value: "int64", UInt64Value: "uint64", Int32Value: "int32", UInt32Value: "uint32", BoolValue: "bool", StringValue: "string", BytesValue: "bytes" };
-      if (Object.hasOwn(wrappers, name)) { this.scalar({ kind: wrappers[name] }, value, path, depth + 1); return; }
+      if (hasOwn(wrappers, name)) { this.scalar({ kind: wrappers[name] }, value, path, depth + 1); return; }
       if (name === "Timestamp") {
-        if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(?:\d{3}|\d{6}|\d{9}))?Z$/.test(value) || Number(value.slice(0, 4)) === 0) this.fail(path, "canonical UTC timestamp");
+        if (typeof value !== "string" || !fullMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(?:\d{3}|\d{6}|\d{9}))?Z$/, value) || Number(value.slice(0, 4)) === 0) this.fail(path, "canonical UTC timestamp");
         const date = new Date(value);
         if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 19) !== value.slice(0, 19)) this.fail(path, "valid UTC timestamp");
         return;
       }
       if (name === "Duration") {
-        if (typeof value !== "string" || !/^-?(0|[1-9]\d*)(?:\.(?:\d{3}|\d{6}|\d{9}))?s$/.test(value) || Math.abs(Number(value.slice(0, -1))) > 315576000001) this.fail(path, "duration in range");
+        if (typeof value !== "string" || !fullMatch(/^-?(0|[1-9]\d*)(?:\.(?:\d{3}|\d{6}|\d{9}))?s$/, value) || Math.abs(Number(value.slice(0, -1))) > 315576000001) this.fail(path, "duration in range");
         if (Math.abs(Number(value.slice(0, -1).split(".")[0])) > 315576000000) this.fail(path, "duration in range");
         return;
       }
-      if (name === "FieldMask") { if (typeof value !== "string" || !/^(?:[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)*(?:,[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)*)*)?$/.test(value)) this.fail(path, "canonical field mask string"); return; }
+      if (name === "FieldMask") { if (typeof value !== "string" || !fullMatch(/^(?:[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)*(?:,[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)*)*)?$/, value)) this.fail(path, "canonical field mask string"); return; }
       if (name === "Value") { this.json(value, path, depth + 1); return; }
       if (name === "Struct") { const fields = this.record(value, path); for (const key of Object.keys(fields)) this.json(fields[key], path + "." + key, depth + 1); return; }
       if (name === "ListValue") { if (!Array.isArray(value)) this.fail(path, "array"); for (const element of value) this.json(element, path, depth + 1); return; }
       if (name === "Any") {
         const fields = this.record(value, path);
         if (typeof fields["@type"] !== "string") this.fail(path, "Any @type");
-        const nestedType = (fields["@type"] as string).split("/").at(-1)!;
-        if (nestedType === type || !Object.hasOwn(this.schema.messages, nestedType)) this.fail(path, "known Any type");
+        const nestedType = (fields["@type"] as string).split("/").slice(-1)[0];
+        if (nestedType === type || !hasOwn(this.schema.messages, nestedType)) this.fail(path, "known Any type");
         const nested = Object.fromEntries(Object.entries(fields).filter(([key]) => key !== "@type"));
         if (nestedType.startsWith(prefix) && nestedType !== prefix + "Empty") {
           if (Object.keys(nested).length !== 1 || !("value" in nested)) this.fail(path, "Any value");
@@ -64,15 +68,15 @@ export class SchemaValidator {
         return;
       }
     }
-    if (!Object.hasOwn(this.schema.messages, type)) this.fail(path, "known message type");
+    if (!hasOwn(this.schema.messages, type)) this.fail(path, "known message type");
     const shape = this.schema.messages[type];
     const fields = this.record(value, path);
     for (const group of shape.oneofs ?? []) {
-      if (group.filter(name => Object.hasOwn(fields, name)).length > 1) this.fail(path, "at most one oneof member");
+      if (group.filter(name => hasOwn(fields, name)).length > 1) this.fail(path, "at most one oneof member");
     }
-    for (const [name, field] of Object.entries(shape.fields)) if (field.required && !Object.hasOwn(fields, name)) this.fail(path + "." + name, "required field");
+    for (const [name, field] of Object.entries(shape.fields)) if (field.required && !hasOwn(fields, name)) this.fail(path + "." + name, "required field");
     for (const name of Object.keys(fields)) {
-      if (!Object.hasOwn(shape.fields, name)) this.fail(path + "." + name, "declared field");
+      if (!hasOwn(shape.fields, name)) this.fail(path + "." + name, "declared field");
       const field = shape.fields[name], item = fields[name], next = path + "." + name;
       if (field.mapKey) {
         const entries = this.record(item, next);
@@ -111,7 +115,7 @@ export class SchemaValidator {
     if (kind === "bool") { if (typeof value !== "boolean") this.fail(path, "boolean"); return; }
     if (kind === "string" || kind === "bytes") {
       if (typeof value !== "string") this.fail(path, "string");
-      if (kind === "bytes" && !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) this.fail(path, "padded Base64");
+      if (kind === "bytes" && !fullMatch(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/, value)) this.fail(path, "padded Base64");
       return;
     }
     this.fail(path, "supported scalar type");

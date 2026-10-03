@@ -4,8 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test runtime.test.mjs schema.test.mjs",
-    "check": "tsc -p tsconfig.json"
+    "test": "node --test runtime.test.mjs schema.test.mjs platform.test.mjs",
+    "check": "tsc -p tsconfig.json",
+    "build:platforms": "node ../../examples/platforms/build.mjs"
   },
-  "devDependencies": { "typescript": "5.9.3" }
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
 }

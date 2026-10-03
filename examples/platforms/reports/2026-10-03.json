@@ -1,0 +1,146 @@
+{
+  "date": "2026-10-03",
+  "contractHash": "4eeb62dc1ded8c934a549020ed62bebcbff799cdafd513a13b32a20e43ec3fd0",
+  "browser": {
+    "host": "macOS",
+    "runtime": "Codex in-app Chromium",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+    "fetch": {
+      "passed": 12,
+      "total": 12
+    },
+    "xhr": {
+      "passed": 12,
+      "total": 12
+    },
+    "cases": [
+      "unary Unicode + uint64",
+      "SSE Unicode + terminal sequence",
+      "request type validation",
+      "incremental event before EOF + cancellation",
+      "iterator break aborts streaming",
+      "whole-stream timeout",
+      "server incomplete-stream error",
+      "fault gap",
+      "fault schema",
+      "fault type",
+      "fault eof",
+      "fault large"
+    ],
+    "evidence": "Observed browser.html DOM results after clicking Run; both backends all passed"
+  },
+  "wechat": {
+    "developerToolsVersion": "2.01.2510260",
+    "system": {
+      "platform": "devtools",
+      "model": "iPhone 12/13 (Pro)",
+      "SDKVersion": "3.11.2"
+    },
+    "results": [
+      {
+        "name": "unary Unicode + uint64",
+        "passed": true
+      },
+      {
+        "name": "SSE Unicode + terminal sequence",
+        "passed": true
+      },
+      {
+        "name": "request type validation",
+        "passed": true
+      },
+      {
+        "name": "incremental event before EOF + cancellation",
+        "passed": true
+      },
+      {
+        "name": "iterator break aborts streaming",
+        "passed": true
+      },
+      {
+        "name": "whole-stream timeout",
+        "passed": true
+      },
+      {
+        "name": "server incomplete-stream error",
+        "passed": true
+      },
+      {
+        "name": "fault gap",
+        "passed": true
+      },
+      {
+        "name": "fault schema",
+        "passed": true
+      },
+      {
+        "name": "fault type",
+        "passed": true
+      },
+      {
+        "name": "fault eof",
+        "passed": true
+      },
+      {
+        "name": "fault large",
+        "passed": true
+      }
+    ]
+  },
+  "typescript": {
+    "typecheck": "passed",
+    "unitTests": {
+      "passed": 24,
+      "total": 24
+    },
+    "npmAudit": "0 known vulnerabilities in SDK dependency tree",
+    "additionalChecks": [
+      "Cancellation cleanup despite application listener exception",
+      "Cocos declaration bundle typecheck"
+    ]
+  },
+  "go": {
+    "command": "go test -race -count=1 ./...",
+    "result": "passed",
+    "enabledOptionalRuntimes": [
+      "Node 24.10.0",
+      "Godot 4.5.1",
+      "C# .NET 8.0.425"
+    ]
+  },
+  "csharpCore": {
+    "runtime": ".NET SDK 8.0.425",
+    "json": "Newtonsoft.Json 13.0.2",
+    "unitTests": "passed",
+    "goHttpSseIntegration": "passed",
+    "isUnityEngineTest": false,
+    "additionalChecks": [
+      "Integral floating-point tokens for int32/uint32/enum",
+      "Very large BigInteger rejects as invalid_message",
+      "Trailing newline canonical-value rejection"
+    ]
+  },
+  "cppCore": {
+    "compiler": "macOS clang++ C++17",
+    "checks": [
+      "-Wall -Wextra -Werror",
+      "address sanitizer",
+      "undefined behavior sanitizer"
+    ],
+    "result": "passed",
+    "isUnrealEngineTest": false
+  },
+  "notExecuted": [
+    "Unity editor compile and PlayMode",
+    "Unreal plugin compile and native HTTP Automation",
+    "Cocos Creator import, scene and JSB",
+    "Android/iOS device builds",
+    "WeChat real devices and mini-game export",
+    "remote CI"
+  ],
+  "notes": [
+    "Development-tool simulator is not a real iPhone",
+    "Cocos Web adapter runs in a real browser, not in Creator",
+    "Vendor automator installed outside SDK dependency tree"
+  ]
+}

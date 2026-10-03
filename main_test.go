@@ -44,7 +44,7 @@ func TestCLIV3Only(t *testing.T) {
 		if err != nil || !bytes.Contains(output, []byte("2 endpoints")) || !bytes.Contains(output, []byte("Schema hash: ")) {
 			t.Fatalf("protocol generation: %v\n%s", err, output)
 		}
-		for _, name := range []string{"types.ts", "contract.json", "schema.pb", "PROTOCOL.md", "protocol.gd", "wire_schema.json"} {
+		for _, name := range []string{"types.ts", "contract.json", "schema.pb", "PROTOCOL.md", "protocol.gd", "wire_schema.json", "runtime.json"} {
 			if data, err := ioutil.ReadFile(filepath.Join(outputDir, name)); err != nil || len(data) == 0 {
 				t.Fatalf("missing %s: %v", name, err)
 			}

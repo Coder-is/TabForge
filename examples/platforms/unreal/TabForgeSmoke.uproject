@@ -1,0 +1,7 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.5",
+  "Category": "Testing",
+  "Description": "TabForge native HTTP/SSE acceptance",
+  "Plugins": [{"Name":"TabForgeProtocol","Enabled":true}]
+}

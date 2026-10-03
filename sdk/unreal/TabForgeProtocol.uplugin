@@ -1,0 +1,10 @@
+{
+  "FileVersion": 3,
+  "Version": 2,
+  "VersionName": "0.2.0",
+  "FriendlyName": "TabForge Protocol",
+  "Description": "Generated-contract ProtoJSON HTTP and SSE transport.",
+  "Category": "Networking",
+  "CanContainContent": false,
+  "Modules": [{ "Name": "TabForgeProtocol", "Type": "Runtime", "LoadingPhase": "Default" }]
+}

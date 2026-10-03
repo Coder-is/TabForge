@@ -27,6 +27,7 @@ jobs:
       - run: npm ci --prefix sdk/typescript --ignore-scripts
       - run: npm --prefix sdk/typescript run check
       - run: npm --prefix sdk/typescript test
+      - run: npm --prefix sdk/typescript run build:platforms
       - run: go test -race ./...
 
   godot:
@@ -47,3 +48,32 @@ jobs:
         env:
           GODOT_BIN: ${{ runner.temp }}/godot/Godot_v4.5.1-stable_linux.x86_64
         run: go test -race -count=1 ./protocol/httptransport -run Godot
+
+  native-cores:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.8'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.425'
+      - name: C++ parser and strict JSON with sanitizers
+        shell: bash
+        run: |
+          clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I sdk/unreal/Source/TabForgeProtocol/Public sdk/native/tests/sse_test.cpp -o "$RUNNER_TEMP/tabforge-sse-test"
+          "$RUNNER_TEMP/tabforge-sse-test"
+      - name: Go HTTP to TS callback adapters and C# core
+        env:
+          DOTNET_BIN: dotnet
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+          DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+        run: go test -race -count=1 -v ./internal/platformtest

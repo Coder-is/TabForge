@@ -1,0 +1,4 @@
+{
+  "extends": "./temp/tsconfig.cocos.json",
+  "compilerOptions": { "strict": true, "lib": ["ES2020", "DOM"] }
+}

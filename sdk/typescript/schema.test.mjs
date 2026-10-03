@@ -7,7 +7,7 @@ import { operations, wireSchema, schemaHash, protocolVersion } from "../../examp
 test("ProtoJSON rejects precision loss, overflow, wrong scalar types and unknown fields", () => {
   const validator = new SchemaValidator(wireSchema);
   validator.validate("tabforge.example.ChatRequest", { conversationId: "18446744073709551615", prompt: "中文😀" });
-  for (const bad of [{ conversationId: 1 }, { conversationId: "18446744073709551616" }, { conversationId: "01" }, { prompt: false }, { unknown: true }]) assert.throws(() => validator.validate("tabforge.example.ChatRequest", bad));
+  for (const bad of [{ conversationId: 1 }, { conversationId: "18446744073709551616" }, { conversationId: "01" }, { conversationId: "1\n" }, { prompt: false }, { unknown: true }]) assert.throws(() => validator.validate("tabforge.example.ChatRequest", bad));
   assert.equal(validIntegerString("-9223372036854775808", true), true);
   assert.equal(validIntegerString("-9223372036854775809", true), false);
   assert.throws(() => validator.validate("tabforge.example.ChatEvent", { delta: {}, completed: {} }));
@@ -50,4 +50,5 @@ test("well-known types preserve canonical values and reject invalid dates/durati
   assert.throws(() => validator.validate("google.protobuf.Timestamp", "2025-02-29T12:34:56Z"));
   assert.throws(() => validator.validate("google.protobuf.Duration", "315576000001s"));
   assert.throws(() => validator.validate("google.protobuf.FieldMask", "user_id"));
+  for (const [type, value] of [["Timestamp", "2024-02-29T12:34:56Z\n"], ["Duration", "1s\n"], ["FieldMask", "userId\n"], ["BytesValue", "YWJj\n"]]) assert.throws(() => validator.validate("google.protobuf." + type, value));
 });

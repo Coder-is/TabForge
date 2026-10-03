@@ -1,0 +1,6 @@
+{
+  "name": "TabForge.Protocol.Tests",
+  "references": ["TabForge.Protocol", "Unity.Newtonsoft.Json"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"]
+}

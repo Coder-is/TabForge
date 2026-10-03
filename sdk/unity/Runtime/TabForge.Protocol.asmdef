@@ -1,0 +1,6 @@
+{
+  "name": "TabForge.Protocol",
+  "rootNamespace": "TabForge.Protocol",
+  "references": ["Unity.Newtonsoft.Json"],
+  "autoReferenced": true
+}

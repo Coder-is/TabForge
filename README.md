@@ -4,7 +4,7 @@
 
 基于 [davyxu/tabtoy](https://github.com/davyxu/tabtoy) 的 V3 版本开发，保留原作者的 MIT 许可和版权说明，使用独立的 Git 提交历史。导表当前只支持 V3，新增已有 Proto 映射、ProtoJSON 导出，以及缓存、并发加载和错误处理改进。
 
-另有独立的统一协议模块：维护 Proto RPC 与接口清单，生成 TypeScript ProtoJSON 类型、字段验证规则、Godot 元数据和接入文档。Go HTTP 服务、TypeScript fetch 客户端和 Godot 原生 GDScript 客户端支持普通 JSON/SSE，包含 schema 身份检查、超时/取消、大小限制、心跳、错误与兼容性检查。Unity、Unreal、小程序等专用适配及真实模型供应商适配仍待实现。见 [统一协议架构](doc/unified-protocol.md)、[生产部署说明](doc/production.md)、[Godot 接入](sdk/godot/README.md)。
+另有独立的统一协议模块：维护 Proto RPC 与接口清单，生成 TypeScript ProtoJSON 类型、字段验证规则、Godot 元数据和接入文档。Go HTTP 服务、TypeScript fetch 客户端和 Godot 原生 GDScript 客户端支持普通 JSON/SSE，包含 schema 身份检查、超时/取消、大小限制、心跳、错误与兼容性检查。已加入 Unity 原生 C#、Unreal C++、Cocos Fetch/XHR 和微信小程序分块网络适配；浏览器与微信开发者工具已实测，Unity/Unreal/Creator 编辑器与移动真机待验证。真实模型供应商适配仍待实现。见 [统一协议架构](doc/unified-protocol.md)、[生产部署说明](doc/production.md)、[Godot 接入](sdk/godot/README.md)、[四端接入与验收](doc/platform-validation.md)。
 
 ```bash
 # 仓库内已包含描述文件，可直接生成接入包。
@@ -16,7 +16,7 @@ go run ./examples/protocol
 
 ## 构建
 
-项目最低使用 Go 1.26.6，toolchain 和 CI 固定 Go 1.26.8，在 Linux、macOS 和 Windows 上验证 Go/TypeScript；另有 Godot 4.5.1 Linux 测试任务。建议使用已修复安全问题的 Go 补丁版本。
+项目最低使用 Go 1.26.6，toolchain 和 CI 固定 Go 1.26.8，在 Linux、macOS 和 Windows 上验证 Go/TypeScript；另有 Godot 4.5.1 Linux 测试任务，以及 Linux/macOS C#、C++ 协议核心任务。建议使用已修复安全问题的 Go 补丁版本。
 
 ```bash
 git clone https://github.com/Coder-is/TabForge.git

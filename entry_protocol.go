@@ -9,7 +9,7 @@ import (
 
 var (
 	paramProtocol        = flag.String("protocol", "", "validate a Proto transport contract JSON (independent of table exports)")
-	paramProtocolOut     = flag.String("protocol_out", "", "generate contract review bundle and ProtoJSON TypeScript types to a directory")
+	paramProtocolOut     = flag.String("protocol_out", "", "generate contract bundle, ProtoJSON TypeScript types and native runtime metadata to a directory")
 	paramProtocolAgainst = flag.String("protocol_against", "", "reject breaking changes against an older protocol manifest")
 )
 

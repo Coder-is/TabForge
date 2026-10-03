@@ -1,0 +1,1 @@
+<view style="padding:24px"><text>TabForge 微信网络验收</text><button bindtap="run" disabled="{{running}}">运行验收</button><text selectable="true" style="white-space:pre-wrap">{{output}}</text></view>
