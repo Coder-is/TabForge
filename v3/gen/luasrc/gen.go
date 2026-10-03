@@ -2,13 +2,16 @@ package luasrc
 
 import (
 	"fmt"
-	"github.com/davyxu/protoplus/codegen"
 	"github.com/Coder-is/TabForge/v3/gen"
 	"github.com/Coder-is/TabForge/v3/model"
+	"github.com/davyxu/protoplus/codegen"
 	"io/ioutil"
 )
 
 func Generate(globals *model.Globals) (data []byte, err error) {
+	if err := gen.ValidateNames(globals, "lua"); err != nil {
+		return nil, err
+	}
 
 	err = codegen.NewCodeGen("luasrc").
 		RegisterTemplateFunc(codegen.UsefulFunc).
@@ -21,6 +24,9 @@ func Generate(globals *model.Globals) (data []byte, err error) {
 }
 
 func Output(globals *model.Globals, param string) (err error) {
+	if err := gen.ValidateNames(globals, "lua"); err != nil {
+		return err
+	}
 
 	type LocalContext struct {
 		Tab *model.DataTable

@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
 
-go run main.go table_gen.go
+go run .

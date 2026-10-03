@@ -1,11 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
 
-# 默认设置代理, 国内专用
-export GOPROXY=https://goproxy.io
-
-go build -v -o ./tabforge github.com/Coder-is/TabForge
-
-./tabforge -mode=v3 \
+go run ../../.. \
 -index=Index.csv \
 -go_out=../golang/table_gen.go \
 -json_out=../json/table_gen.json \
@@ -16,12 +13,4 @@ go build -v -o ./tabforge github.com/Coder-is/TabForge
 -java_out=../java/src/main/java/main/Table.java \
 -package=main
 
-
-if [[ $? -ne 0 ]] ; then
-	read -rsp $'Errors occurred...\n' ;
-	exit 1
-fi
-
-cp ../json/table_gen.json ../java/cfg
-
-rm -f tabforge
+cp ../json/table_gen.json ../java/cfg/table_gen.json

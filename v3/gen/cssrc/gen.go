@@ -1,12 +1,15 @@
 package cssrc
 
 import (
-	"github.com/davyxu/protoplus/codegen"
 	"github.com/Coder-is/TabForge/v3/gen"
 	"github.com/Coder-is/TabForge/v3/model"
+	"github.com/davyxu/protoplus/codegen"
 )
 
 func Generate(globals *model.Globals) (data []byte, err error) {
+	if err := gen.ValidateNames(globals, "csharp"); err != nil {
+		return nil, err
+	}
 
 	cg := codegen.NewCodeGen("cssrc").
 		RegisterTemplateFunc(codegen.UsefulFunc).

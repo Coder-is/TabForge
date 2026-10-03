@@ -50,6 +50,6 @@ func PreCheck(dataList *model.DataTableList) {
 func PostCheck(globals *model.Globals) {
 
 	checkEnumValue(globals)
-	checkRepeat(globals)
 	checkDataType(globals)
+	checkRepeat(globals)
 }

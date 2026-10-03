@@ -2,766 +2,310 @@
 
 将 Excel/CSV 编译为经过校验的跨语言配置、代码与 Protobuf 数据。
 
-TabForge 基于 [davyxu/tabtoy](https://github.com/davyxu/tabtoy) 的 V3 版本开发，保留原作者的 MIT 许可和版权说明，使用独立的 Git 提交历史。当前只提供 V3 导出，新增已有 Proto 映射导出，以及缓存、并发加载和错误处理改进。
+基于 [davyxu/tabtoy](https://github.com/davyxu/tabtoy) 的 V3 版本开发，保留原作者的 MIT 许可和版权说明，使用独立的 Git 提交历史。当前只支持 V3，新增已有 Proto 映射、ProtoJSON 导出，以及缓存、并发加载和错误处理改进。
 
-## 构建与验证
+## 构建
+
+CI 使用 Go 1.25，在 Linux、macOS 和 Windows 上验证。建议使用同版本或更新的 Go 工具链。
 
 ```bash
 git clone https://github.com/Coder-is/TabForge.git
 cd TabForge
 go build -o bin/tabforge .
 ./bin/tabforge -h
-go test -race ./...
+export PATH="$PWD/bin:$PATH"
 ```
 
-Go 安装方式：`go install github.com/Coder-is/TabForge@latest`，安装后的命令名为 `TabForge`。下面的导出示例使用源码构建得到的 `tabforge`（Windows 为 `tabforge.exe`）。
+以上为 Bash 命令。Windows 可执行 `go build -o bin/tabforge.exe .`，然后运行 `.\bin\tabforge.exe -h`。下文使用已加入 `PATH` 的 `tabforge`，Windows 对应 `tabforge.exe`。
 
-读取已有 Protobuf 定义的完整示例见 [existingproto](v3/example/existingproto/README.md)。运行示例需要 `protoc`：
+也可执行 `go install github.com/Coder-is/TabForge@latest`，安装后的命令名为 `TabForge`。普通 `go build` 不注入版本元数据，`-version` 中的版本、提交和构建时间可能为空。
+
+## 快速开始
+
+在仓库根目录运行已有教程，无须手工创建表格：
 
 ```bash
+bash v3/example/tutorial/Make.sh
+```
+
+结果为 `v3/example/tutorial/table_gen.json`。教程中的三个文件分别是：
+
+**类型表 `Type.xlsx`**：定义对象的字段和输入类型。
+
+| 种类 | 对象类型 | 标识名 | 字段名 | 字段类型 |
+| --- | --- | --- | --- | --- |
+| 表头 | MyData | ID | ID | int32 |
+| 表头 | MyData | 名称 | Name | string |
+
+**数据表 `MyData.xlsx`**：列头可使用类型表的标识名或字段名。
+
+| ID | 名称 |
+| --- | --- |
+| 1 | 坦克 |
+| 2 | 法师 |
+
+**索引表 `Index.xlsx`**：列出需要加载的文件。
+
+| 模式 | 表类型 | 表文件名 |
+| --- | --- | --- |
+| 类型表 | | Type.xlsx |
+| 数据表 | MyData | MyData.xlsx |
+
+在这三个文件所在目录中运行：
+
+```bash
+tabforge -index=Index.xlsx -json_out=table_gen.json
+```
+
+源文件路径相对于**命令执行目录**解析，不会自动以索引表所在目录为基准。表类型留空时，会使用源文件名去掉扩展名后的名称；类型表的模式必须为“类型表”。
+
+## 功能与输出格式
+
+支持 XLSX/CSV 混合输入、类型和数据校验、枚举、数组、多列数组、字段索引、拆分表、KV 表和标签过滤。输出任务并发执行，缓存和并发加载可单独开启。
+
+| 输出 | 合并文件参数 | 按表目录参数 | 读取方式 |
+| --- | --- | --- | --- |
+| Go 源码 | `-go_out` | — | 与 JSON 配合使用 |
+| C# 源码 | `-csharp_out` | — | 与专用 `.bin` 和 C# 读取库配合使用 |
+| Java 源码 | `-java_out` | — | 与 JSON 配合使用 |
+| 普通 JSON | `-json_out` | `-json_dir` | 生成代码或应用自己的 JSON 读取流程 |
+| Lua | `-lua_out` | `-lua_dir` | `require("模块名").init(tab)` |
+| 专用二进制 `.bin` | `-binary_out` | `-binary_dir` | C# `tabtoy.TableReader` |
+| JSON 类型信息 | `-jsontype_out` | — | 查看表结构 |
+| Proto3 定义 | `-proto_out` | — | 用 `protoc` 生成语言代码 |
+| Protobuf 二进制 `.pbb` | `-pbbin_out` | `-pbbin_dir` | `proto.Unmarshal` 或对应语言的 Protobuf SDK |
+| 已有 Proto 的 ProtoJSON | `-pbjson_out` | — | `protojson.Unmarshal` 或对应 SDK |
+
+`.bin` 和 `.pbb` 使用不同的格式。`-json_out` 是 TabForge 普通 JSON，`-pbjson_out` 是已有消息的 ProtoJSON。分表 JSON 仍包含表名作为顶层键；分表 `.pbb` 仍使用合并根消息，只填充对应表字段。
+
+Go JSON 读取库：
+
+```go
+import tabtoy "github.com/Coder-is/TabForge/v3/api/golang"
+
+// 以下代码放在生成的 Table 类型所在包的函数内。
+tab := NewTable()
+err := tabtoy.LoadFromFile(tab, "table_gen.json")
+// 或按表加载：err := tabtoy.LoadTableFromFile(tab, "ExampleData.json")
+```
+
+整表加载会执行注册的 Pre/Post 回调；分表加载只重置并构建对应表的索引。完整用法见 [Go 示例](v3/example/golang/main.go)。V3 读取库的 `tabtoy` 包名、C# 命名空间和二进制标识 `TABTOY` 保持原有定义。
+
+### 示例入口
+
+下面的脚本均可在仓库根目录调用，输出写入 `v3/example` 下的对应目录，会覆盖已有生成示例。
+
+```bash
+# 导出完整 XLSX 示例，包括合并文件、分表文件和 Proto3 定义。
+bash v3/example/xlsx/Make.sh
+
+# 导出 CSV 示例。
+bash v3/example/csv/Make.sh
+
+# 读取普通 JSON：先运行 XLSX 导出，确保合并和分表数据均已生成。
+bash v3/example/golang/Make.sh
+
+# 读取 Protobuf 数据：先运行 XLSX 导出；直接使用仓库内已有的 Go 消息代码。
+bash v3/example/protobuf/golang/Make.sh
+
+# 已有 Proto 映射导出：需要 protoc，无须 protoc-gen-go。
 bash v3/example/existingproto/Make.sh
 ```
 
-Go 运行时读取库可从 `github.com/Coder-is/TabForge/v3/api/golang` 导入；V3 读取库的 `tabtoy` 包名、C# 命名空间和二进制标识保持原有定义。
+其他语言用法见 [C# 示例](v3/example/csharp/TabtoyExample/Program.cs)、[Java 示例](v3/example/java/src/test/java/Main.java) 和 [Lua 示例](v3/example/lua/main.lua)，需对应语言运行时。C# 读取库位于 [TableReader.cs](v3/api/csharp/TableReader.cs)。
 
+## 命令行参数
 
-# 特性
-* 支持Xlsx/CSV作为表格数据混合输入
+执行 `tabforge -h` 查看完整参数。未指定的输出不会生成，一次命令可指定多个输出；各输出须使用不同文件路径。
 
-* 支持JSON/Golang/C#/Java/Lua/二进制 源码, 数据, 类型输出
+| 参数 | 用途与默认值 |
+| --- | --- |
+| `-index` | V3 索引表文件，正常导出时指定 |
+| `-mode` | 默认 `v3`，只接受 `v3` |
+| `-package` | 生成代码的包名或命名空间，默认空；生成 Go、C#、Java 或 Proto 定义时建议明确填写 |
+| `-combinename` | 合并根类型名，默认 `Table` |
+| `-go_out` / `-csharp_out` / `-java_out` | Go / C# / Java 源码文件 |
+| `-json_out` / `-lua_out` / `-binary_out` | 合并的 JSON / Lua / 专用 `.bin` 文件 |
+| `-jsontype_out` | JSON 类型信息文件 |
+| `-proto_out` | 从类型表生成 Proto3 定义，不能与 `-proto_desc` 同用 |
+| `-pbbin_out` | 合并的 Protobuf `.pbb` 文件 |
+| `-json_dir` / `-lua_dir` / `-binary_dir` / `-pbbin_dir` | 每个表各一个文件的输出目录 |
+| `-proto_desc` / `-proto_map` | 已有 Proto 的描述文件与 JSON 映射，必须同时提供 |
+| `-pbjson_out` | 已有 Proto 消息的 ProtoJSON 文件，要求 `-proto_desc` 和 `-proto_map` |
+| `-tag_action` | 标签动作，格式为 `action:tag1+tag2\|action2:tag3` |
+| `-para` | 并发加载，默认 `false` |
+| `-usecache` | 启用 XLSX 缓存，默认 `false` |
+| `-cachedir` | 缓存目录，默认 `./.tabtoycache`，启用缓存后生效 |
+| `-version` | 显示构建版本信息 |
 
-* 自动单元格数据格式检查, 精确到单元格的报错
-
-* 支持预定义枚举, 可使用中文枚举类型
-
-* 支持表拆分, 支持多人协作
-
-* 支持KV配置表, 方便将表格作为配置文件
-
-* 多核并发导出, 缓存加速, 上百文件秒级导出
-
-# 上游迭代历程
-
-* 2020年6月: tabtoy v3
-    支持Xlsx/CSV混合导出
-    
-    新的表格格式
-        
-    重构代码
-
-* 2016年8月: 第六代导出器,tabtoy v2 调整为以电子表格为中心的方式, 支持v1 90%常用功能
-
-	增加: 所有导出文件均为1个文件, 提高加载读取速度
-
-	增加: 二进制合并导出(第五代导出器需要使用2个工具才能完成)
-	
-	增加: C#源码导出及索引创建,无需protobuf支持
-	
-	增加: proto格式导出, 支持v2,v3格式
-		
-	重构代码, 导出速度更快
-
-* 2016年3月: 第五代导出器,tabtoy v1 在四代基础上重构,开源,支持并发导出	
-
-* 2015年: 第四代导出器,基于Golang导出器,增加ID重复检查,数组格的多重写法, 支持a.b.c栏位导出, 导出速度大大提高
-
-* 2013年: 第三代导出器,在二代基础上做到内容格式与导出器独立,但依然依赖csv前置导出,增加逗号分隔格子内容,导出速度慢
-
-* 2012年: 第二代导出器,基于C++和Protobuf的导出器,内容格式与导出器混合编写,需要vbs导出csv,速度慢
-	
-* 2011年: 第一代导出器,基于VBA的表格内建导出器,速度慢,复用困难,容易错,不安全
-
-# 导出第一个表
-
-## 类型表
-准备一个电子表格命名为: Type.xlsx
-
-类型表用于定义表格中表头以及用到的类型
-
-表格内容如下:
-
-种类 | 对象类型 | 标识名 | 字段名 | 字段类型 | 数组切割| 值 | 索引 | 标记
----|---|---|---|---|---|---|---|---
-表头 | MyData | ID | ID | int32| 
-表头 | MyData | 名称 | Name | string|
-
-## 数据表
-准备一个电子表格命名为: MyData.xlsx
-
-表格内容如下:
-
-ID | 名称
----|---
-1 | 坦克
-2 | 法师
-
-## 索引表
-* 准备一个电子表格命名为: Index.xlsx
-
-模式 | 表类型 | 表文件名
----|---|---
-类型表 |        | Type.xlsx
-数据表 | MyData | MyData.xlsx
-
-注意 数据表的表类型需要与类型表里的对象类型对应
-
-## 编写导出shell
-
-
-[TabForge 项目](https://github.com/Coder-is/TabForge)
+普通分表输出不会自动创建目录，请提前创建：
 
 ```bash
-tabforge.exe -mode=v3 -index=Index.xlsx -json_out=table_gen.json
+mkdir -p out/json out/pb
+tabforge -index=Index.xlsx -package=main -go_out=out/table_gen.go \
+  -json_dir=out/json -proto_out=out/table.proto -pbbin_dir=out/pb
 ```
 
-[完整例子文件](https://github.com/Coder-is/TabForge/tree/main/v3/example/tutorial)
+Lua 分表输出还包含枚举模块 `_TableType.lua`；修改 `-combinename` 时文件名随之变化。
 
-# 导出数据/源码/类型
+## Protobuf 的两种使用方式
 
-## Golang使用表格导出的JSON数据
+### 从表格生成 Proto3 定义
 
-导出命令行:
 ```bash
-tabforge.exe -mode=v3 -index=Index.xlsx -package=main -go_out=table_gen.go -json_out=table_gen.json
+tabforge -index=Index.xlsx -package=main -proto_out=table.proto -pbbin_out=all.pbb
 ```
 
-读取数据源码:
+字段编号按类型表和输出表的顺序分配，调整排列可能改变编号。需要保持项目已有字段编号时，使用已有 Proto 映射。
 
-```go
-	var Tab = NewTable()
+Go 示例已包含生成的 [table.pb.go](v3/example/protobuf/golang/table.pb.go)。修改类型表后需要重新导出并生成 Go 消息代码：
 
-	// 表加载前清除之前的手动索引和表关联数据
-	Tab.RegisterPreEntry(func(tab *Table) error {
-		fmt.Println("tab pre load clear")
-		return nil
-	})
-
-	// 表加载和构建索引后，需要手动处理数据的回调
-	Tab.RegisterPostEntry(func(tab *Table) error {
-		fmt.Println("tab post load done")
-		fmt.Printf("%+v\n", tab.ExampleDataByID[200])
-
-		fmt.Println("KV: ", tab.GetKeyValue_ExampleKV().ServerIP)
-		return nil
-	})
-
-	err := tabtoy.LoadFromFile(Tab, "../json/table_gen.json")
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-```
-[完整Golang例子](https://github.com/Coder-is/TabForge/tree/main/v3/example/golang)
-
-## C#使用表格导出二进制数据
-
-导出命令行:
 ```bash
-tabforge.exe -mode=v3 -index=Index.xlsx -package=main -csharp_out=table_gen.cs -binary_out=table_gen.bin
-   ```
-
-读取数据源码:
-
-```cs
-using (var stream = new FileStream("../../../../binary/table_gen.bin", FileMode.Open))
-{
-    stream.Position = 0;
-
-    var reader = new tabtoy.TableReader(stream);
-
-
-    var tab = new main.Table();
-
-    try
-    {
-        tab.Deserialize(reader);
-    }
-    catch (Exception e)
-    {
-        Console.WriteLine(e);
-        throw;
-    }
-    
-    // 建立所有数据的索引
-    tab.IndexData();
-
-    // 表遍历
-    foreach (var kv in tab.ExampleData) 
-    {
-        Console.Write("{0} {1}\n",kv.ID, kv.Name);
-    }
-
-    // 直接取值
-    Console.WriteLine(tab.ExtendData[1].Additive);
-
-    // KV配置
-    Console.WriteLine(tab.GetKeyValue_ExampleKV().ServerIP);
-}
+go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.23.0
+# 确保 protoc 与 protoc-gen-go 均在 PATH 中，然后在 v3/example/protobuf/golang 执行：
+protoc -I .. --go_out=. --go_opt=paths=source_relative \
+  --go_opt='Mtable.proto=github.com/Coder-is/TabForge/v3/example/protobuf/golang;main' ../table.proto
 ```
 
-* C#源码出于性能考虑, 默认读取tabtoy专用二进制格式
+`protoc` 下载见 [Protobuf Releases](https://github.com/protocolbuffers/protobuf/releases)。其他项目需将映射中的 Go 导入路径和包名替换为自己的值。
 
-* C#也可以读取JSON数据格式, 由于C#第三方JSON不统一, 请自行使用生成的源码与第三方源码对接
-
-[完整C#例子](https://github.com/Coder-is/TabForge/tree/main/v3/example/csharp)
-
-## Java使用表格导出的JSON数据
-
-导出命令行:
-```bash
-tabforge.exe -mode=v3 -index=Index.xlsx -package=main -java_out=Table.java -json_out=table_gen.json
-```
-
-读取数据源码:
-
-```java
-import main.Table;
-import com.alibaba.fastjson.JSON;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Map;
-
-public class Main {
-
-    // 从文件读取数据
-    private static String readFileAsString(String fileName)throws Exception
-    {
-        return new String(Files.readAllBytes(Paths.get(fileName)));
-    }
-    public static void main(String[] args) throws Exception {
-
-        // 从文件读取配置表
-        String data = null;
-        try {
-            data = readFileAsString("table_gen.json");
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        // 表格数据
-        Table tab;
-
-        // 从json序列化出对象
-        tab = JSON.parseObject(data, Table.class);
-
-        if(tab == null){
-            throw new Exception("parse table failed");
-        }
-
-        // 构建索引
-        tab.BuildData();
-
-        // 测试输出
-        for(Map.Entry<Integer, Table.ExampleData> def : tab.ExampleDataByID.entrySet()){
-            System.out.println(def.getValue().Name);
-        }
-    }
-}
-```
-
-[完整Java例子](https://github.com/Coder-is/TabForge/tree/main/v3/example/java)
-
-## Lua使用表格导出的Lua数据(测试中)
-
-导出命令行:
-```bash
-tabforge.exe -mode=v3 -index=Index.xlsx -lua_out=table_gen.lua
-```
-
-读取数据源码:
-
-```lua
-    -- 加载
-    local tab = {}
-    require("table_gen").init(tab)
-    
-    -- 遍历表
-    print("Iterate lua table by order:")
-    for _, v in ipairs(tab.ExampleData) do
-        print(v.ID, v.Name)
-    end
-
-    -- 通过索引访问
-    print("Access index table data:")
-    print(tab.ExampleDataByID[300].ID)
-
-    -- 枚举类型访问
-    print("Use generated enum:")
-    print(tab.ActorType.Pharah,  tab.ActorType[3])
-```
-
-[完整Lua例子](https://github.com/Coder-is/TabForge/tree/main/v3/example/lua)
-
-## 将表格类型信息导出为JSON格式
-
-导出命令行:
-```bash
-tabforge -mode=v3 -index=Index.xlsx -jsontype_out=type_gen.json
-```
-
-## 导出为Protobuf格式
-TabForge 可以将表类型及结构输出为Google Protobuf的proto格式, 同时输出与之对应的二进制格式(*.pbb)
-
-使用Protobuf的SDK即可方便的将表数据提供给所有Protobuf支持的语言
-
-以下例子展示Golang使用Protobuf读取表格输出文件
-
-* 导出proto文件:
-```bash
-tabforge -mode=v3 -index=Index.xlsx -proto_out=table.proto
-```
-
-* 导出proto二进制数据文件:
-```bash
-tabforge -mode=v3 -index=Index.xlsx -pbbin_out=all.pbb
-```
-
-* Protobuf编译器protoc下载
-
-下载地址: https://github.com/protocolbuffers/protobuf/releases
-
-* 安装Golang的Protobuf生成插件
-```bash
-go install google.golang.org/protobuf/cmd/protoc-gen-go
-```
-
-* 将proto文件生成代码
-```bash
-protoc --go_out=. ./table.proto -I .
-```
-
-[完整Golang使用Protobuf例子](https://github.com/Coder-is/TabForge/tree/main/v3/example/protobuf/golang)
-
-# 按表导出
-
-TabForge 默认情况下, 均是将数据, 源码一次性导出.出于以下原因,TabForge 支持按表导出数据
-
-* 某些语言在读取大量数据时, 会出现兼容性问题. 例如: lua的local和const限制等
-
-* 按需读取数据, 降低内存需求
-
-* 按需更新数据, 减少模块耦合
-
-## Golang按需读取JSON数据
-
-导出命令行:
-```bash
-tabforge -mode=v3 -index=Index.xlsx -package=main -go_out=table_gen.json -json_dir=.
-```
-
-读取数据源码:
-
-```go
-	var TabData = NewTable()
-	err := tabtoy.LoadTableFromFile(TabData, "../jsondir/ExampleData.json")
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
-	fmt.Println("load specified table: ExampleData")
-	for k, v := range TabData.ExampleDataByID {
-		fmt.Println(k, v)
-	}
-
-	// 分表加载时, 不会触发pre/post Handler
-	var TabKV = NewTable()
-	err = tabtoy.LoadTableFromFile(TabKV, "../jsondir/ExampleKV.json")
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
-	fmt.Println("load specified table: ExampleKV")
-	for k, v := range TabKV.ExampleKV {
-		fmt.Println(k, v)
-	}
-```
-[完整Golang例子](https://github.com/Coder-is/TabForge/tree/main/v3/example/golang)
-
-## Lua按需读取Lua数据
-
-导出命令行:
-```bash
-tabforge -mode=v3 -index=Index.xlsx -lua_dir=.
-```
-
-读取数据源码:
-
-```lua
-    local tabData = {}
-    require("ExampleData").init(tabData)
-    require("ExtendData").init(tabData)
-
-    print("Load 2 tables into one lua table:")
-    for _, v in ipairs(tabData.ExampleData) do
-        print(v.ID, v.Name)
-    end
-    for _, v in ipairs(tabData.ExtendData) do
-        print(v.Additive)
-    end
-
-    print("Load kv table into single lua table:")
-    local kvData = {}
-    require("ExampleKV").init(kvData)
-    for _, v in ipairs(kvData.ExampleKV) do
-        print(v.ServerIP, v.ServerPort)
-    end
-
-    -- lua枚举是可选功能, 根据需要加载
-    local tabType = {}
-    require("_TableType").init(tabType)
-    print("Use generated enum:")
-    print(tabType.ActorType.Pharah,  tabType.ActorType[3])
-```
-
-[完整Lua例子](https://github.com/Coder-is/TabForge/tree/main/v3/example/lua)
-[导出的Lua表](https://github.com/Coder-is/TabForge/tree/main/v3/example/luasrc)
-
-## C#按需读取二进制数据
-导出命令行:
-```bash
-tabforge -mode=v3 -index=Index.xlsx -package=main -csharp_out=table_gen.cs -binary_dir=.
-   ```
-
-读取数据源码:
-
-```cs
- static void LoadTableByName(main.Table tab,  string tableName)
-{
-    using (var stream = new FileStream(string.Format("../../../../binary/{0}.bin", tableName), FileMode.Open))
-    {
-        stream.Position = 0;
-
-        var reader = new tabtoy.TableReader(stream);
-        try
-        {
-            tab.Deserialize(reader);
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine(e);
-            throw;
-        }
-    }
-    
-    tab.IndexData(tableName);
-}
-
-static void LoadSpecifiedTable()
-{
-    var tabData = new main.Table();
-
-    LoadTableByName(tabData, "ExampleData");
-    LoadTableByName(tabData, "ExtendData");
-
-    Console.WriteLine("Load table merged into one class");
-    // 表遍历
-    foreach (var kv in tabData.ExampleData)
-    {
-        Console.Write("{0} {1}\n", kv.ID, kv.Name);
-    }
-    // 表遍历
-    foreach (var kv in tabData.ExtendData)
-    {
-        Console.Write("{0}\n", kv.Additive);
-    }
-
-    Console.WriteLine("Load KV table into one class");
-    var tabKV = new main.Table();
-    LoadTableByName(tabKV, "ExampleKV");
-
-    // KV配置
-    Console.WriteLine(tabKV.GetKeyValue_ExampleKV().ServerIP);
-}
-```
-
-[完整C#例子](https://github.com/Coder-is/TabForge/tree/main/v3/example/csharp)
-
-## Golang使用Protobuf按需读取二进制数据
-[Golang例子](https://github.com/Coder-is/TabForge/tree/main/v3/example/protobuf/golang)
-
-
-
-# 特色功能
-
-## 复用项目已有的 Protobuf 类型
-
-V3支持通过 `-proto_desc` 和 `-proto_map` 将表格数据导出到已有消息定义。支持导入的共享类型、嵌套字段、数组、map、枚举、optional和oneof，字段编号直接使用Proto中的定义。
+### 复用项目已有的 Proto
 
 ```bash
 protoc -I ./proto --include_imports --descriptor_set_out=schema.pb ./proto/config.proto
-tabforge -mode=v3 -index=Index.xlsx -proto_desc=schema.pb -proto_map=mapping.json \
+tabforge -index=Index.xlsx -proto_desc=schema.pb -proto_map=mapping.json \
   -pbbin_out=tables.pbb -pbjson_out=tables.json
 ```
 
-Go可直接使用项目已有的生成类型和 `proto.Unmarshal` 读取，无须再定义或转换一套结构体。源表结构、字段映射和完整使用方法见[通用示例](v3/example/existingproto/README.md)。
+描述文件决定目标消息和字段编号，映射文件决定源表及列的对应关系。支持共享类型、嵌套字段、repeated、map、枚举、optional 和 oneof；不会生成另一套 Proto 定义。
 
-## 定义和使用枚举
+映射格式、JSON 单元格、map 导出、校验和接入流程统一见 [已有 Proto 示例文档](v3/example/existingproto/README.md)。
 
+## 表格规则
 
-* 在类型表中定义枚举
+### 基础类型
 
-种类 | 对象类型 | 标识名 | 字段名 | 字段类型 | 数组切割| 值 | 索引 | 标记
----|---|---|---|---|---|---|---|---
-枚举 | ActorType |   | None | int32|  | 0
-枚举 | ActorType | 法鸡 | Pharah | int32|  | 1
-枚举 | ActorType | 狂鼠 | Junkrat | string| | 2
-枚举 | ActorType | 源氏 | Genji | int32|  | 3
-枚举 | ActorType | 天使 | Mercy | string| | 4
-表头 | ExampleData | 类型 | Type | ActorType
+类型表支持 `int16`、`int32`、`int64`、`uint16`、`uint32`、`uint64`、`float` / `float32`、`double` / `float64`、`bool` 和 `string`；`int`、`uint` 分别按 32 位处理。Java 的无符号整数映射到相应有符号类型，应用需自行处理取值范围。
 
-* 在数据表中使用枚举
+布尔值接受 `true` / `false`、`1` / `0`、`是` / `否`，也接受源码中定义的部分大小写形式。CSV 中包含逗号、双引号或换行的单元格须按 CSV 规则加双引号，内部双引号写为两个双引号；已有 Proto 示例中的 JSON 单元格采用此写法。
 
-类型 |
---- |
-狂鼠 |
-Genji |
+V3 不支持自定义默认值。普通输出中的空标量使用类型默认值；空枚举使用类型表的第一个枚举项。已有 Proto 映射中的空单元格不赋值，optional / oneof 可区分空值与显式填写的 `0`、`false`。Excel 中的大整数建议存为文本，避免输入文件先丢失精度。
 
-* 在数据表的枚举字段中, 枚举 字段名或标识名都会自动识别对应枚举值
+### 枚举
 
-* 枚举只有枚举数值会被导出. 枚举标识名, 字段名均不会出现在数据中
+| 种类 | 对象类型 | 标识名 | 字段名 | 字段类型 | 值 |
+| --- | --- | --- | --- | --- | --- |
+| 枚举 | ActorType | | None | int32 | 0 |
+| 枚举 | ActorType | 狂鼠 | Junkrat | int32 | 1 |
+| 表头 | ExampleData | 类型 | Type | ActorType | |
 
-## 使用数组
-种类 | 对象类型 | 标识名 | 字段名 | 字段类型 | 数组切割| 值 | 索引 | 标记
----|---|---|---|---|---|---|---|---
-表头 | ExampleData | 技能列表| Skill | int32 | <code>&#124;</code>   | 
+数据表可填写 `狂鼠` 或 `Junkrat`。普通数据输出使用枚举数值；生成代码保留枚举名称。已有 Proto 模式的枚举输入规则见其示例文档。
 
-技能列表 |
---- |
-<code>2&#124;3</code> |
-1 |
+### 数组与多列数组
 
-输出:
+类型表中填写“数组切割”即定义数组，例如 `int32` 字段的分隔符为 `|` 时，单列单元格 `2|3` 导出为 `[2, 3]`。单列空单元格导出空数组。
 
- [2, 3]
- 
- [ 1 ]
+多个同名数组列按列合并，每个单元格是一个元素，例如两列分别为 `1`、空，导出为 `[1, 0]`。**多列模式不会再按分隔符拆分每个单元格**。同一数组字段在拆分表中的列数须一致。
 
-## 使用多列数组
+### 索引与拆分表
 
-种类 | 对象类型 | 标识名 | 字段名 | 字段类型 | 数组切割| 值 | 索引 | 标记
----|---|---|---|---|---|---|---|---
-表头 | ExampleData | 技能列表| Skill | int32 | <code>&#124;</code>   | 
+在类型表的“索引”列填写“是”，生成代码会建立索引，例如 `ExampleDataByID`。非空索引按实际类型比较：整数 `1` 与 `01`、布尔值 `true` 与“是”、同一枚举的标识名与字段名会被识别为重复。浮点数按定义精度比较，`-0` 与 `0` 相同；字符串 `1` 与 `01` 仍不同。空索引保持可选，不参与重复检查。数组、消息对象和非有限浮点数不能作为索引。
 
-技能列表 | 技能列表
---- | --- |
-2 | 3
-1 | 
+同一表类型可在索引表中引用多个文件，各文件的行会合并，未填写的字段使用默认值：
 
-输出:
+| 模式 | 表类型 | 表文件名 |
+| --- | --- | --- |
+| 数据表 | ExampleData | Data.csv |
+| 数据表 | ExampleData | Data2.csv |
 
- [2, 3 ]
- 
- [ 1, 0 ]
- 
- * 多列数组单元格所有数据会被自动切割并合并
- 
- * 当数组字段拆分为多个同名列时, 导出数组将为空单元格默认填充类型默认值, 保证多列导出后, 数组数量统一
- 
- * 切勿在拆分表中使用多列数组, 导出数据可能存在歧义
+### KV 表
 
-## 为字段建立索引
-种类 | 对象类型 | 标识名 | 字段名 | 字段类型 | 数组切割| 值 | 索引 | 标记
----|---|---|---|---|---|---|---|---
-表头 | ExampleData | ID| ID | int32 |  | |是| 
+KV 字段直接定义在键值表中，索引表的模式使用“键值表”：
 
+| 模式 | 表类型 | 表文件名 |
+| --- | --- | --- |
+| 键值表 | ExampleKV | KV.csv |
 
-生成代码中, 会自动对数据创建索引, 例如:
-```go
-ExampleDataByID map[int32]*ExampleData
+`KV.csv` 内容：
+
+| 字段名 | 字段类型 | 标识名 | 值 | 数组切割 | 标记 |
+| --- | --- | --- | --- | --- | --- |
+| ServerIP | string | 服务器 IP | 8.8.8.8 | | |
+| ServerPort | uint16 | 服务器端口 | 1024 | | |
+
+### 空行、空列和注释
+
+- 第一行是列头。列头遇到空列即停止，后续列不会加载。
+- 遇到完整空行即停止读取，后续行不会导出。
+- 首列有效单元格以 `#` 开头时，该行被忽略。避免注释首列列头，以免影响行识别。
+- 列头以 `#` 开头时，该列不读取源数据；类型表仍定义的字段在普通输出中使用默认值。
+
+## 名称校验
+
+同一对象内的非空标识名须唯一，不能与其他字段的字段名冲突；标识名与自身字段名相同是允许的。同名枚举与表头类型、内建类型名称冲突会在加载阶段报错，KV 表也使用这些检查。
+
+选择源码或 Proto 输出时，会进一步检查该格式使用的类型、字段、包名和生成成员名称，并报告源位置：
+
+| 输出 | 名称要求 |
+| --- | --- |
+| Go | 单一包名；使用 Go 标识符；表名及数据字段须导出，不能与生成方法、索引、枚举辅助类型或变量重名 |
+| C# | 包名作为命名空间，可用点分隔；拒绝保留关键字、非法字符和成员与所在类型同名 |
+| Java | 支持点分包名；拒绝关键字、受限类型名，以及与模板依赖类型或辅助类型冲突的名称 |
+| Lua | 使用 ASCII 字母、数字和下划线，不能以数字开头或使用关键字；表、枚举和索引在输出根表中不得重名 |
+| Proto3 | 使用 ASCII 标识符；检查枚举值的包级作用域，以及去掉下划线、大小写与枚举前缀后产生的名称冲突 |
+
+生成的合并根类型也不能与输出类型或辅助类型重名，可用 `-combinename` 调整。模板不自动转义关键字。普通 JSON 不受其他输出语言的额外名称规则限制；已有 Proto 映射使用目标描述文件的名称，不校验未使用的 `-package` 和 `-combinename`。
+
+名称规则参考 [C# 规范](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/lexical-structure)、[Java 规范](https://docs.oracle.com/en/java/javase/26/docs/specs/jls/jls-3.html#jls-3.8)、[Lua 手册](https://www.lua.org/manual/5.4/manual.html#3.1) 和 [Proto3 规范](https://protobuf.dev/reference/protobuf/proto3-spec/)；Proto3 冲突检查也与项目所用 Protobuf 描述验证器保持一致。
+
+## 标签过滤
+
+在索引表或类型表的“标记”列填写标签，多个标签用 `|` 分隔。通过 `-tag_action` 选择动作，多个动作使用 `|`，同一动作的多个标签使用 `+`；shell 中须给整段值加引号。
+
+```bash
+# 客户端：不导出 server 表，普通 JSON 也不包含 server 字段。
+tabforge -index=Index.xlsx -json_out=client.json \
+  -tag_action='nogentab:server|nogenfield_json:server'
+
+# 服务端：不导出 client 表和字段。
+tabforge -index=Index.xlsx -json_out=server.json \
+  -tag_action='nogentab:client|nogenfield_json:client'
 ```
 
-## 表拆分
+| 动作 | 标记位置 | 作用 |
+| --- | --- | --- |
+| `nogentab` | 索引表 | 不导出带该标签的表 |
+| `nogenfield_json` | 类型表 | 普通合并 JSON 不包含该字段 |
+| `nogenfield_jsondir` | 类型表 | 普通分表 JSON 不包含该字段 |
+| `nogenfield_binary` | 类型表 | 专用二进制不包含该字段 |
+| `nogenfield_pbbin` | 类型表 | Protobuf 二进制不包含该字段；已有 Proto 模式下也作用于 ProtoJSON |
+| `nogenfield_lua` | 类型表 | Lua 不包含该字段 |
+| `nogenfield_csharp` | 类型表 | 生成的 C# 不包含该字段 |
 
-将ExampleData表, 拆为Data.csv, Data2.csv表
+字段动作按输出格式分别生效，例如 `nogenfield_json` 不过滤分表 JSON，也不过滤 Go 源码。已有 Proto 映射引用的表须存在于编译结果中，经 `nogentab` 过滤后仍被映射引用的表会报错。
 
-模式 | 表类型 | 表文件名
----|---|---
-类型表 |        | Type.xlsx
-数据表 | ExampleData | Data.csv
-数据表 | ExampleData | Data2.csv
+## 缓存、并发和失败处理
 
-每个表中的字段可按需填写
-
-## KV表
-
-准备类型表:
-
-模式 | 表类型 | 表文件名
----|---|---
-类型表 |        | Type.xlsx
-数据表 | ExampleKV | KV.csv
-
-准备KV表:
-
-字段名 | 字段类型 | 标识名 |  值|  数组切割 | 标记
----|---|---|---|---|---|
-ServerIP | string | 服务器IP | 8.8.8.8
-ServerPort | uint16 | 服务器端口 | 1024  
-
-## 空行分割
-
-表格数据如下:
-
-ID | 名称
----|---
-1 | 坦克
-2 | 法师
-(空行)  |
-3 | 治疗
-
-导出数据
-* 1 坦克
-* 2 法师
-
-导表工具在识别到空行后, 空行后的数据将被忽略
-
-## 行数据注释
-
-表格数据如下:
-
-ID | 名称
----|---
-1 | 坦克
-#2 | 法师
-3 | 治疗
-
-导出数据
-* 1 坦克
-* 3 治疗
-
-在任意表的首列单元格中首字符为#时，该行所有数据不会被导出
-
-## 列数据注释
-
-表格数据如下:
-
-ID | #名称
----|---
-1 | 坦克
-2 | 法师
-3 | 治疗
-
-导出数据
-* 1 
-* 2
-* 3 
-
-表头中, 列字段首字符为#时，该列所有数据按默认值导出 
-
-## 不导出指定表
-实现此功能需要使用到TagAction, 参考下面例子配置:
-
-在Index表中:
-
-模式 | 表类型 | 表文件名 | 标记
----|---|---|---|
-数据表 | Effect | Effect.csv | client
-数据表 | Password | Server.csv | server
-
-* 客户端数据导出
-导出参数中新增参数
-```shell script
---tag_action=nogentab:server
+```bash
+tabforge -index=Index.xlsx -json_out=out/tables.json \
+  -usecache=true -cachedir=.tabtoycache -para=true
 ```
-表示, 不导出带有server标记的所有表格
 
-* 服务器数据导出
-导出参数中新增参数
-```shell script
---tag_action=nogentab:client
-```
-表示, 不导出带有client标记的所有表格
+XLSX 使用缓存，CSV 不使用；缓存目录会自动创建。缓存文件名来自源文件完整路径，并校验源表与缓存内容。缓存缺失、损坏或版本过旧时会重新读取源表；缓存写入失败显示警告，仍可继续导出。
 
-## 不输出指定列数据
-实现此功能需要使用到TagAction, 参考下面例子配置:
-
-在Type表中:
-
-种类 | 对象类型 | 标识名 | 字段名 | 字段类型 | 数组切割| 值 | 索引 | 标记
----|---|---|---|---|---|---|---|---
-表头 | ExampleData | 特效ID| EffectID | int32 |  | | | client 
-表头 | ExampleData | 概率| Rate | float |  | | | server
-
-表中的特效ID, 只希望客户端导出数据中包含EffectID, 同时服务器导出数据中只包含Rate, 不希望将Rate字段导入客户端数据
-客户端导出为二进制, 服务器导出为json
-
-此时在相应字段所在的Type表中的"标记" 一列增加如表所示标记(如标记列不存在, 请新建)
-
-将原有导出流程拆分为客户端导出和服务器导出, 分两次分别导出不同需求的数据
-
-* 客户端数据导出
-导出参数中新增参数
-```shell script
---tag_action=nogenfield_binary:server
-```
-表示: server标记的字段不导出到二进制
-
-* 服务器数据导出  
-导出参数中新增参数
-```shell script
---tag_action=nogenfield_json:client
-```
-表示: client标记的字段不导出到json完整文件
-
-## TagAction参考说明
-
-### 格式
-```shell script
---tag_action=action1:tag1+tag2|action2:tag1+tag3
-```
-* | 表示多个action
-* 被标记的tag, 将被对应action处理
-
-### action类型
-action | 适用范围 | 功能
----|---|---|
-nogenfield_json | Type表 | 被标记的字段不导出到json完整文件中
-nogenfield_jsondir| Type表 | 被标记的字段不导出到每个表文件json
-nogenfield_binary| Type表 | 被标记的字段不导出到二进制中
-nogenfield_pbbin| Type表 | 被标记的字段不导出到Protobuf二进制中
-nogenfield_lua| Type表 | 被标记的字段不导出到Lua中
-nogenfield_csharp| Type表 | 被标记的字段不导出到C#中
-nogentab| Index表 | 被标记的表不会导出到任何输出中
-
-## 启用缓存
-命令行中加入-usecache=true, 将启用缓存功能, 加速导出速度
-
--cachedir参数设定缓存目录, 默认输出到 TabForge 当前目录下的.tabtoycache目录。缓存目录会自动创建。
-
-缓存文件按源文件完整路径生成文件名，并校验源表和缓存数据是否匹配。缓存缺失或损坏时会重新读取源表；缓存写入失败会显示警告，仍可完成导出。旧版缓存会在首次使用时重新生成。
-
-V3使用-para=true时，加载任务数量受当前Go运行时的GOMAXPROCS限制，同一批次中重复的文件路径只加载一次。
+`-para` 的同时加载数量受 Go 运行时 `GOMAXPROCS` 限制，同一批次中规范化后重复的路径只加载一次。多个输出任务全部结束后统一报告失败，失败返回非零退出码；成功任务可能已写出文件，输出不保证整体原子性。
 
 ## 开发验证
 
-CI使用Go 1.25，在Linux、macOS和Windows上运行测试与竞态检测。本地可执行：
-
 ```bash
-go test ./...
 go test -race ./...
 go test ./v3/model -run '^$' -bench BenchmarkTypeFieldLookup -benchmem
 ```
 
-回归测试包括缓存故障恢复、并发导出失败处理，以及示例在无缓存、冷缓存、热缓存和并发加载模式下的导出一致性。
+测试覆盖类型和数据校验、已有 Proto 映射、缓存故障恢复、并发失败处理，以及无缓存、冷缓存、热缓存和并发加载时的导出一致性。当前校验及本次修复记录见 [检查清单](v3/checker/TODO.md)。
 
-# FAQ
+V2 导出器、V2→V3 迁移工具及其专用参数、示例和文档已移除。旧模式 `v2`、`exportorv2`、`v2tov3` 会报错；旧参数如 `-protover`、`-cpp_out`、`-type_out`、`-pbt_out` 不再可用。迁移输入须使用本文的 V3 索引表、类型表和数据表格式。
 
-* 怎么让客户端和服务器通过标记分别导出
+## 许可与反馈
 
-    请为客户端和服务器分别编写两个 TabForge 导出命令。
-
-# 使用范围
-
-当前仅提供 V3 表格导出。命令默认使用 V3，也可显式指定 `-mode=v3`。
-
-V2 导出器、V2→V3 迁移工具及其专用参数、示例和文档已移除。输入表格请遵循本文的 V3 索引表、类型表和数据表格式。
-
-# 备注
-
-感觉不错请star, 谢谢!
-
-上游作者 davyxu：[知乎](http://www.zhihu.com/people/sunicdavy)。原始版权声明见 [LICENSE](LICENSE)。
-
-提交bug及特性: [https://github.com/Coder-is/TabForge/issues](https://github.com/Coder-is/TabForge/issues)
+原始版权声明见 [MIT LICENSE](LICENSE)。问题和功能建议请提交到 [TabForge Issues](https://github.com/Coder-is/TabForge/issues)。

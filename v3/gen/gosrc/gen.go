@@ -1,13 +1,16 @@
 package gosrc
 
 import (
-	"github.com/davyxu/protoplus/codegen"
 	"github.com/Coder-is/TabForge/v3/gen"
 	"github.com/Coder-is/TabForge/v3/model"
 	"github.com/Coder-is/TabForge/v3/report"
+	"github.com/davyxu/protoplus/codegen"
 )
 
 func Generate(globals *model.Globals) (data []byte, err error) {
+	if err := gen.ValidateNames(globals, "go"); err != nil {
+		return nil, err
+	}
 
 	cg := codegen.NewCodeGen("gosrc").
 		RegisterTemplateFunc(codegen.UsefulFunc).

@@ -179,6 +179,15 @@ func (self *TypeTable) FieldByName(objectType, name string) (ret *TypeDefine) {
 	return self.fieldsByName[typeFieldKey{objectType, name}]
 }
 
+// ObjectDefinition returns the first definition of an object without copying its fields.
+func (self *TypeTable) ObjectDefinition(objectType string) *TypeDefine {
+	fields := self.fieldsByObject[objectType]
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields[0].Define
+}
+
 func (self *TypeTable) ObjectExists(objectType string) bool {
 
 	return len(self.fieldsByObject[objectType]) > 0

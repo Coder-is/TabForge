@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"github.com/Coder-is/TabForge/v3/checker"
 	"github.com/Coder-is/TabForge/v3/helper"
 	"github.com/Coder-is/TabForge/v3/model"
 	"github.com/Coder-is/TabForge/v3/report"
@@ -28,15 +29,7 @@ func LoadTypeTable(typeTab *model.TypeTable, indexGetter helper.FileGetter, file
 				report.ReportError("UnknownTypeKind", objtype.ObjectType, objtype.FieldName)
 			}
 
-			if typeTab.FieldByName(objtype.ObjectType, objtype.FieldName) != nil {
-				cell := tab.GetValueByName(row, "字段名")
-				if cell != nil {
-					report.ReportError("DuplicateTypeFieldName", cell.String(), objtype.ObjectType, objtype.FieldName)
-				} else {
-					report.ReportError("InvalidTypeTable", objtype.ObjectType, objtype.FieldName, tab.FileName)
-				}
-
-			}
+			checker.CheckFieldDefinition(typeTab, &objtype, tab, row, "DuplicateTypeFieldName")
 
 			typeTab.AddField(&objtype, tab, row)
 		}

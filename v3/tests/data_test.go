@@ -173,7 +173,7 @@ func TestArraySpliter(t *testing.T) {
 
 	typeSheet := emu.CreateCSVFile("Type")
 	helper.WriteTypeTableHeader(typeSheet)
-	helper.WriteRowValues(typeSheet, "表头", "TestData", "Week", "Week", "string", "$", "", "true")
+	helper.WriteRowValues(typeSheet, "表头", "TestData", "Week", "Week", "string", "$", "", "false")
 
 	dataSheet := emu.CreateCSVFile("TestData")
 	helper.WriteRowValues(dataSheet, "Week", "Week")

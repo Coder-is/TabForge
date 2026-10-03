@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"github.com/Coder-is/TabForge/v3/checker"
 	"github.com/Coder-is/TabForge/v3/model"
 	"github.com/Coder-is/TabForge/v3/report"
 	"strings"
@@ -35,7 +36,9 @@ func transposeKVtoData(symbols *model.TypeTable, kvtab *model.DataTable) (ret *m
 		tf.Kind = model.TypeUsage_HeaderStruct
 		tf.ObjectType = kvtab.HeaderType
 
-		tf.Name = name.Value
+		if name != nil {
+			tf.Name = name.Value
+		}
 
 		if !model.PrimitiveExists(fieldType.Value) && !symbols.ObjectExists(fieldType.Value) { // 对象检查
 			report.ReportError("UnknownFieldType", fieldType.Value, fieldType.String())
@@ -43,7 +46,9 @@ func transposeKVtoData(symbols *model.TypeTable, kvtab *model.DataTable) (ret *m
 
 		tf.FieldName = fieldName.Value
 		tf.FieldType = fieldType.Value
-		tf.ArraySplitter = arraySplitter.Value
+		if arraySplitter != nil {
+			tf.ArraySplitter = arraySplitter.Value
+		}
 
 		// 将KV表的Tags转换过去
 		if tags != nil && tags.Value != "" {
@@ -51,9 +56,7 @@ func transposeKVtoData(symbols *model.TypeTable, kvtab *model.DataTable) (ret *m
 			tf.Tags = strings.Split(tags.Value, tagsType.TypeInfo.ArraySplitter)
 		}
 
-		if symbols.FieldByName(tf.ObjectType, tf.FieldName) != nil {
-			report.ReportError("DuplicateKVField", fieldName.String())
-		}
+		checker.CheckFieldDefinition(symbols, &tf, kvtab, row, "DuplicateKVField")
 
 		symbols.AddField(&tf, kvtab, row)
 

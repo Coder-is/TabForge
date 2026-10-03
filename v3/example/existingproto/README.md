@@ -1,6 +1,6 @@
 # 使用已有 Protobuf 定义导出配置
 
-这个示例演示 `Excel/CSV → 已有 Protobuf 类型 → .pbb/ProtoJSON`。`common.proto` 定义共享奖励和枚举，`config.proto` 引用这些结构；tabtoy 不会重新生成或修改它们。
+这个示例演示 `Excel/CSV → 已有 Protobuf 类型 → .pbb/ProtoJSON`。`common.proto` 定义共享奖励和枚举，`config.proto` 引用这些结构；TabForge 不会重新生成或修改它们。
 
 ## 运行示例
 
@@ -10,7 +10,7 @@
 bash v3/example/existingproto/Make.sh
 ```
 
-需要 Go 和 `protoc`。示例已包含 `schema.pb`，也可以跳过重新编译 Proto，从本目录直接运行：
+需要 Go 和 `protoc`，仅导出数据不需要 `protoc-gen-go`。示例已包含 `schema.pb`，也可以跳过重新编译 Proto，从本目录直接运行：
 
 ```bash
 go run ../../.. -mode=v3 -index=Index.csv \
@@ -18,6 +18,8 @@ go run ../../.. -mode=v3 -index=Index.csv \
   -pbbin_out=out/tables.pbb -pbjson_out=out/tables.json \
   -pbbin_dir=out/by-table
 ```
+
+索引表中的源文件路径相对于当前工作目录解析；手动执行上述命令前应切换到 `v3/example/existingproto`。
 
 结果：
 
@@ -35,10 +37,10 @@ go run ../../.. -mode=v3 -index=Index.csv \
      --descriptor_set_out=./schema.pb ./proto/config.proto
    ```
 
-3. 按 tabtoy V3 格式准备索引表、类型表和数据表。类型表定义源列的名称和输入格式，Proto 负责最终消息类型与字段编号。
+3. 按 TabForge V3 格式准备索引表、类型表和数据表。类型表定义源列的名称和输入格式，Proto 负责最终消息类型与字段编号。
 4. 编写映射文件并使用 `-proto_desc`、`-proto_map` 导出。
 
-tabtoy 无须导入使用者的 Go 包，也无须链接使用者的生成代码。不同游戏的消息名称、包名和字段编号均从描述文件中读取。
+TabForge 无须导入使用者的 Go 包，也无须链接使用者的生成代码。不同游戏的消息名称、包名和字段编号均从描述文件中读取。
 
 ## 映射文件
 
@@ -82,7 +84,14 @@ tabtoy 无须导入使用者的 Go 包，也无须链接使用者的生成代码
 { "field": "by_id", "key_field": "ID", "fields": { "ID": "id" } }
 ```
 
-上述JSON是map目标的配置片段，完整示例见 `mapping_map.json`。键必须能解析为 Proto 定义的键类型，重复键会报错。单个消息的目标只允许一行数据。
+从示例目录运行 map 导出：
+
+```bash
+go run ../../.. -index=Index.csv -proto_desc=schema.pb -proto_map=mapping_map.json \
+  -pbbin_out=out/tables-map.pbb -pbjson_out=out/tables-map.json
+```
+
+上述 JSON 是 map 目标的配置片段，完整示例见 [mapping_map.json](mapping_map.json)。键必须能解析为 Proto 定义的键类型，重复键会报错。单个消息的目标只允许一行数据。
 
 ## 单元格表示
 
@@ -122,7 +131,10 @@ if err := proto.Unmarshal(data, cfg); err != nil {
 
 - 现有 `-proto_out`、不带描述文件的 `-pbbin_out` 等行为保留。
 - `-proto_desc` 和 `-proto_map` 必须同时提供；此模式不能再使用 `-proto_out` 生成另一套定义。
-- `-json_out` 仍是 tabtoy 原有 JSON 格式；读取已有 Proto 消息的 JSON 请用 `-pbjson_out` 和 `protojson.Unmarshal`。
+- `-json_out` 仍是 TabForge 原有 JSON 格式；读取已有 Proto 消息的 JSON 请用 `-pbjson_out` 和 `protojson.Unmarshal`。
 - 更改 Proto 后重新编译 `schema.pb`。字段编号始终取自 Proto，不依赖表格或 Proto 声明的排列顺序。
 - 配置错误、缺失依赖、未知列/字段、数值溢出、非法 JSON、重复 map 键和 oneof 冲突会返回错误。
+- `-package` 和 `-combinename` 不会重命名已有 Proto 消息；根类型由 `root_message` 决定。
+- `nogenfield_pbbin` 同时作用于此模式的 `.pbb` 和 ProtoJSON；映射中的表须存在于编译结果中，经 `nogentab` 过滤后仍被映射引用的表会报错。
+- `.pbb` 使用确定性序列化；ProtoJSON 的空白排版不作为兼容性约定。
 - 此接口面向描述文件中的普通消息字段；不支持用字段映射设置 Proto2 扩展字段。运行时索引、跨表业务关联和热更新切换由应用管理。

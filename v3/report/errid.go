@@ -22,6 +22,9 @@ var (
 		"DataMissMatchTypeDefine":        {CHS: "数据与定义类型不匹配"},
 		"ArrayMultiColumnDefineNotMatch": {CHS: "数组类型多列跨表定义不一致"},
 		"InvalidFieldName":               {CHS: "非法字段名"},
+		"ConflictingTypeName":            {CHS: "类型名冲突"},
+		"AmbiguousTypeFieldName":         {CHS: "字段名或标识名有歧义"},
+		"InvalidIndexType":               {CHS: "不支持的索引类型"},
 		"UnknownTypeKind":                {CHS: "非法的类型种类"},
 	}
 )

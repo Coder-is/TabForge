@@ -76,7 +76,7 @@ func wrapSingleValue(globals *model.Globals, valueType *model.TypeDefine, value 
 		i64, _ := strconv.ParseInt(value, 10, 64)
 		return i64
 	case goType == "uint16":
-		i64, _ := strconv.ParseInt(value, 10, 16)
+		i64, _ := strconv.ParseUint(value, 10, 16)
 		return uint16(i64)
 	case goType == "uint32":
 		i64, _ := strconv.ParseUint(value, 10, 32)

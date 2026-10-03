@@ -2,6 +2,7 @@ package pbdata
 
 import (
 	"fmt"
+	"github.com/Coder-is/TabForge/v3/gen"
 	"github.com/Coder-is/TabForge/v3/model"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -67,6 +68,9 @@ func Generate(globals *model.Globals) (data []byte, err error) {
 		return proto.MarshalOptions{Deterministic: true}.Marshal(message)
 	}
 
+	if err := gen.ValidateNames(globals, "protobuf"); err != nil {
+		return nil, err
+	}
 	pbFile, err := buildDynamicType(globals)
 	if err != nil {
 		return nil, err
@@ -89,6 +93,9 @@ func Output(globals *model.Globals, param string) (err error) {
 		return outputExternal(globals, param)
 	}
 
+	if err := gen.ValidateNames(globals, "protobuf"); err != nil {
+		return err
+	}
 	pbFile, err := buildDynamicType(globals)
 	if err != nil {
 		return err

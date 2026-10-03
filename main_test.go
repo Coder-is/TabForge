@@ -63,7 +63,7 @@ func TestCLIV3Only(t *testing.T) {
 				name = "explicit"
 			}
 			jsonOutput, pbOutput := filepath.Join(dir, name+".json"), filepath.Join(dir, name+".pbb")
-			args := []string{"-index=Index.csv", "-proto_desc=schema.pb", "-proto_map=mapping.json", "-pbjson_out=" + jsonOutput, "-pbbin_out=" + pbOutput}
+			args := []string{"-index=Index.csv", "-proto_desc=schema.pb", "-proto_map=mapping.json", "-combinename=Item", "-package=not.a.valid-go-name", "-pbjson_out=" + jsonOutput, "-pbbin_out=" + pbOutput}
 			if explicit {
 				args = append(args, "-mode=v3")
 			}
