@@ -1,0 +1,26 @@
+{
+  "root_message": "example.config.Tables",
+  "tables": {
+    "Item": {
+      "field": "items",
+      "fields": {
+        "ID": "id",
+        "Name": "name",
+        "RewardID": "reward.item_id",
+        "RewardCount": "reward.count",
+        "Costs": "costs",
+        "Levels": "levels",
+        "Stats": "stats",
+        "Rarity": "rarity",
+        "IconHash": "icon_hash",
+        "UnlockLevel": "unlock_level",
+        "TextEffect": "text_effect",
+        "PowerEffect": "power_effect"
+      }
+    },
+    "Settings": {
+      "field": "settings",
+      "fields": { "MaxLevel": "max_level" }
+    }
+  }
+}

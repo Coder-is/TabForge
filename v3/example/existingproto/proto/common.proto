@@ -1,0 +1,14 @@
+syntax = "proto3";
+package example.common;
+option go_package = "github.com/Coder-is/TabForge/v3/example/existingproto/commonpb";
+
+enum Rarity {
+  UNKNOWN = 0;
+  NORMAL = 1;
+  EPIC = 2;
+}
+
+message Reward {
+  int32 item_id = 3;
+  uint64 count = 9;
+}

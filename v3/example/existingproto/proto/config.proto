@@ -1,0 +1,31 @@
+syntax = "proto3";
+package example.config;
+option go_package = "github.com/Coder-is/TabForge/v3/example/existingproto/configpb";
+
+import "common.proto";
+
+message ItemConfig {
+  int32 id = 7;
+  string name = 12;
+  example.common.Reward reward = 20;
+  repeated example.common.Reward costs = 24;
+  repeated int32 levels = 30;
+  map<string, int32> stats = 35;
+  example.common.Rarity rarity = 40;
+  bytes icon_hash = 45;
+  optional int32 unlock_level = 50;
+  oneof effect {
+    string text_effect = 55;
+    int32 power_effect = 60;
+  }
+}
+
+message Settings {
+  int32 max_level = 8;
+}
+
+message Tables {
+  repeated ItemConfig items = 10;
+  map<int32, ItemConfig> by_id = 20;
+  Settings settings = 30;
+}
