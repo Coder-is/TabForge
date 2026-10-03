@@ -8,7 +8,7 @@ var (
 	paramVersion = flag.Bool("version", false, "Show version")
 
 	// 工作模式
-	paramMode = flag.String("mode", "v3", "export mode (only v3 is supported)")
+	paramMode = flag.String("mode", "v3", "table export mode (only v3 is supported)")
 
 	// 并发加载表格
 	paramPara = flag.Bool("para", false, "load tables in parallel by your cpu count")

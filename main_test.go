@@ -37,6 +37,31 @@ func TestCLIV3Only(t *testing.T) {
 			t.Fatalf("V3 default missing from help: %v\n%s", err, output)
 		}
 	})
+	t.Run("protocol-bundle-and-reload", func(t *testing.T) {
+		outputDir := filepath.Join(dir, "protocol")
+		manifest := filepath.Join(root, "examples", "protocol", "contract.json")
+		output, err := exec.Command(binary, "-protocol="+manifest, "-protocol_out="+outputDir).CombinedOutput()
+		if err != nil || !bytes.Contains(output, []byte("2 endpoints")) {
+			t.Fatalf("protocol generation: %v\n%s", err, output)
+		}
+		for _, name := range []string{"types.ts", "contract.json", "schema.pb", "PROTOCOL.md"} {
+			if data, err := ioutil.ReadFile(filepath.Join(outputDir, name)); err != nil || len(data) == 0 {
+				t.Fatalf("missing %s: %v", name, err)
+			}
+		}
+		output, err = exec.Command(binary, "-protocol="+filepath.Join(outputDir, "contract.json")).CombinedOutput()
+		if err != nil {
+			t.Fatalf("distributed bundle cannot be validated: %v\n%s", err, output)
+		}
+		for _, args := range [][]string{
+			{"-protocol_out=" + outputDir},
+			{"-protocol=" + manifest, "-index=Index.csv"},
+		} {
+			if output, err := exec.Command(binary, args...).CombinedOutput(); err == nil {
+				t.Fatalf("invalid protocol invocation accepted: %v\n%s", args, output)
+			}
+		}
+	})
 	for _, mode := range []string{"v2", "exportorv2", "v2tov3"} {
 		t.Run("reject-mode-"+mode, func(t *testing.T) {
 			output, err := exec.Command(binary, "-mode="+mode).CombinedOutput()

@@ -1,0 +1,31 @@
+{
+  "schema_version": "1",
+  "name": "TabForge chat example",
+  "version": "1.0.0",
+  "descriptor": "schema.pb",
+  "endpoints": [
+    {
+      "id": "chatComplete",
+      "rpc": "tabforge.example.ChatService.Complete",
+      "path": "/v1/chat/complete",
+      "transport": "http_json",
+      "auth": "none",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "chatStream",
+      "rpc": "tabforge.example.ChatService.Stream",
+      "path": "/v1/chat/stream",
+      "transport": "http_sse",
+      "auth": "none",
+      "timeout_ms": 120000,
+      "events": [
+        {"name": "text.delta", "field": "delta", "terminal": false},
+        {"name": "tool.delta", "field": "tool_delta", "terminal": false},
+        {"name": "usage", "field": "usage", "terminal": false},
+        {"name": "completed", "field": "completed", "terminal": true},
+        {"name": "failed", "field": "failed", "terminal": true}
+      ]
+    }
+  ]
+}

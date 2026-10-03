@@ -29,5 +29,12 @@ func main() {
 		profiler := profile.Start(profile.CPUProfile, profile.ProfilePath("."))
 		defer profiler.Stop()
 	}
+	if *paramProtocol != "" || *paramProtocolOut != "" {
+		if err := protocolEntry(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	V3Entry()
 }

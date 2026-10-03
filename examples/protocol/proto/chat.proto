@@ -1,0 +1,48 @@
+syntax = "proto3";
+package tabforge.example;
+option go_package = "github.com/Coder-is/TabForge/examples/protocol/chatpb";
+
+// Application-owned types. No dependency on any model vendor's event schema.
+message ChatRequest {
+  string prompt = 1;
+  uint64 conversation_id = 2;
+}
+
+message ChatResponse {
+  string text = 1;
+  Usage usage = 2;
+}
+
+message Usage {
+  uint64 input_tokens = 1;
+  uint64 output_tokens = 2;
+}
+
+message TextDelta { string text = 1; }
+message ToolCallDelta {
+  string call_id = 1;
+  string name = 2;
+  // Fragments can be incomplete JSON. Assemble by call_id before parsing.
+  string arguments_delta = 3;
+}
+message ChatCompleted { ChatResponse response = 1; }
+message ChatFailed {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+}
+
+message ChatEvent {
+  oneof payload {
+    TextDelta delta = 1;
+    ToolCallDelta tool_delta = 2;
+    Usage usage = 3;
+    ChatCompleted completed = 4;
+    ChatFailed failed = 5;
+  }
+}
+
+service ChatService {
+  rpc Complete(ChatRequest) returns (ChatResponse);
+  rpc Stream(ChatRequest) returns (stream ChatEvent);
+}

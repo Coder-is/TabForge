@@ -28,3 +28,6 @@ protoc
 /TabForge
 /v3/example/csv/tabforge
 /v3/example/xlsx/tabforge
+
+# TypeScript SDK development dependencies
+sdk/typescript/node_modules/

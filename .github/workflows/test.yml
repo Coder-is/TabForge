@@ -21,4 +21,10 @@ jobs:
         with:
           go-version: '1.25.x'
           cache-dependency-path: go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --prefix sdk/typescript --ignore-scripts
+      - run: npm --prefix sdk/typescript run check
+      - run: npm --prefix sdk/typescript test
       - run: go test -race ./...

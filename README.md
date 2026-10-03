@@ -1,8 +1,18 @@
 # TabForge
 
-将 Excel/CSV 编译为经过校验的跨语言配置、代码与 Protobuf 数据。
+将 Excel/CSV 编译为经过校验的跨语言配置、代码与 Protobuf 数据，并从 Proto 与接口清单生成统一的数据接入约定。
 
-基于 [davyxu/tabtoy](https://github.com/davyxu/tabtoy) 的 V3 版本开发，保留原作者的 MIT 许可和版权说明，使用独立的 Git 提交历史。当前只支持 V3，新增已有 Proto 映射、ProtoJSON 导出，以及缓存、并发加载和错误处理改进。
+基于 [davyxu/tabtoy](https://github.com/davyxu/tabtoy) 的 V3 版本开发，保留原作者的 MIT 许可和版权说明，使用独立的 Git 提交历史。导表当前只支持 V3，新增已有 Proto 映射、ProtoJSON 导出，以及缓存、并发加载和错误处理改进。
+
+另有独立的统一协议 v1 模块：维护 Proto RPC 与接口清单，生成 TypeScript ProtoJSON 类型与字段/传输文档，通过 Go HTTP 服务和 TypeScript 客户端接入普通 JSON 响应、SSE 流式事件。当前已验证 Go ↔ TypeScript 互通；Unity、Unreal、小程序等专用网络适配及真实模型供应商适配仍待实现。范围与路线见 [统一协议架构](doc/unified-protocol.md)。
+
+```bash
+# 仓库内已包含描述文件，可直接生成接入包。
+go run . -protocol=examples/protocol/contract.json -protocol_out=examples/protocol/generated
+go run ./examples/protocol
+```
+
+完整接入步骤见 [协议示例](examples/protocol/README.md)。`-protocol` 只校验，`-protocol_out` 指定生成目录；此入口与下文 V3 导表参数独立。
 
 ## 构建
 
