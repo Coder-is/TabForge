@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.25.x'
+          go-version: '1.26.8'
           cache-dependency-path: go.sum
       - uses: actions/setup-node@v4
         with:
@@ -28,3 +28,22 @@ jobs:
       - run: npm --prefix sdk/typescript run check
       - run: npm --prefix sdk/typescript test
       - run: go test -race ./...
+
+  godot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.8'
+      - name: Download verified Godot 4.5.1
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/godot.zip" https://github.com/godotengine/godot-builds/releases/download/4.5.1-stable/Godot_v4.5.1-stable_linux.x86_64.zip
+          printf '%s  %s\n' '5bccbed65a94b82c7c319fdb15719ee8113a6e503976cc54e16f1c61fe95f3d74e5e40b8449b5bb89ff7f424574c20af01a4f5ef08b389e4dc338b245185b0b9' "$RUNNER_TEMP/godot.zip" | sha512sum --check
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+      - name: Godot units and real Go integration
+        env:
+          GODOT_BIN: ${{ runner.temp }}/godot/Godot_v4.5.1-stable_linux.x86_64
+        run: go test -race -count=1 ./protocol/httptransport -run Godot

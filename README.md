@@ -4,7 +4,7 @@
 
 基于 [davyxu/tabtoy](https://github.com/davyxu/tabtoy) 的 V3 版本开发，保留原作者的 MIT 许可和版权说明，使用独立的 Git 提交历史。导表当前只支持 V3，新增已有 Proto 映射、ProtoJSON 导出，以及缓存、并发加载和错误处理改进。
 
-另有独立的统一协议 v1 模块：维护 Proto RPC 与接口清单，生成 TypeScript ProtoJSON 类型与字段/传输文档，通过 Go HTTP 服务和 TypeScript 客户端接入普通 JSON 响应、SSE 流式事件。当前已验证 Go ↔ TypeScript 互通；Unity、Unreal、小程序等专用网络适配及真实模型供应商适配仍待实现。范围与路线见 [统一协议架构](doc/unified-protocol.md)。
+另有独立的统一协议模块：维护 Proto RPC 与接口清单，生成 TypeScript ProtoJSON 类型、字段验证规则、Godot 元数据和接入文档。Go HTTP 服务、TypeScript fetch 客户端和 Godot 原生 GDScript 客户端支持普通 JSON/SSE，包含 schema 身份检查、超时/取消、大小限制、心跳、错误与兼容性检查。Unity、Unreal、小程序等专用适配及真实模型供应商适配仍待实现。见 [统一协议架构](doc/unified-protocol.md)、[生产部署说明](doc/production.md)、[Godot 接入](sdk/godot/README.md)。
 
 ```bash
 # 仓库内已包含描述文件，可直接生成接入包。
@@ -16,7 +16,7 @@ go run ./examples/protocol
 
 ## 构建
 
-CI 使用 Go 1.25，在 Linux、macOS 和 Windows 上验证。建议使用同版本或更新的 Go 工具链。
+项目最低使用 Go 1.26.6，toolchain 和 CI 固定 Go 1.26.8，在 Linux、macOS 和 Windows 上验证 Go/TypeScript；另有 Godot 4.5.1 Linux 测试任务。建议使用已修复安全问题的 Go 补丁版本。
 
 ```bash
 git clone https://github.com/Coder-is/TabForge.git
@@ -171,7 +171,7 @@ tabforge -index=Index.xlsx -package=main -proto_out=table.proto -pbbin_out=all.p
 Go 示例已包含生成的 [table.pb.go](v3/example/protobuf/golang/table.pb.go)。修改类型表后需要重新导出并生成 Go 消息代码：
 
 ```bash
-go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.23.0
+go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
 # 确保 protoc 与 protoc-gen-go 均在 PATH 中，然后在 v3/example/protobuf/golang 执行：
 protoc -I .. --go_out=. --go_opt=paths=source_relative \
   --go_opt='Mtable.proto=github.com/Coder-is/TabForge/v3/example/protobuf/golang;main' ../table.proto

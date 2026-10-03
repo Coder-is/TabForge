@@ -1,11 +1,17 @@
 /** TabForge v1 ProtoJSON transport. No dependency on a model provider or engine. */
+import { SchemaValidator } from "./schema.ts";
+import type { WireSchema } from "./schema.ts";
+export type { WireSchema } from "./schema.ts";
 export interface Operation {
   path: string;
   transport: "http_json" | "http_sse";
   auth: "none" | "bearer";
   timeoutMS: number;
   events?: Readonly<Record<string, { field: string; terminal: boolean }>>;
+  requestType?: string;
+  responseType?: string;
 }
+export interface FetchOptions { schemaHash?: string; wireSchema?: WireSchema; maxResponseBytes?: number; maxFrameChars?: number }
 export interface TransportError { code: string; message: string; retryable: boolean }
 export interface CallOptions { signal?: AbortSignal; token?: string; requestId?: string }
 export interface StreamEvent<T> { name: string; requestId: string; sequence: string; payload: T }
@@ -127,16 +133,18 @@ export class StreamValidator {
   private requestID?: string;
   private sequence = "0";
   private ended = false;
-  constructor(operation: Operation, version: string, requestID?: string) {
+  private options: FetchOptions;
+  constructor(operation: Operation, version: string, requestID?: string, options: FetchOptions = {}) {
     this.operation = operation;
     this.version = version;
     this.requestID = requestID;
+    this.options = options;
   }
   get terminal(): boolean { return this.ended; }
   accept(frame: SSEFrame): StreamEvent<unknown> {
     if (this.ended) throw new ProtocolError("invalid_frame", "Event after a terminal event");
     const body = object(parseJSON(frame.data));
-    validateEnvelope(body, this.version, this.requestID);
+    validateEnvelope(body, this.version, this.requestID, this.options.schemaHash);
     this.requestID = body.requestId as string;
     const expected = nextSequence(this.sequence);
     if (body.sequence !== expected || frame.id !== expected) throw new ProtocolError("invalid_sequence", "SSE id and sequence must increment from 1");
@@ -151,6 +159,7 @@ export class StreamValidator {
     if (!event || "error" in body) throw new ProtocolError("invalid_event", "Unknown or conflicting stream event");
     const payload = object(body.payload);
     if (Object.keys(payload).length !== 1 || !Object.prototype.hasOwnProperty.call(payload, event.field)) throw new ProtocolError("invalid_event", "Event does not match the response oneof");
+    validateMessage(this.options, this.operation.responseType, payload);
     this.ended = event.terminal;
     return { name: frame.event, requestId: this.requestID, sequence: expected, payload };
   }
@@ -159,22 +168,45 @@ export class StreamValidator {
   }
 }
 
-function validateEnvelope(body: Record<string, unknown>, version: string, requestID?: string): void {
+function validateEnvelope(body: Record<string, unknown>, version: string, requestID?: string, schemaHash?: string): void {
   if (body.protocolVersion !== version) throw new ProtocolError("version_mismatch", "Response protocol version differs");
+  if (schemaHash && body.schemaHash !== schemaHash) throw new ProtocolError("schema_mismatch", "Response schema differs");
   if (typeof body.requestId !== "string" || !/^[A-Za-z0-9_.-]{1,128}$/.test(body.requestId) || (requestID && requestID !== body.requestId)) {
     throw new ProtocolError("invalid_frame", "Invalid or inconsistent request ID");
   }
 }
 
-export function parseUnary(value: unknown, version: string, requestID?: string): unknown {
+export function parseUnary(value: unknown, version: string, requestID?: string, schemaHash?: string): unknown {
   const body = object(value);
-  validateEnvelope(body, version, requestID);
+  validateEnvelope(body, version, requestID, schemaHash);
   if ("error" in body) {
     if ("data" in body) throw new ProtocolError("invalid_frame", "Response contains data and error");
     throw remoteError(body.error);
   }
   if (!("data" in body)) throw new ProtocolError("invalid_frame", "Response has no data");
   return body.data;
+}
+
+function validateMessage(options: FetchOptions, type: string | undefined, value: unknown): void {
+  if (!options.wireSchema || !type) return;
+  try { new SchemaValidator(options.wireSchema).validate(type, value); }
+  catch (error) { throw new ProtocolError("invalid_message", error instanceof Error ? error.message : "Invalid ProtoJSON"); }
+}
+
+async function boundedJSON(response: Response, maximum: number): Promise<unknown> {
+  if (!response.body) throw new ProtocolError("invalid_frame", "Response has no body");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let size = 0, text = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) { text += decoder.decode(); return parseJSON(text); }
+      size += chunk.value.byteLength;
+      if (size > maximum) throw new ProtocolError("response_too_large", "Response exceeds the configured limit");
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+  } finally { try { await reader.cancel(); } catch { /* closed */ } reader.releaseLock(); }
 }
 
 /** Browser/Node fetch adapter. Supply a custom Transport for other network APIs.
@@ -185,10 +217,12 @@ export class FetchTransport implements Transport {
   private baseURL: string;
   private version: string;
   private fetcher: typeof fetch;
-  constructor(baseURL: string, version: string, fetcher: typeof fetch = globalThis.fetch) {
+  private options: FetchOptions;
+  constructor(baseURL: string, version: string, fetcher: typeof fetch = globalThis.fetch, options: FetchOptions = {}) {
     this.baseURL = baseURL.replace(/\/$/, "");
     this.version = version;
     this.fetcher = fetcher;
+    this.options = options;
   }
   private setup(operation: Operation, options: CallOptions = {}) {
     if (operation.auth === "bearer" && !options.token) throw new ProtocolError("unauthorized", "Bearer token is required");
@@ -202,6 +236,7 @@ export class FetchTransport implements Transport {
     const headers: Record<string, string> = { "Content-Type": "application/json", "X-Protocol-Version": this.version, "Accept": operation.transport === "http_sse" ? "text/event-stream" : "application/json" };
     if (options.token) headers.Authorization = "Bearer " + options.token;
     if (options.requestId) headers["X-Request-ID"] = options.requestId;
+    if (this.options.schemaHash) headers["X-Protocol-Schema"] = this.options.schemaHash;
     return {
       controller, headers,
       error: (error: unknown) => {
@@ -214,26 +249,29 @@ export class FetchTransport implements Transport {
     };
   }
   async call(operation: Operation, request: unknown, options: CallOptions = {}): Promise<unknown> {
+    validateMessage(this.options, operation.requestType, request);
     const scope = this.setup(operation, options);
     try {
       const response = await this.fetcher(this.baseURL + operation.path, { method: "POST", headers: scope.headers, body: JSON.stringify(request), signal: scope.controller.signal });
       if (response.headers.get("content-type")?.split(";")[0].trim() !== "application/json") {
         throw new ProtocolError("unsupported_media_type", "Expected a JSON response body");
       }
-      const body = await response.json();
-      const data = parseUnary(body, this.version, options.requestId);
+      const body = await boundedJSON(response, this.options.maxResponseBytes ?? (1 << 20));
+      const data = parseUnary(body, this.version, options.requestId, this.options.schemaHash);
       if (!response.ok) throw new ProtocolError("http_error", "Unexpected HTTP status " + response.status);
+      validateMessage(this.options, operation.responseType, data);
       return data;
     } catch (error) { throw scope.error(error); }
     finally { scope.cleanup(); }
   }
   async *stream(operation: Operation, request: unknown, options: CallOptions = {}): AsyncIterable<StreamEvent<unknown>> {
+    validateMessage(this.options, operation.requestType, request);
     const scope = this.setup(operation, options);
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
       const response = await this.fetcher(this.baseURL + operation.path, { method: "POST", headers: scope.headers, body: JSON.stringify(request), signal: scope.controller.signal });
       if (!response.ok) {
-        parseUnary(await response.json(), this.version, options.requestId);
+        parseUnary(await boundedJSON(response, this.options.maxResponseBytes ?? (1 << 20)), this.version, options.requestId, this.options.schemaHash);
         throw new ProtocolError("http_error", "Unexpected HTTP status " + response.status);
       }
       if (response.headers.get("content-type")?.split(";")[0].trim() !== "text/event-stream" || !response.body) {
@@ -241,8 +279,8 @@ export class FetchTransport implements Transport {
       }
       reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8", { fatal: true });
-      const parser = new SSEParser();
-      const validator = new StreamValidator(operation, this.version, options.requestId);
+      const parser = new SSEParser(this.options.maxFrameChars);
+      const validator = new StreamValidator(operation, this.version, options.requestId, this.options);
       while (true) {
         const chunk = await reader.read();
         const text = chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });

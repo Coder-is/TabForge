@@ -2,7 +2,7 @@
 
 目标是用同一套类型和接口约定连接后端、游戏客户端、网页、小程序及大模型应用。开发者维护 Proto 和接口清单，工具检查两者的一致性，生成类型和接入文档；各平台网络适配器负责实际收发。
 
-目前已有可运行的 **v1 基础版本**：Proto RPC 与接口清单校验、TypeScript ProtoJSON 类型生成、Go HTTP 服务、TypeScript fetch 客户端、普通响应和 SSE 流。后续平台与供应商路线不是已实现功能。
+目前已实现 Proto RPC/清单校验、schema hash、TypeScript 类型和字段验证规则、Godot 元数据、Go HTTP 服务、TypeScript fetch 与 Godot 原生 GDScript 客户端，支持普通响应和 SSE。加固范围与升级要求见 [生产部署说明](production.md)。
 
 ## 协议的组成
 
@@ -37,6 +37,7 @@
 ```json
 {
   "protocolVersion": "1.0.0",
+  "schemaHash": "生成包的 schema hash",
   "requestId": "req-1",
   "data": {"text": "你好", "usage": {"outputTokens": "3"}}
 }
@@ -47,23 +48,24 @@
 ```json
 {
   "protocolVersion": "1.0.0",
+  "schemaHash": "生成包的 schema hash",
   "requestId": "req-1",
   "error": {"code": "timeout", "message": "request deadline exceeded", "retryable": true}
 }
 ```
 
-请求必须带 `X-Protocol-Version`，与服务端协议版本完全一致，否则返回 409。版本使用 major.minor.patch，可附加 prerelease 后缀。`X-Request-ID` 可省略，由服务端生成；填写时仅接受 1–128 位 ASCII 字母、数字、下划线、点和连字符。声明 bearer 的接口默认拒绝访问，直到应用提供鉴权回调。请求正文默认最大 1 MiB。
+请求默认必须带 `X-Protocol-Version` 与 `X-Protocol-Schema`，匹配生成包中的版本和 schema hash，否则返回 409。版本使用 major.minor.patch，可附加 prerelease 后缀。`X-Request-ID` 可省略，由服务端生成；填写时仅接受 1–128 位 ASCII 字母、数字、下划线、点和连字符。bearer 接口默认拒绝访问，直到应用提供鉴权回调。请求正文默认最大 1 MiB。
 
 流响应使用 `text/event-stream`：
 
 ```text
 id: 1
 event: text.delta
-data: {"protocolVersion":"1.0.0","requestId":"req-1","sequence":"1","payload":{"delta":{"text":"你"}}}
+data: {"protocolVersion":"1.0.0","schemaHash":"生成包的hash","requestId":"req-1","sequence":"1","payload":{"delta":{"text":"你"}}}
 
 id: 2
 event: completed
-data: {"protocolVersion":"1.0.0","requestId":"req-1","sequence":"2","payload":{"completed":{"response":{"text":"你好"}}}}
+data: {"protocolVersion":"1.0.0","schemaHash":"生成包的hash","requestId":"req-1","sequence":"2","payload":{"completed":{"response":{"text":"你好"}}}}
 
 ```
 
@@ -77,9 +79,9 @@ data: {"protocolVersion":"1.0.0","requestId":"req-1","sequence":"2","payload":{"
 
 沿用 [官方 ProtoJSON 映射](https://protobuf.dev/programming-guides/json/)：64 位整数用十进制字符串，bytes 用 Base64，枚举通常用名称，字段使用 lowerCamelCase 或显式 json_name。数组、map 和 well-known types 使用标准映射。
 
-生成的 TypeScript 类型描述**序列化后的 JSON 形态**，不是二进制库的 message 对象。字段可因默认值或 presence 规则省略；oneof 在类型上禁止同时填写多个成员。Go 输入解析检查未知字段、溢出、oneof 冲突等。TS 客户端检查包络、版本、请求 ID、序号和事件成员，尚未生成逐字段的响应运行时校验器。
+生成的 TypeScript 类型描述**序列化后的 JSON 形态**。字段可因默认值或 presence 规则省略；oneof 禁止同时填写多个成员。Go 输入解析检查未知字段、溢出、oneof 和重复 JSON 成员；TS/Godot 同时使用生成的 wireSchema 检查字段、类型、map、数组和消息结构，并校验包络与事件顺序。它们不直接等于某个 Protobuf 二进制库的 message 对象。
 
-删除 Proto 字段需 reserved 原编号与名称，不能将旧编号分配给新字段。ProtoJSON 的字段名和枚举名也有兼容性要求，不能只检查二进制兼容。v1 严格要求前后端版本相同，升级需协调部署；版本协商与差异检查是后续阶段。
+删除 Proto 字段需 reserved 原编号与名称，不能重用旧编号。ProtoJSON 的字段名和枚举名也有兼容性要求。`-protocol_against` 可检查旧客户端到新服务端的破坏变化；默认严格要求版本与 hash 相同，仍需协调部署，不提供自动版本协商。
 
 ## 大模型普通与流式响应
 
@@ -99,7 +101,7 @@ data: {"protocolVersion":"1.0.0","requestId":"req-1","sequence":"2","payload":{"
 | 微信等小程序 | 可复用 TS 类型、SSEParser、StreamValidator | request 分块/socket 适配、增量 UTF-8 解码、真机验证 |
 | Unity / .NET | 现有配置 C# 导出；消息可用 protoc C# | 网络客户端、流读取、取消与主线程调度适配 |
 | Unreal / C++ | 消息可用 protoc C++ | 引擎构建、HTTP/SSE 与回调适配 |
-| Godot | 可使用 ProtoJSON 约定 | GDScript/C# 类型与网络适配 |
+| Godot 4.5.1+ 原生 | GDScript HTTP/SSE 客户端、字段验证、取消和超时，4.5.1 macOS headless 实测 | Web 流桥、移动导出与其他引擎版本验证 |
 | Lua | 已有配置 Lua 输出 | 网络类型/编解码与网络适配 |
 | Java、Python、Rust 等后端 | 可用各自 protoc 插件 | 协议工具的语言运行时适配 |
 
@@ -109,7 +111,7 @@ data: {"protocolVersion":"1.0.0","requestId":"req-1","sequence":"2","payload":{"
 
 1. **平台适配**：Unity C#、微信小程序、Cocos、Unreal C++；每端提供同一普通/流式演示与测试数据，再建立版本和目标平台的实测矩阵。
 2. **传输扩展**：WebSocket、Protobuf 二进制帧、必要的 NDJSON。先规定关联 ID、分帧、心跳、背压、重连、幂等与回放语义，再生成适配器。v1 拒绝尚未实现的传输名。
-3. **协议演进**：兼容性差异检查、版本协商、OpenAPI/JSON Schema、类型化服务端桩、客户端字段验证和发布包。
+3. **协议演进**：继续扩大已实现的兼容性和字段验证覆盖，补版本协商、OpenAPI/JSON Schema、类型化服务端桩与发布包。
 4. **模型与多模态适配**：按供应商及接口版本映射普通/流式响应、工具调用、结束原因和错误；建立录制事件回归测试后再验证真实服务。
 
 共同验收目标：各语言序列化同一测试数据得到一致结果，任意分片位置不破坏 Unicode 或消息边界，取消、超时和中途失败不会被误判为成功。
@@ -135,6 +137,6 @@ npm --prefix sdk/typescript test
 go test -race ./...
 ```
 
-不指定 `-protocol_out` 时只校验；生成目录写入并覆盖 contract.json、schema.pb、types.ts、PROTOCOL.md。清单和描述文件可一起分发，再重新校验。二进制消息的 Go/C#/C++/Java 等代码仍由 protoc 与对应插件生成。
+不指定 `-protocol_out` 时只校验；生成目录写入并覆盖 contract.json、schema.pb、types.ts、PROTOCOL.md、wire_schema.json 和 protocol.gd。整个目录作为同一发布产物分发。二进制消息代码仍由 protoc 和各语言插件生成。
 
 跨语言集成测试需要 Node 24+；缺少该运行时的本地 Go 测试会跳过此项，CI 安装 Node 24 并执行全部验证。

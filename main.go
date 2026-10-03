@@ -29,7 +29,7 @@ func main() {
 		profiler := profile.Start(profile.CPUProfile, profile.ProfilePath("."))
 		defer profiler.Stop()
 	}
-	if *paramProtocol != "" || *paramProtocolOut != "" {
+	if *paramProtocol != "" || *paramProtocolOut != "" || *paramProtocolAgainst != "" {
 		if err := protocolEntry(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)

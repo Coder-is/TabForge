@@ -3,15 +3,12 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 // Generate produces a self-contained review bundle. Language-specific Protobuf
@@ -30,13 +27,15 @@ func (c *Contract) Generate(dir string) error {
 	if err := ensureDir(dir); err != nil {
 		return err
 	}
-	set := &descriptorpb.FileDescriptorSet{}
-	c.Files.RangeFiles(func(f protoreflect.FileDescriptor) bool {
-		set.File = append(set.File, protodesc.ToFileDescriptorProto(f))
-		return true
-	})
-	sort.Slice(set.File, func(i, j int) bool { return set.File[i].GetName() < set.File[j].GetName() })
-	descriptor, err := proto.Marshal(set)
+	descriptor, err := proto.Marshal(c.descriptorSet(true))
+	if err != nil {
+		return err
+	}
+	gd, err := c.Godot()
+	if err != nil {
+		return err
+	}
+	wire, err := json.MarshalIndent(c.WireSchema(), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -44,9 +43,9 @@ func (c *Contract) Generate(dir string) error {
 		name string
 		data []byte
 	}{
-		{"types.ts", ts}, {"schema.pb", descriptor}, {"contract.json", append(manifest, '\n')}, {"PROTOCOL.md", []byte(c.Markdown())},
+		{"types.ts", ts}, {"schema.pb", descriptor}, {"contract.json", append(manifest, '\n')}, {"PROTOCOL.md", []byte(c.Markdown())}, {"protocol.gd", gd}, {"wire_schema.json", append(wire, '\n')},
 	} {
-		if err := ioutil.WriteFile(filepath.Join(dir, file.name), file.data, 0644); err != nil {
+		if err := atomicWrite(filepath.Join(dir, file.name), file.data); err != nil {
 			return err
 		}
 	}
@@ -169,32 +168,19 @@ func (c *Contract) TypeScript() ([]byte, error) {
 		fmt.Fprintf(&b, "  %s: { request: %s; response: %s };\n", quote(e.ID), tsName(e.Input.FullName()), tsName(e.Output.FullName()))
 	}
 	b.WriteString("}\n\nexport const operations = ")
-	type operation struct {
-		Path      string                 `json:"path"`
-		Transport string                 `json:"transport"`
-		Auth      string                 `json:"auth"`
-		TimeoutMS int                    `json:"timeoutMS"`
-		Events    map[string]interface{} `json:"events,omitempty"`
-	}
-	ops := map[string]operation{}
-	for _, e := range c.Endpoints {
-		o := operation{Path: e.Path, Transport: e.Transport, Auth: e.Auth, TimeoutMS: e.TimeoutMS}
-		if len(e.Events) != 0 {
-			o.Events = map[string]interface{}{}
-			for _, ev := range e.Events {
-				f := e.Output.Fields().ByName(protoreflect.Name(ev.Field))
-				o.Events[ev.Name] = map[string]interface{}{"field": f.JSONName(), "terminal": ev.Terminal}
-			}
-		}
-		ops[e.ID] = o
-	}
-	data, err := json.MarshalIndent(ops, "", "  ")
+	data, err := json.MarshalIndent(c.operations(), "", "  ")
 	if err != nil {
 		return nil, err
 	}
-	b.Write(data)
+	b.WriteString(strings.ReplaceAll(string(data), `"__proto__":`, `["__proto__"]:`))
 	b.WriteString(" as const;\n")
 	fmt.Fprintf(&b, "export const protocolVersion = %s;\n", quote(c.Manifest.Version))
+	fmt.Fprintf(&b, "export const schemaHash = %s;\n", quote(c.Fingerprint()))
+	schema, err := json.MarshalIndent(c.WireSchema(), "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(&b, "export const wireSchema = %s as const;\n", strings.ReplaceAll(string(schema), `"__proto__":`, `["__proto__"]:`))
 	return []byte(b.String()), nil
 }
 
@@ -259,16 +245,16 @@ func wellKnown(name protoreflect.FullName) string {
 
 func (c *Contract) Markdown() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s\n\nProtocol version: `%s`; contract format: `%s`.\n\n", md(c.Manifest.Name), md(c.Manifest.Version), SchemaVersion)
+	fmt.Fprintf(&b, "# %s\n\nProtocol version: `%s`; contract format: `%s`.\n\nSchema hash: `%s`.\n\n", md(c.Manifest.Name), md(c.Manifest.Version), SchemaVersion, c.Fingerprint())
 	b.WriteString("Generated from Proto + manifest. All endpoints use POST with `Content-Type: application/json` and ProtoJSON request bodies. A version mismatch returns HTTP 409.\n\n")
-	b.WriteString("Headers: `X-Protocol-Version` (required), `X-Request-ID` (optional; server creates one if absent), and `Authorization: Bearer …` when declared. Authentication must be implemented by the application.\n\n")
+	b.WriteString("Headers: `X-Protocol-Version` and `X-Protocol-Schema` (required by default), `X-Request-ID` (optional; server creates one if absent), and `Authorization: Bearer …` when declared. Authentication must be implemented by the application. Envelope responses also include `schemaHash`. The hash is contract identity, not authentication. Generated `wireSchema` validates ProtoJSON fields in TypeScript and Godot.\n\n")
 	b.WriteString("ProtoJSON uses lowerCamelCase (or explicit json_name), decimal strings for 64-bit integers, base64 bytes, enum names, omitted defaults, and at most one member per oneof. Typescript types describe the emitted wire shape, not binary Protobuf objects.\n\n")
 	for _, e := range c.Endpoints {
 		fmt.Fprintf(&b, "## %s\n\n- Route: `POST %s`\n- Transport: `%s`\n- Auth: `%s`\n- Timeout: %d ms (whole request/stream)\n- RPC: `%s`\n- Request: `%s`\n- Response: `%s`\n\n", md(e.ID), e.Path, e.Transport, e.Auth, e.TimeoutMS, e.RPC, e.Input.FullName(), e.Output.FullName())
 		if e.Transport == "http_json" {
-			b.WriteString("Success: `{\"protocolVersion\":\"…\",\"requestId\":\"…\",\"data\":{…}}`. Failures use a non-2xx status and an `error` member instead of `data`.\n\n")
+			b.WriteString("Success: `{\"protocolVersion\":\"…\",\"schemaHash\":\"…\",\"requestId\":\"…\",\"data\":{…}}`. Failures use a non-2xx status and an `error` member instead of `data`.\n\n")
 		} else {
-			b.WriteString("Response: `text/event-stream`. Each SSE `data` is `{\"protocolVersion\":\"…\",\"requestId\":\"…\",\"sequence\":\"1\",\"payload\":{…}}`. Sequence starts at 1 and increments by 1; SSE `id` is the same decimal string. `payload` is the full response oneof message, not only its nested member.\n\n| SSE event | Proto field | Payload type | Terminal |\n| --- | --- | --- | --- |\n")
+			b.WriteString("Response: `text/event-stream`. Each SSE `data` is `{\"protocolVersion\":\"…\",\"schemaHash\":\"…\",\"requestId\":\"…\",\"sequence\":\"1\",\"payload\":{…}}`. Sequence starts at 1 and increments by 1; SSE `id` is the same decimal string. `payload` is the full response oneof message, not only its nested member.\n\n| SSE event | Proto field | Payload type | Terminal |\n| --- | --- | --- | --- |\n")
 			for _, ev := range e.Events {
 				f := e.Output.Fields().ByName(protoreflect.Name(ev.Field))
 				fmt.Fprintf(&b, "| %s | %s | %s | %t |\n", ev.Name, f.JSONName(), f.Message().FullName(), ev.Terminal)
@@ -276,7 +262,7 @@ func (c *Contract) Markdown() string {
 			b.WriteString("\nA terminal event ends the stream. An EOF before a terminal event is a failure. Transport failures after headers use the reserved terminal `protocol.error` event with `error` instead of `payload`. Cancelling the client aborts the request; it does not imply provider-side work was cancelled. No automatic retries or replay are promised in v1.\n\n")
 		}
 	}
-	b.WriteString("## Errors\n\n`error` has `{ code: string, message: string, retryable: boolean }`. Business errors belong in declared Proto messages/events. Transport codes: `bad_request`, `not_found`, `method_not_allowed`, `unsupported_media_type`, `unauthorized`, `version_mismatch`, `timeout`, `internal`, `incomplete_stream`.\n")
+	b.WriteString("## Errors\n\n`error` has `{ code: string, message: string, retryable: boolean }`. Business errors belong in declared Proto messages/events. Transport codes: `bad_request`, `request_too_large`, `not_found`, `method_not_allowed`, `unsupported_media_type`, `unauthorized`, `version_mismatch`, `schema_mismatch`, `timeout`, `internal`, `incomplete_stream`. Limits default to 1 MiB per request/response/frame. SSE comments provide keepalive without consuming event sequence. Go handlers must respect context cancellation. Deploy using `httptransport.HTTPServer` and an explicit CORS origin allowlist where needed.\n")
 	messages, enums := c.reachableTypes()
 	b.WriteString("\n## Message types\n\nFields may be omitted according to ProtoJSON presence/default rules. `oneof` members are mutually exclusive.\n")
 	for _, m := range messages {

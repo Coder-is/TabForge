@@ -41,10 +41,10 @@ func TestCLIV3Only(t *testing.T) {
 		outputDir := filepath.Join(dir, "protocol")
 		manifest := filepath.Join(root, "examples", "protocol", "contract.json")
 		output, err := exec.Command(binary, "-protocol="+manifest, "-protocol_out="+outputDir).CombinedOutput()
-		if err != nil || !bytes.Contains(output, []byte("2 endpoints")) {
+		if err != nil || !bytes.Contains(output, []byte("2 endpoints")) || !bytes.Contains(output, []byte("Schema hash: ")) {
 			t.Fatalf("protocol generation: %v\n%s", err, output)
 		}
-		for _, name := range []string{"types.ts", "contract.json", "schema.pb", "PROTOCOL.md"} {
+		for _, name := range []string{"types.ts", "contract.json", "schema.pb", "PROTOCOL.md", "protocol.gd", "wire_schema.json"} {
 			if data, err := ioutil.ReadFile(filepath.Join(outputDir, name)); err != nil || len(data) == 0 {
 				t.Fatalf("missing %s: %v", name, err)
 			}
@@ -53,8 +53,39 @@ func TestCLIV3Only(t *testing.T) {
 		if err != nil {
 			t.Fatalf("distributed bundle cannot be validated: %v\n%s", err, output)
 		}
+		output, err = exec.Command(binary, "-protocol="+manifest, "-protocol_against="+filepath.Join(outputDir, "contract.json")).CombinedOutput()
+		if err != nil || !bytes.Contains(output, []byte("No breaking changes")) {
+			t.Fatalf("identical distributed contract rejected: %v\n%s", err, output)
+		}
+		data, err := os.ReadFile(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var changed map[string]interface{}
+		if err := json.Unmarshal(data, &changed); err != nil {
+			t.Fatal(err)
+		}
+		changed["descriptor"] = filepath.Join(root, "examples", "protocol", "schema.pb")
+		changed["endpoints"].([]interface{})[0].(map[string]interface{})["path"] = "/v2/chat/complete"
+		data, err = json.Marshal(changed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changedPath := filepath.Join(dir, "changed-contract.json")
+		if err := os.WriteFile(changedPath, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		rejectedDir := filepath.Join(dir, "rejected-bundle")
+		output, err = exec.Command(binary, "-protocol="+changedPath, "-protocol_against="+manifest, "-protocol_out="+rejectedDir).CombinedOutput()
+		if err == nil || !bytes.Contains(output, []byte("BREAKING")) {
+			t.Fatalf("breaking route accepted: %v\n%s", err, output)
+		}
+		if _, err := os.Stat(rejectedDir); !os.IsNotExist(err) {
+			t.Fatalf("breaking contract wrote output: %v", err)
+		}
 		for _, args := range [][]string{
 			{"-protocol_out=" + outputDir},
+			{"-protocol_against=" + manifest},
 			{"-protocol=" + manifest, "-index=Index.csv"},
 		} {
 			if output, err := exec.Command(binary, args...).CombinedOutput(); err == nil {

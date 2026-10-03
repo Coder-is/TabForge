@@ -57,13 +57,17 @@ export const operations = {
     "path": "/v1/chat/complete",
     "transport": "http_json",
     "auth": "none",
-    "timeoutMS": 30000
+    "timeoutMS": 30000,
+    "requestType": "tabforge.example.ChatRequest",
+    "responseType": "tabforge.example.ChatResponse"
   },
   "chatStream": {
     "path": "/v1/chat/stream",
     "transport": "http_sse",
     "auth": "none",
     "timeoutMS": 120000,
+    "requestType": "tabforge.example.ChatRequest",
+    "responseType": "tabforge.example.ChatEvent",
     "events": {
       "completed": {
         "field": "completed",
@@ -89,3 +93,114 @@ export const operations = {
   }
 } as const;
 export const protocolVersion = "1.0.0";
+export const schemaHash = "4eeb62dc1ded8c934a549020ed62bebcbff799cdafd513a13b32a20e43ec3fd0";
+export const wireSchema = {
+  "messages": {
+    "tabforge.example.ChatCompleted": {
+      "fields": {
+        "response": {
+          "kind": "message",
+          "type": "tabforge.example.ChatResponse"
+        }
+      }
+    },
+    "tabforge.example.ChatEvent": {
+      "fields": {
+        "completed": {
+          "kind": "message",
+          "type": "tabforge.example.ChatCompleted"
+        },
+        "delta": {
+          "kind": "message",
+          "type": "tabforge.example.TextDelta"
+        },
+        "failed": {
+          "kind": "message",
+          "type": "tabforge.example.ChatFailed"
+        },
+        "toolDelta": {
+          "kind": "message",
+          "type": "tabforge.example.ToolCallDelta"
+        },
+        "usage": {
+          "kind": "message",
+          "type": "tabforge.example.Usage"
+        }
+      },
+      "oneofs": [
+        [
+          "delta",
+          "toolDelta",
+          "usage",
+          "completed",
+          "failed"
+        ]
+      ]
+    },
+    "tabforge.example.ChatFailed": {
+      "fields": {
+        "code": {
+          "kind": "string"
+        },
+        "message": {
+          "kind": "string"
+        },
+        "retryable": {
+          "kind": "bool"
+        }
+      }
+    },
+    "tabforge.example.ChatRequest": {
+      "fields": {
+        "conversationId": {
+          "kind": "uint64"
+        },
+        "prompt": {
+          "kind": "string"
+        }
+      }
+    },
+    "tabforge.example.ChatResponse": {
+      "fields": {
+        "text": {
+          "kind": "string"
+        },
+        "usage": {
+          "kind": "message",
+          "type": "tabforge.example.Usage"
+        }
+      }
+    },
+    "tabforge.example.TextDelta": {
+      "fields": {
+        "text": {
+          "kind": "string"
+        }
+      }
+    },
+    "tabforge.example.ToolCallDelta": {
+      "fields": {
+        "argumentsDelta": {
+          "kind": "string"
+        },
+        "callId": {
+          "kind": "string"
+        },
+        "name": {
+          "kind": "string"
+        }
+      }
+    },
+    "tabforge.example.Usage": {
+      "fields": {
+        "inputTokens": {
+          "kind": "uint64"
+        },
+        "outputTokens": {
+          "kind": "uint64"
+        }
+      }
+    }
+  },
+  "enums": {}
+} as const;

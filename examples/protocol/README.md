@@ -9,11 +9,18 @@ go run ./examples/protocol
 
 TypeScript 客户端见 [client.ts](client.ts)。演示监听 127.0.0.1:18082；跨域网页需要由应用或网关配置 CORS，演示本身没有 CORS 中间件。
 
+Godot 接入见 [GDScript SDK](../../sdk/godot/README.md)。先获取此协议的 hash，供下列请求使用：
+
+```bash
+PROTOCOL_SCHEMA_HASH=$(go run . -protocol=examples/protocol/contract.json | sed -n 's/^Schema hash: //p')
+```
+
 普通响应：
 
 ```bash
 curl http://127.0.0.1:18082/v1/chat/complete \
   -H 'Content-Type: application/json' -H 'X-Protocol-Version: 1.0.0' \
+  -H "X-Protocol-Schema: $PROTOCOL_SCHEMA_HASH" \
   --data '{"prompt":"你好","conversationId":"18446744073709551615"}'
 ```
 
@@ -22,6 +29,7 @@ curl http://127.0.0.1:18082/v1/chat/complete \
 ```bash
 curl -N http://127.0.0.1:18082/v1/chat/stream \
   -H 'Content-Type: application/json' -H 'X-Protocol-Version: 1.0.0' \
+  -H "X-Protocol-Schema: $PROTOCOL_SCHEMA_HASH" \
   --data '{"prompt":"你好"}'
 ```
 

@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Coder-is/TabForge/protocol"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -36,6 +39,7 @@ func request(s *Server, path, data string, edit func(*httptest.ResponseRecorder)
 	r := httptest.NewRequest("POST", path, strings.NewReader(data))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("X-Protocol-Version", "1.0.0")
+	r.Header.Set("X-Protocol-Schema", s.schemaHash)
 	r.Header.Set("X-Request-ID", "test-request")
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, r)
@@ -72,7 +76,7 @@ func TestUnaryProtoJSONAndInputValidation(t *testing.T) {
 		}
 	}
 	s.MaxBodyBytes = 2
-	if w := request(s, e.Path, `{"prompt":"long"}`, nil); w.Code != 400 {
+	if w := request(s, e.Path, `{"prompt":"long"}`, nil); w.Code != 413 {
 		t.Fatal("request limit not applied")
 	}
 }
@@ -93,6 +97,7 @@ func TestAuthVersionAndMethod(t *testing.T) {
 	} {
 		r := httptest.NewRequest(tc.method, "/v1/chat/complete", strings.NewReader("{}"))
 		r.Header.Set("X-Protocol-Version", tc.version)
+		r.Header.Set("X-Protocol-Schema", s.schemaHash)
 		r.Header.Set("Authorization", tc.auth)
 		r.Header.Set("Content-Type", tc.content)
 		w := httptest.NewRecorder()
@@ -115,6 +120,7 @@ func TestAuthVersionAndMethod(t *testing.T) {
 	}
 	r := httptest.NewRequest("POST", e.Path, strings.NewReader("{}"))
 	r.Header.Set("X-Protocol-Version", "1.0.0")
+	r.Header.Set("X-Protocol-Schema", s.schemaHash)
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer valid")
 	w := httptest.NewRecorder()
@@ -228,5 +234,58 @@ func TestTypeScriptClientAgainstGoServer(t *testing.T) {
 	command := exec.Command(node, "../../sdk/typescript/integration.mjs", server.URL)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("cross-language HTTP/SSE: %v\n%s", err, output)
+	}
+}
+
+func TestGodotClientAgainstGoServer(t *testing.T) {
+	binary := os.Getenv("GODOT_BIN")
+	if binary == "" {
+		t.Skip("set GODOT_BIN to run the real Godot integration")
+	}
+	s := fixture(t)
+	u, _ := s.Contract.Endpoint("chatComplete")
+	e, _ := s.Contract.Endpoint("chatStream")
+	if err := s.HandleUnary(u.ID, func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		f := req.ProtoReflect().Descriptor().Fields().ByName("conversation_id")
+		if req.ProtoReflect().Get(f).Uint() != ^uint64(0) {
+			t.Error("Godot uint64 precision lost")
+		}
+		return message(t, u.Output, `{"text":"你好😀","usage":{"outputTokens":"18446744073709551615"}}`), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.HandleStream(e.ID, func(ctx context.Context, req proto.Message, emit func(proto.Message) error) error {
+		prompt := req.ProtoReflect().Get(req.ProtoReflect().Descriptor().Fields().ByName("prompt")).String()
+		if prompt == "timeout" {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		if err := emit(message(t, e.Output, `{"delta":{"text":"你好😀"}}`)); err != nil {
+			return err
+		}
+		if prompt == "truncated" {
+			return nil
+		}
+		if prompt == "cancel" {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return emit(message(t, e.Output, `{"completed":{"response":{"text":"你好😀"}}}`))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(s)
+	defer server.Close()
+	project, _ := filepath.Abs("../../sdk/godot")
+	bundle := t.TempDir()
+	if err := s.Contract.Generate(bundle); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "--headless", "--path", project, "--script", "tests/integration.gd", "--", server.URL, filepath.Join(bundle, "protocol.gd"))
+	output, err := cmd.CombinedOutput()
+	if err != nil || strings.Contains(string(output), "SCRIPT ERROR") || !strings.Contains(string(output), "integration: 0 failures") {
+		t.Fatalf("Godot: %v\n%s", err, output)
 	}
 }

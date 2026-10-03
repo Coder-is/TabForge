@@ -6,6 +6,10 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/Coder-is/TabForge/protocol"
 	"github.com/Coder-is/TabForge/protocol/httptransport"
@@ -54,5 +58,19 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("Demo protocol server: http://%s", *address)
-	log.Fatal(http.ListenAndServe(*address, s))
+	server := httptransport.HTTPServer(*address, s)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		deadline, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(deadline); err != nil {
+			log.Printf("shutdown: %v", err)
+			server.Close()
+		}
+	}()
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }

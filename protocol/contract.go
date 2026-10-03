@@ -66,6 +66,9 @@ func Load(path string) (*Contract, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateJSON(data); err != nil {
+		return nil, fmt.Errorf("protocol manifest: %w", err)
+	}
 	var m Manifest
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()

@@ -2,9 +2,11 @@
 
 Protocol version: `1.0.0`; contract format: `1`.
 
+Schema hash: `4eeb62dc1ded8c934a549020ed62bebcbff799cdafd513a13b32a20e43ec3fd0`.
+
 Generated from Proto + manifest. All endpoints use POST with `Content-Type: application/json` and ProtoJSON request bodies. A version mismatch returns HTTP 409.
 
-Headers: `X-Protocol-Version` (required), `X-Request-ID` (optional; server creates one if absent), and `Authorization: Bearer …` when declared. Authentication must be implemented by the application.
+Headers: `X-Protocol-Version` and `X-Protocol-Schema` (required by default), `X-Request-ID` (optional; server creates one if absent), and `Authorization: Bearer …` when declared. Authentication must be implemented by the application. Envelope responses also include `schemaHash`. The hash is contract identity, not authentication. Generated `wireSchema` validates ProtoJSON fields in TypeScript and Godot.
 
 ProtoJSON uses lowerCamelCase (or explicit json_name), decimal strings for 64-bit integers, base64 bytes, enum names, omitted defaults, and at most one member per oneof. Typescript types describe the emitted wire shape, not binary Protobuf objects.
 
@@ -18,7 +20,7 @@ ProtoJSON uses lowerCamelCase (or explicit json_name), decimal strings for 64-bi
 - Request: `tabforge.example.ChatRequest`
 - Response: `tabforge.example.ChatResponse`
 
-Success: `{"protocolVersion":"…","requestId":"…","data":{…}}`. Failures use a non-2xx status and an `error` member instead of `data`.
+Success: `{"protocolVersion":"…","schemaHash":"…","requestId":"…","data":{…}}`. Failures use a non-2xx status and an `error` member instead of `data`.
 
 ## chatStream
 
@@ -30,7 +32,7 @@ Success: `{"protocolVersion":"…","requestId":"…","data":{…}}`. Failures us
 - Request: `tabforge.example.ChatRequest`
 - Response: `tabforge.example.ChatEvent`
 
-Response: `text/event-stream`. Each SSE `data` is `{"protocolVersion":"…","requestId":"…","sequence":"1","payload":{…}}`. Sequence starts at 1 and increments by 1; SSE `id` is the same decimal string. `payload` is the full response oneof message, not only its nested member.
+Response: `text/event-stream`. Each SSE `data` is `{"protocolVersion":"…","schemaHash":"…","requestId":"…","sequence":"1","payload":{…}}`. Sequence starts at 1 and increments by 1; SSE `id` is the same decimal string. `payload` is the full response oneof message, not only its nested member.
 
 | SSE event | Proto field | Payload type | Terminal |
 | --- | --- | --- | --- |
@@ -44,7 +46,7 @@ A terminal event ends the stream. An EOF before a terminal event is a failure. T
 
 ## Errors
 
-`error` has `{ code: string, message: string, retryable: boolean }`. Business errors belong in declared Proto messages/events. Transport codes: `bad_request`, `not_found`, `method_not_allowed`, `unsupported_media_type`, `unauthorized`, `version_mismatch`, `timeout`, `internal`, `incomplete_stream`.
+`error` has `{ code: string, message: string, retryable: boolean }`. Business errors belong in declared Proto messages/events. Transport codes: `bad_request`, `request_too_large`, `not_found`, `method_not_allowed`, `unsupported_media_type`, `unauthorized`, `version_mismatch`, `schema_mismatch`, `timeout`, `internal`, `incomplete_stream`. Limits default to 1 MiB per request/response/frame. SSE comments provide keepalive without consuming event sequence. Go handlers must respect context cancellation. Deploy using `httptransport.HTTPServer` and an explicit CORS origin allowlist where needed.
 
 ## Message types
 

@@ -1,10 +1,10 @@
 import { ProtocolClient, FetchTransport } from "../../sdk/typescript/runtime.ts";
-import { operations, protocolVersion } from "./generated/types.ts";
+import { operations, protocolVersion, schemaHash, wireSchema } from "./generated/types.ts";
 import type { ProtocolTypes } from "./generated/types.ts";
 
 export const client = new ProtocolClient<ProtocolTypes>(
   operations,
-  new FetchTransport("http://127.0.0.1:18082", protocolVersion)
+  new FetchTransport("http://127.0.0.1:18082", protocolVersion, globalThis.fetch, { schemaHash, wireSchema })
 );
 
 export async function runExample(): Promise<void> {

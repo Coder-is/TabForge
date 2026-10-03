@@ -31,3 +31,5 @@ protoc
 
 # TypeScript SDK development dependencies
 sdk/typescript/node_modules/
+sdk/godot/.godot/
+*.gd.uid
