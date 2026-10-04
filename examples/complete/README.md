@@ -68,7 +68,7 @@ node --input-type=module -e "import('node:fs/promises').then(async fs => (await 
 
 Node 示例使用 Node 24+；浏览器使用业务构建器处理 TypeScript。客户端从 `Generated/schema/` 导入 `DataSchema`、`MessageTypes` 和 `wireSchema`，得到字段补全和运行时校验。TS 数据 SDK 当前读取 ProtoJSON；没有 Protobuf 二进制编解码器。
 
-Go 示例同时展示生成类型的 `proto.Unmarshal` 和第三方包 `protocol.LoadSchema` 的动态读取。导入自己的业务项目前，把 Proto 的 `go_package` 改成业务模块中生成代码的导入路径。生成消息、描述和数据来自同一次导出。
+Go 示例使用第三方包 `databundle`，同时展示强类型二进制与动态 ProtoJSON 读取。导入自己的业务项目前，把 Proto 的 `go_package` 改成业务模块中生成代码的导入路径。生成消息、描述和数据来自同一次导出。完整后端包接入与 Node、Java、Python 示例见 [第三版工作流](../../doc/backend-workflow.md)。
 
 只需要数据结构时，从 `tabforge.json` 删除 `protocol` 项即可；仅生成结构时再删除 `tables`。不必编写 RPC。网络服务与各平台客户端仍沿用 TabForge 的协议接入指南，版本/hash 必须一致。
 

@@ -71,3 +71,11 @@ outputs/
 editors/unity/bin/
 editors/cocos/bin/
 editors/godot/bin/
+sdk/python/build/
+sdk/python/dist/
+sdk/python/*.egg-info/
+__pycache__/
+sdk/java/target/
+# Small binary fixtures referenced by the portable data manifest.
+!examples/complete/Generated/data/*.pbb
+!examples/complete/Generated/data/by-table/*.pbb

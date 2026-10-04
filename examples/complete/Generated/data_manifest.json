@@ -1,0 +1,50 @@
+{
+  "format": "tabforge.data.v1",
+  "schemaHash": "a5c415d8c190f0b49e2779c69e83c7fc13f377308f362525b0258a8448b3a25a",
+  "descriptor": {
+    "path": "schema/schema.pb",
+    "sha256": "ae4cf836a68cd5b78e28da4fa5af1476e0123b349be6b7cda1e732e5d58ceb55"
+  },
+  "wireSchema": {
+    "path": "schema/wire_schema.json",
+    "sha256": "ca296d00e4fe821910bf5ff858ffe305d35b91ec630135f2e2dd5e5a080cfbeb"
+  },
+  "data": [
+    {
+      "path": "data/by-table/Item.pbb",
+      "sha256": "4a6f69166aa7be11905a2fbed37ecbe11a70b13e7efbfed9c7716f379698d960",
+      "message": "tabforge.demo.config.Tables",
+      "encoding": "protobuf"
+    },
+    {
+      "path": "data/by-table/Settings.pbb",
+      "sha256": "ed261d1c6ae595df86200c7f2ad1cce183cf07371e812e4772ed75133cf4c154",
+      "message": "tabforge.demo.config.Tables",
+      "encoding": "protobuf"
+    },
+    {
+      "path": "data/tables-map.json",
+      "sha256": "0268eb92cb983f4c0bee6d7f69c92008d849278966135f7ec11f27ef7904cb66",
+      "message": "tabforge.demo.config.Tables",
+      "encoding": "protojson"
+    },
+    {
+      "path": "data/tables-map.pbb",
+      "sha256": "808de3c84a77a4971584f488609aa94efadb5111fcf06119df2fbafc8493f510",
+      "message": "tabforge.demo.config.Tables",
+      "encoding": "protobuf"
+    },
+    {
+      "path": "data/tables.json",
+      "sha256": "80bc8766261807cd663cb54d17ff40706842dc1f80f9ad2847aa9c504fe99fa9",
+      "message": "tabforge.demo.config.Tables",
+      "encoding": "protojson"
+    },
+    {
+      "path": "data/tables.pbb",
+      "sha256": "6607fa89ad5eff362c7d12866646c6f49d5f70223e988a115e379b699f539160",
+      "message": "tabforge.demo.config.Tables",
+      "encoding": "protobuf"
+    }
+  ]
+}

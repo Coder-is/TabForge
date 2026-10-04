@@ -19,9 +19,9 @@ for await (const event of client.stream("chatStream", { prompt: "你好" })) {
 
 AbortSignal 可取消请求，退出流迭代会中止请求。failed 等业务事件由应用处理；传输错误抛出 ProtocolError。默认字段可能被 ProtoJSON 省略。
 
-可直接复制源码，也可在本目录执行 `npm pack` 创建包含 JS 和声明文件的本地 npm 包，再在业务项目执行 `npm install /path/to/tabforge-protocol-runtime-0.2.0.tgz`。包入口为 `@tabforge/protocol-runtime`，子入口为 `/data`、`/schema`、`/callback`。当前未发布到 npm registry。浏览器源码示例使用构建器；Node 示例使用 Node 24+，见 [协议示例](../../examples/protocol/README.md)。
+可直接复制源码，也可在本目录执行 `npm pack` 创建包含 JS 和声明文件的本地 npm 包，再在业务项目执行 `npm install /path/to/tabforge-protocol-runtime-0.3.0.tgz`。包入口为 `@tabforge/protocol-runtime`，子入口为 `/data`、`/node`、`/schema`、`/callback`。当前未发布到 npm registry。浏览器源码示例使用构建器；Node 示例使用 Node 24+，见 [协议示例](../../examples/protocol/README.md)。
 
-纯结构与配置加载使用 `DataSchema<MessageTypes>`，无需网络接口。项目导出会把 `data.ts` 和 `schema.ts` 与全部类型一起放入 `Generated/schema`，可直接复制使用。64 位数保留字符串，校验 optional、oneof、map 与嵌套消息，见 [完整示例](../../examples/complete/README.md)与[项目工作流](../../doc/project-workflow.md)。`decode` 返回类型化 ProtoJSON 对象，不补齐被省略的默认字段；当前不提供二进制 Protobuf 编解码。
+纯结构与配置加载使用 `DataSchema<MessageTypes>`，无需网络接口。项目导出会把 `data.ts`、`schema.ts` 和 `json.ts` 与全部类型一起放入 `Generated/schema`，可直接复制使用。64 位数保留字符串，校验 optional、oneof、map 与嵌套消息，并拒绝重复 JSON 键，见 [完整示例](../../examples/complete/README.md)与[项目工作流](../../doc/project-workflow.md)。`decode` 返回类型化 ProtoJSON 对象，不补齐被省略的默认字段；当前不提供二进制 Protobuf 编解码。Node 后端可用 `/node` 的 `DataBundle`、`DataStore` 直接加载完整 Generated 包并保留快照，见 [第三版接入](../../doc/backend-workflow.md)。
 
 FetchTransport 要求 ES2022、fetch、ReadableStream、TextDecoder 和 AbortController。schemaHash 与 wireSchema 从生成的 types.ts 导入，分别校验协议身份和请求/响应字段。普通响应默认限制为 1 MiB 字节，SSE 默认限制单帧为 1 MiB UTF-16 字符，可通过 FetchOptions 配置。微信与 Cocos 可直接使用 [WechatTransport](../wechat/README.md) / [CocosTransport](../cocos/README.md)；微信与 Cocos XHR 后端不要求宿主提供 TextDecoder，Cocos Fetch 后端仍需标准 fetch 环境。其他平台可实现 CallbackNetwork 并使用 CallbackTransport，或者自行实现 Transport，复用 SSEParser、StreamValidator、SchemaValidator：
 

@@ -1,6 +1,7 @@
 # 第一版项目工作流
 
 第一版的项目格式和后端 API 继续可用。Unity、Cocos、Godot 编辑器接入及结构化报告见 [第二版工作流](editor-workflow.md)。
+四种语言的后端数据包、校验清单与快照读取见 [第三版工作流](backend-workflow.md)。
 
 项目以 `tabforge.json` 为入口。策划使用随项目提供的工具；编辑器和后端构建调用同一个 `project.Export` 内核。项目导出与原有命令行参数入口共存。
 

@@ -22,6 +22,7 @@ test("distributed JS and declarations work in an independent consumer without so
     import { DataSchema } from '@tabforge/protocol-runtime/data';
     import { ProtocolClient, FetchTransport } from '@tabforge/protocol-runtime';
     import { CallbackTransport } from '@tabforge/protocol-runtime/callback';
+    import { DataBundle, DataStore } from '@tabforge/protocol-runtime/node';
     const loader = new DataSchema({messages:{M:{fields:{count:{kind:'uint64'}}}},enums:{}});
     const result = loader.decode('M','{"count":"18446744073709551615"}');
     if(result.count !== '18446744073709551615') throw Error('precision loss');
@@ -31,6 +32,7 @@ test("distributed JS and declarations work in an independent consumer without so
   await writeFile(join(root, "main.ts"), `
     import { DataSchema } from '@tabforge/protocol-runtime/data';
     import { ProtocolClient } from '@tabforge/protocol-runtime';
+    import { DataBundle, DataStore } from '@tabforge/protocol-runtime/node';
     import { wireSchema } from './types.js';
     import type { MessageTypes } from './types.js';
     const loader = new DataSchema<MessageTypes>(wireSchema);
@@ -40,6 +42,13 @@ test("distributed JS and declarations work in an independent consumer without so
     loader.decode('Missing','{}');
     // @ts-expect-error Unknown fields must be rejected.
     tables.items?.[0].missingField;
+    const bundle = await DataBundle.open<MessageTypes>('Generated');
+    const typed = bundle.read('data/tables.json','tabforge.demo.config.Tables');
+    const id: string | undefined = typed.items?.[0].ownerId;
+    // @ts-expect-error Invalid message name must be rejected.
+    bundle.read('data/tables.json','Missing');
+    const store = new DataStore<MessageTypes>();
+    const optional = store.snapshot?.read('data/tables.json','tabforge.demo.config.Tables');
   `);
   const tsc = fileURLToPath(new URL("./node_modules/typescript/bin/tsc", import.meta.url));
   execFileSync(process.execPath, [tsc, "--strict", "--noEmit", "--target", "ES2022", "--module", "NodeNext", "--moduleResolution", "NodeNext", join(root, "main.ts")], { encoding: "utf8" });

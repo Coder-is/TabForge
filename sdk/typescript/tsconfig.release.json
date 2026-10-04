@@ -9,5 +9,5 @@
     "rootDir": ".",
     "rewriteRelativeImportExtensions": true
   },
-  "include": ["runtime.ts", "schema.ts", "data.ts", "callback_transport.ts", "utf8.ts"]
+  "include": ["runtime.ts", "schema.ts", "data.ts", "json.ts", "callback_transport.ts", "utf8.ts"]
 }

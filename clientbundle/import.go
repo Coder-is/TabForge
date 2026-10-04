@@ -183,12 +183,13 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 	}
 	switch kind {
 	case "cocos":
-		for _, name := range []string{"data.ts", "schema.ts"} {
+		for _, name := range []string{"data.ts", "schema.ts", "json.ts"} {
 			data, err := sdk.ClientAssets.ReadFile("typescript/" + name)
 			if err != nil {
 				return nil, err
 			}
 			data = []byte(strings.ReplaceAll(string(data), "./schema.ts", "./schema"))
+			data = []byte(strings.ReplaceAll(string(data), "./json.ts", "./json"))
 			if err := write(name, data); err != nil {
 				return nil, err
 			}

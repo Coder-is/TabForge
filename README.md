@@ -12,11 +12,14 @@
 go run . -project=examples/complete  # 导出完整结构示例
 go run . -init=/path/to/NewProject  # 创建模板与当前平台便携工具
 go run ./cmd/package -out=outputs/releases/v2 # 构建便携包与四种编辑器插件
+go run ./cmd/package-backend -out=outputs/releases/v3 # 构建四种语言的后端分发包
 ```
 
 便携包内置可执行文件，策划无需安装开发环境。完整示例覆盖复杂 Proto 结构、普通导表、数据读取与 RPC。纯消息定义也能生成，导出失败会保留上次成功产物。见 [项目工作流](doc/project-workflow.md)、[完整示例](examples/complete/README.md)。
 
 第二版新增 Unity、Cocos Creator、Godot 编辑器入口，支持创建示例、只校验、导出并导入、导入已有 Generated 包及错误报告。Unity 生成 C# ProtoJSON 类型，Cocos 生成 TS 类型，Godot 使用结构脚本和字典校验；资产重新导入保留 UUID。VS Code 新增 Problems 诊断与配置补全。安装、读取代码和验证范围见 [第二版工作流](doc/editor-workflow.md)。
+
+第三版补齐 Go、Node.js/TypeScript、Java、Python 的后端包。Generated 新增数据清单，关联文件与根消息并记录校验值；运行时直接加载整个包，支持结构校验、独立数据快照与失败保留旧数据。Go 读取 ProtoJSON / Protobuf，其他三端读取 ProtoJSON。安装、示例和验证范围见 [第三版工作流](doc/backend-workflow.md)。
 
 原有工具提供两个独立入口：
 

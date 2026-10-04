@@ -172,7 +172,7 @@ func (p *Project) validate() error {
 	}
 	paths := []string{"export.json"}
 	if p.Config.Schema != nil {
-		paths = append(paths, "schema")
+		paths = append(paths, "schema", "data_manifest.json")
 	}
 	if p.Config.Protocol != "" {
 		paths = append(paths, "protocol")

@@ -3,5 +3,5 @@ package typescript
 
 import "embed"
 
-//go:embed data.ts schema.ts
+//go:embed data.ts schema.ts json.ts
 var DataFiles embed.FS

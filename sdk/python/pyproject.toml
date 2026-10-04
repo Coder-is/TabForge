@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=58", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tabforge-data"
+version = "0.3.0"
+description = "Validated TabForge ProtoJSON data bundle snapshots"
+requires-python = ">=3.9"
+license = "MIT"
+
+[tool.setuptools]
+packages = ["tabforge_data"]

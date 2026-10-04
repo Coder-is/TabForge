@@ -162,6 +162,7 @@ func TestProjectConfigRejectsUnsafeAndConflictingPaths(t *testing.T) {
 		`{"version":1,"output":"../outside","schema":{}}`,
 		`{"version":1,"output":"Tables","tables":[{"index":"Tables/Index.csv","outputs":{"json":"a.json"}}]}`,
 		`{"version":1,"schema":{},"tables":[{"index":"Tables/Index.csv","outputs":{"json":"schema/types.ts"}}]}`,
+		`{"version":1,"schema":{},"tables":[{"index":"Tables/Index.csv","outputs":{"json":"data_manifest.json"}}]}`,
 		`{"version":1,"tables":[{"index":"Tables/Index.csv","outputs":{"json":"a","json_dir":"a/b"}}]}`,
 		`{"version":1,"tables":[{"index":"Tables/Index.csv","outputs":{"json":"a.json","lua":"A.json"}}]}`,
 		`{"version":1,"tables":[{"index":"Tables/Index.csv","outputs":{"json":"../escaped.json"}}]}`,

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Coder-is/TabForge/databundle"
 	"github.com/Coder-is/TabForge/protocol"
 	"github.com/Coder-is/TabForge/v3/compiler"
 	"github.com/Coder-is/TabForge/v3/gen"
@@ -124,6 +125,7 @@ func (p *Project) generate(ctx context.Context, publishOutput bool) (*Result, er
 			return nil, err
 		}
 	}
+	var entries []databundle.Entry
 	for _, config := range p.Config.Tables {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -131,18 +133,36 @@ func (p *Project) generate(ctx context.Context, publishOutput bool) (*Result, er
 		if err := p.exportTable(config, stage); err != nil {
 			return nil, &tableJobError{index: filepath.Join(p.Root, filepath.FromSlash(config.Index)), cause: err}
 		}
-		if config.Mapping != "" && config.Outputs["protojson"] != "" {
+		if config.Mapping != "" {
 			data, err := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(config.Mapping)))
 			if err != nil {
 				return nil, err
 			}
-			var mapping struct {
-				RootMessage string `json:"root_message"`
-			}
+			var mapping pbdata.ExternalMapping
 			if err := json.Unmarshal(data, &mapping); err != nil {
 				return nil, err
 			}
-			result.Data = append(result.Data, DataFile{Path: config.Outputs["protojson"], Message: strings.TrimPrefix(mapping.RootMessage, ".")})
+			message := strings.TrimPrefix(mapping.RootMessage, ".")
+			if name := config.Outputs["protojson"]; name != "" {
+				result.Data = append(result.Data, DataFile{Path: name, Message: message})
+				entries = append(entries, databundle.Entry{File: databundle.File{Path: name}, Message: message, Encoding: "protojson"})
+			}
+			if name := config.Outputs["protobuf"]; name != "" {
+				entries = append(entries, databundle.Entry{File: databundle.File{Path: name}, Message: message, Encoding: "protobuf"})
+			}
+			if dir := config.Outputs["protobuf_dir"]; dir != "" {
+				for table := range mapping.Tables {
+					entries = append(entries, databundle.Entry{File: databundle.File{Path: filepath.ToSlash(filepath.Join(dir, table+".pbb"))}, Message: message, Encoding: "protobuf"})
+				}
+			}
+		}
+	}
+	if schema != nil {
+		if err := databundle.WriteManifest(stage, schema.Fingerprint(), entries); err != nil {
+			return nil, err
+		}
+		if _, err := databundle.Open(stage, schema.Fingerprint()); err != nil {
+			return nil, fmt.Errorf("validate data bundle: %w", err)
 		}
 	}
 	if err := filepath.WalkDir(stage, func(path string, entry os.DirEntry, err error) error {

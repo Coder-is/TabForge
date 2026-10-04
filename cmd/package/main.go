@@ -77,7 +77,7 @@ func build(out, selected string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".zip") && !strings.HasSuffix(entry.Name(), ".vsix") && !strings.HasSuffix(entry.Name(), ".tgz")) {
+		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".zip") && !strings.HasSuffix(entry.Name(), ".vsix") && !strings.HasSuffix(entry.Name(), ".tgz") && !strings.HasSuffix(entry.Name(), ".whl") && !strings.HasSuffix(entry.Name(), ".jar") && !strings.HasSuffix(entry.Name(), ".pom")) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(out, entry.Name()))
