@@ -4,7 +4,28 @@
 
 基于 [davyxu/tabtoy](https://github.com/davyxu/tabtoy) 的 V3 版本开发，保留原作者的 MIT 许可和版权说明，使用独立的 Git 提交历史。导表当前只支持 V3，新增已有 Proto 映射、ProtoJSON 导出，以及缓存、并发加载和错误处理改进。
 
-另有独立的统一协议模块：维护 Proto RPC 与接口清单，生成 TypeScript ProtoJSON 类型、字段验证规则、Godot 元数据和接入文档。Go HTTP 服务、TypeScript fetch 客户端和 Godot 原生 GDScript 客户端支持普通 JSON/SSE，包含 schema 身份检查、超时/取消、大小限制、心跳、错误与兼容性检查。已加入 Unity 原生 C#、Unreal C++、Cocos Fetch/XHR 和微信小程序分块网络适配；浏览器与微信开发者工具已实测，Unity/Unreal/Creator 编辑器与移动真机待验证。真实模型供应商适配仍待实现。见 [统一协议架构](doc/unified-protocol.md)、[生产部署说明](doc/production.md)、[Godot 接入](sdk/godot/README.md)、[四端接入与验收](doc/platform-validation.md)。
+项目提供两个独立入口：
+
+| 场景 | 维护的输入 | 输出与接入 |
+| --- | --- | --- |
+| 游戏或应用配置 | Excel/CSV、索引表；可映射已有 Proto | V3 配置代码、JSON、Lua、专用二进制或 Protobuf，见下文导表教程 |
+| 前后端网络协议 | Proto RPC 与 `contract.json` 接口清单 | 七类协议产物、Go HTTP 服务和多平台 JSON/SSE 客户端，见 [前后端接入指南](doc/protocol-integration.md) |
+
+统一协议模块包含字段验证、协议身份检查、全程超时/取消、大小限制、SSE 心跳和兼容性检查。普通请求返回 ProtoJSON，流式接口使用 SSE，可承载大模型文本、工具调用和用量事件。当前模型示例是固定数据，供应商适配需由业务后端实现。
+
+| 接入端 | SDK | 当前验证范围 |
+| --- | --- | --- |
+| Go 后端 | [HTTP/SSE 服务](doc/protocol-integration.md) | Go 竞态回归与跨语言 HTTP 联调 |
+| 网页 / Node | [TypeScript Fetch](sdk/typescript/README.md) | Node 24、Chromium Fetch/XHR |
+| 微信小程序 | [wx.request 分块](sdk/wechat/README.md) | 开发者工具真实网络 12 项；真机与小游戏构建待测 |
+| Cocos Creator 3.8 目标 | [Fetch/XHR/微信](sdk/cocos/README.md) | Web 网络后端通过；Creator/JSB/移动构建待测 |
+| Unity 2022.3 / Unity 6 原生目标 | [UPM C#](sdk/unity/README.md) | C# 核心与 Go 联调；编辑器/IL2CPP 待测，WebGL SSE 未实现 |
+| Unreal 5.5+ 目标 | [Runtime C++ 插件](sdk/unreal/README.md) | 独立 C++ 核心 sanitizer；引擎编译和原生 HTTP 待测 |
+| Godot 4.5.1+ 原生目标 | [GDScript](sdk/godot/README.md) | 4.5.1 macOS headless 与 Go 联调；Web 流与移动导出待测 |
+
+完整环境与用例见 [平台验收](doc/platform-validation.md)。代码实现与目标设备实测分开记录，不能从核心测试推断所有引擎构建均已兼容。
+
+## 网络协议快速开始
 
 ```bash
 # 仓库内已包含描述文件，可直接生成接入包。
@@ -12,7 +33,20 @@ go run . -protocol=examples/protocol/contract.json -protocol_out=examples/protoc
 go run ./examples/protocol
 ```
 
-完整接入步骤见 [协议示例](examples/protocol/README.md)。`-protocol` 只校验，`-protocol_out` 指定生成目录；此入口与下文 V3 导表参数独立。
+服务监听 `127.0.0.1:18082`。生成目录包含 `contract.json`、`schema.pb`、`types.ts`、`PROTOCOL.md`、`wire_schema.json`、`protocol.gd` 和 `runtime.json`；前后端分发同一生成包。`-protocol` 只校验，`-protocol_out` 指定生成目录，`-protocol_against` 检查升级兼容性；这些参数不能与 V3 导表参数混用。
+
+首次接入从 [前后端指南](doc/protocol-integration.md) 和 [可运行协议示例](examples/protocol/README.md) 开始；设计细节见 [统一协议架构](doc/unified-protocol.md)，上线配置见 [生产部署说明](doc/production.md)。[平台验收工程](examples/platforms/README.md) 使用另一套服务，默认端口为 `18083`。
+
+## 目录导航
+
+| 目录 | 用途 |
+| --- | --- |
+| `protocol/` | 清单/描述文件校验、产物生成、兼容性检查和 Go HTTP/SSE 服务 |
+| `sdk/` | TypeScript、微信、Cocos、Unity、Unreal、Godot 客户端 |
+| `examples/protocol/` | 示例 Proto、清单、七类生成文件和固定响应服务 |
+| `examples/platforms/` | 平台验收服务、打包入口、编辑器工程、运行器和实测记录 |
+| `v3/` | Excel/CSV 导表、配置读取库和各语言配置示例 |
+| `doc/` | [文档导航](doc/README.md)、接入、架构、部署与验收 |
 
 ## 构建
 
@@ -30,7 +64,7 @@ export PATH="$PWD/bin:$PATH"
 
 也可执行 `go install github.com/Coder-is/TabForge@latest`，安装后的命令名为 `TabForge`。普通 `go build` 不注入版本元数据，`-version` 中的版本、提交和构建时间可能为空。
 
-## 快速开始
+## V3 导表快速开始
 
 在仓库根目录运行已有教程，无须手工创建表格：
 
@@ -126,10 +160,13 @@ bash v3/example/existingproto/Make.sh
 
 ## 命令行参数
 
-执行 `tabforge -h` 查看完整参数。未指定的输出不会生成，一次命令可指定多个输出；各输出须使用不同文件路径。
+执行 `tabforge -h` 查看完整参数。V3 未指定的输出不会生成，一次命令可指定多个输出；各输出须使用不同文件路径。协议入口独立使用下面前三个参数。
 
 | 参数 | 用途与默认值 |
 | --- | --- |
+| `-protocol` | 协议清单路径；不带输出参数时只校验 Proto RPC 与清单 |
+| `-protocol_out` | 协议七类产物的输出目录，覆盖同名文件，要求 `-protocol` |
+| `-protocol_against` | 已发布的旧清单路径，检查旧客户端接入新服务端的兼容性，要求 `-protocol` |
 | `-index` | V3 索引表文件，正常导出时指定 |
 | `-mode` | 默认 `v3`，只接受 `v3` |
 | `-package` | 生成代码的包名或命名空间，默认空；生成 Go、C#、Java 或 Proto 定义时建议明确填写 |
@@ -308,11 +345,17 @@ XLSX 使用缓存，CSV 不使用；缓存目录会自动创建。缓存文件�
 ## 开发验证
 
 ```bash
+npm ci --prefix sdk/typescript --ignore-scripts
+npm --prefix sdk/typescript run check
+npm --prefix sdk/typescript test
+npm --prefix sdk/typescript run build:platforms
 go test -race ./...
 go test ./v3/model -run '^$' -bench BenchmarkTypeFieldLookup -benchmem
 ```
 
-测试覆盖类型和数据校验、已有 Proto 映射、缓存故障恢复、并发失败处理，以及无缓存、冷缓存、热缓存和并发加载时的导出一致性。当前校验及本次修复记录见 [检查清单](v3/checker/TODO.md)。
+配置测试覆盖类型和数据校验、已有 Proto 映射、缓存故障恢复、并发失败处理，以及无缓存、冷缓存、热缓存和并发加载时的导出一致性，见 [检查清单](v3/checker/TODO.md)。协议测试覆盖产物生成/升级、JSON/SSE、类型与身份校验、超时/取消、大小限制与各端联调。
+
+TS 集成测试需要 Node 24+；Godot/C# 联调需要分别设置 GODOT_BIN / DOTNET_BIN，未提供运行时会跳过对应测试。独立 C++ 核心与编辑器验收命令见 [平台验收](doc/platform-validation.md)，CI 安装范围见 [生产说明](doc/production.md)。
 
 V2 导出器、V2→V3 迁移工具及其专用参数、示例和文档已移除。旧模式 `v2`、`exportorv2`、`v2tov3` 会报错；旧参数如 `-protover`、`-cpp_out`、`-type_out`、`-pbt_out` 不再可用。迁移输入须使用本文的 V3 索引表、类型表和数据表格式。
 

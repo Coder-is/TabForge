@@ -2,6 +2,8 @@
 
 `TabForgeProtocol.uplugin` 提供 Runtime 模块，目标 UE 5.5+ 的 HTTP API；调用方 Build.cs 添加 `TabForgeProtocol`、`Json`。安装到项目 Plugins/TabForgeProtocol 后构建。此插件提供 C++ API，尚未提供 Blueprint 节点。
 
+将业务生成包的 runtime.json 内容读入 RuntimeJson，再创建 Client；部署时与服务端统一版本/hash。示例打包只复制源码插件，引擎编译需另外执行。协议生成、Go 后端与错误处理见 [前后端指南](../../doc/protocol-integration.md)。
+
 ```cpp
 #include "TabForgeClient.h"
 FTabForgeError Error;

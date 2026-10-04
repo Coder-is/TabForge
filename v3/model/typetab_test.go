@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-
-	"github.com/ahmetb/go-linq"
 )
 
 func TestTypeTableLookupCompatibility(t *testing.T) {
@@ -68,12 +66,12 @@ func BenchmarkTypeFieldLookup(b *testing.B) {
 	b.Run("original_scan", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			linq.From(table.fields).Where(func(raw interface{}) bool {
-				tf := raw.(*TypeData).Define
-				return tf.ObjectType == "Table99" && (tf.Name == "Field29" || tf.FieldName == "Field29")
-			}).ForEach(func(raw interface{}) {
-				benchmarkField = raw.(*TypeData).Define
-			})
+			for _, td := range table.fields {
+				field := td.Define
+				if field.ObjectType == "Table99" && (field.Name == "Field29" || field.FieldName == "Field29") {
+					benchmarkField = field
+				}
+			}
 		}
 	})
 }

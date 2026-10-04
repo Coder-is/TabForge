@@ -1,8 +1,8 @@
 package tests
 
 import (
-	"fmt"
-	"github.com/davyxu/protoplus/codegen"
+	"github.com/Coder-is/TabForge/v3/gen"
+	"github.com/Coder-is/TabForge/v3/helper"
 	"os/exec"
 	"strings"
 )
@@ -53,14 +53,11 @@ func main() {
 	fmt.Println(string(outData))
 }
 `
-	var data []byte
-	err := codegen.NewCodeGen("launcher").
-		RegisterTemplateFunc(codegen.UsefulFunc).
-		ParseTemplate(textTemplate, m).
-		WriteOutputFile(launcherFile).Error()
-
+	data, err := gen.Render("launcher", textTemplate, m, nil)
 	if err != nil {
-		fmt.Println(string(data))
+		return nil, err
+	}
+	if err := helper.WriteFile(launcherFile, data); err != nil {
 		return nil, err
 	}
 

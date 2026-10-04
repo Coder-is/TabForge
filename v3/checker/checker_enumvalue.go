@@ -49,7 +49,7 @@ func checkEnumValue(globals *model.Globals) {
 // 检查枚举值是否存在有效
 func checkEnumFieldValue(globals *model.Globals, header *model.HeaderField, value string, inputCell *model.Cell) {
 
-	if inputCell.Value == "" {
+	if value == "" {
 		return
 	}
 

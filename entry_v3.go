@@ -61,26 +61,21 @@ func genFile(globals *model.Globals, entry V3GenEntry) error {
 	filename := *entry.param
 
 	if entry.genSingleFile != nil {
-		if data, err := entry.genSingleFile(globals); err != nil {
+		data, err := entry.genSingleFile(globals)
+		if err != nil {
 			return err
-		} else {
-
-			report.Log.Infof("  [%s] %s", entry.name, filename)
-
-			err = helper.WriteFile(filename, data)
-
-			if err != nil {
-				return err
-			}
 		}
+		if err := helper.WriteFile(filename, data); err != nil {
+			return err
+		}
+		report.Log.Infof("  [%s] %s", entry.name, filename)
 	}
 
 	if entry.genCustom != nil {
-		if err := entry.genCustom(globals, *entry.param); err != nil {
+		if err := entry.genCustom(globals, filename); err != nil {
 			return err
-		} else {
-			report.Log.Infof("  [%s] %s", entry.name, filename)
 		}
+		report.Log.Infof("  [%s] %s", entry.name, filename)
 	}
 
 	return nil
@@ -123,6 +118,16 @@ func genFiles(globals *model.Globals, entries []V3GenEntry) error {
 }
 
 func V3Entry() {
+	if err := runV3(); err != nil {
+		report.Log.Errorln(err)
+		os.Exit(1)
+	}
+}
+
+func runV3() error {
+	if err := validateProtoOptions(); err != nil {
+		return err
+	}
 	globals := model.NewGlobals()
 	globals.Version = build.Version
 	globals.ParaLoading = *paramPara
@@ -139,33 +144,20 @@ func V3Entry() {
 	idxloader := helper.NewFileLoader(true, globals.CacheDir)
 	globals.IndexGetter = idxloader
 
-	var err error
-	if err = validateProtoOptions(); err != nil {
-		goto Exit
-	}
 	if *paramTagAction != "" {
-		globals.TagActions, err = model.ParseTagAction(*paramTagAction)
+		actions, err := model.ParseTagAction(*paramTagAction)
 		if err != nil {
-			goto Exit
+			return err
 		}
+		globals.TagActions = actions
 	}
 
-	err = compiler.Compile(globals)
-
-	if err != nil {
-		goto Exit
+	if err := compiler.Compile(globals); err != nil {
+		return err
 	}
 
 	report.Log.Debugln("Generate files...")
-	err = GenFileByList(globals)
-	if err != nil {
-		goto Exit
-	}
-
-	return
-Exit:
-	report.Log.Errorln(err)
-	os.Exit(1)
+	return GenFileByList(globals)
 }
 
 func validateProtoOptions() error {

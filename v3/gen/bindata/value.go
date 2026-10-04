@@ -1,138 +1,79 @@
 package bindata
 
 import (
-	"github.com/Coder-is/TabForge/v3/model"
 	"strconv"
+
+	"github.com/Coder-is/TabForge/v3/model"
 )
 
-func writeValue(globals *model.Globals, structWriter *BinaryWriter, fieldType *model.TypeDefine, goType, value string) error {
-	switch {
-	case goType == "int16":
-		if value == "" {
-			return structWriter.WriteInt16(0)
-		} else {
-			v, err := strconv.ParseInt(value, 10, 16)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteInt16(int16(v))
+func writeValue(globals *model.Globals, writer *BinaryWriter, field *model.TypeDefine, kind, value string) error {
+	if globals.Types.IsEnumKind(field.FieldType) {
+		kind = "int32"
+		if value != "" {
+			value = globals.Types.ResolveEnumValue(field.FieldType, value)
 		}
-
-	case goType == "int32":
-		if value == "" {
-			return structWriter.WriteInt32(0)
-		} else {
-			v, err := strconv.ParseInt(value, 10, 32)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteInt32(int32(v))
-		}
-
-	case goType == "int64":
-		if value == "" {
-			return structWriter.WriteInt64(0)
-		} else {
-			v, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteInt64(int64(v))
-		}
-
-	case goType == "uint16":
-		if value == "" {
-			return structWriter.WriteUInt16(0)
-		} else {
-			v, err := strconv.ParseInt(value, 10, 16)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteUInt16(uint16(v))
-		}
-
-	case goType == "uint32":
-		if value == "" {
-			return structWriter.WriteUInt32(0)
-		} else {
-			v, err := strconv.ParseInt(value, 10, 32)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteUInt32(uint32(v))
-		}
-
-	case goType == "uint64":
-		if value == "" {
-			return structWriter.WriteUInt64(0)
-		} else {
-			v, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteUInt64(uint64(v))
-		}
-
-	case goType == "bool":
-		if value == "" {
-			return structWriter.WriteBool(false)
-		} else {
-			v, err := model.ParseBool(value)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteBool(v)
-		}
-
-	case goType == "float32":
-		if value == "" {
-			return structWriter.WriteFloat32(0)
-		} else {
-			v, err := strconv.ParseFloat(value, 32)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteFloat32(float32(v))
-		}
-	case goType == "float64":
-		if value == "" {
-			return structWriter.WriteFloat64(0)
-		} else {
-			v, err := strconv.ParseFloat(value, 64)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteFloat64(v)
-		}
-	case goType == "string":
-		return structWriter.WriteString(value)
-
-	case globals.Types.IsEnumKind(fieldType.FieldType): // 枚举
-		if value == "" {
-			return structWriter.WriteInt32(0)
-		} else {
-			enumValue := globals.Types.ResolveEnumValue(fieldType.FieldType, value)
-
-			v, err := strconv.ParseInt(enumValue, 10, 32)
-			if err != nil {
-				return err
-			}
-
-			return structWriter.WriteInt32(int32(v))
-		}
-
-	default:
-		panic("unknown binary type: " + fieldType.FieldType)
 	}
-
-	return nil
+	if value == "" && kind != "string" && kind != "bool" {
+		value = "0"
+	}
+	switch kind {
+	case "int16":
+		v, err := strconv.ParseInt(value, 10, 16)
+		if err != nil {
+			return err
+		}
+		return writer.WriteInt16(int16(v))
+	case "int32":
+		v, err := strconv.ParseInt(value, 10, 32)
+		if err != nil {
+			return err
+		}
+		return writer.WriteInt32(int32(v))
+	case "int64":
+		v, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return err
+		}
+		return writer.WriteInt64(v)
+	case "uint16":
+		v, err := strconv.ParseUint(value, 10, 16)
+		if err != nil {
+			return err
+		}
+		return writer.WriteUInt16(uint16(v))
+	case "uint32":
+		v, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return err
+		}
+		return writer.WriteUInt32(uint32(v))
+	case "uint64":
+		v, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return err
+		}
+		return writer.WriteUInt64(v)
+	case "float32":
+		v, err := strconv.ParseFloat(value, 32)
+		if err != nil {
+			return err
+		}
+		return writer.WriteFloat32(float32(v))
+	case "float64":
+		v, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return err
+		}
+		return writer.WriteFloat64(v)
+	case "bool":
+		v, err := model.ParseBool(value)
+		if err != nil {
+			return err
+		}
+		return writer.WriteBool(v)
+	case "string":
+		return writer.WriteString(value)
+	default:
+		panic("unknown binary type: " + field.FieldType)
+	}
 }

@@ -2,102 +2,55 @@ package jsondata
 
 import (
 	"encoding/json"
-	"fmt"
+	"path/filepath"
+
+	"github.com/Coder-is/TabForge/v3/helper"
 	"github.com/Coder-is/TabForge/v3/model"
-	"io/ioutil"
 )
 
-func Output(globals *model.Globals, param string) (err error) {
-
-	for _, tab := range globals.Datas.AllTables() {
-
-		// 一个表的所有列
-		headers := globals.Types.AllFieldByName(tab.OriginalHeaderType)
-
-		fileData := map[string]interface{}{
-			"@Tool":    "github.com/Coder-is/TabForge",
-			"@Version": globals.Version,
-		}
-
-		var tabData []interface{}
-
-		// 遍历所有行
-		for row := 1; row < len(tab.Rows); row++ {
-
-			// 遍历每一列
-			rowData := map[string]interface{}{}
-			for col, header := range headers {
-
-				if globals.CanDoAction(model.ActionNoGenFieldJsonDir, header) {
-					continue
-				}
-
-				// 在单元格找到值
-				valueCell := tab.GetCell(row, col)
-
-				var value = wrapValue(globals, valueCell, header)
-
-				rowData[header.FieldName] = value
-			}
-
-			tabData = append(tabData, rowData)
-		}
-
-		fileData[tab.HeaderType] = tabData
-
-		data, err := json.MarshalIndent(&fileData, "", "\t")
-
-		if err != nil {
-			return err
-		}
-
-		err = ioutil.WriteFile(fmt.Sprintf("%s/%s.json", param, tab.HeaderType), data, 0666)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func Generate(globals *model.Globals) (data []byte, err error) {
-
-	fileData := map[string]interface{}{
+func metadata(globals *model.Globals) map[string]interface{} {
+	return map[string]interface{}{
 		"@Tool":    "github.com/Coder-is/TabForge",
 		"@Version": globals.Version,
 	}
+}
 
-	for _, tab := range globals.Datas.AllTables() {
-
-		// 一个表的所有列
-		headers := globals.Types.AllFieldByName(tab.OriginalHeaderType)
-
-		var tabData []interface{}
-
-		// 遍历所有行
-		for row := 1; row < len(tab.Rows); row++ {
-
-			// 遍历每一列
-			rowData := map[string]interface{}{}
-			for col, header := range headers {
-
-				if globals.CanDoAction(model.ActionNoGenFieldJson, header) {
-					continue
-				}
-
-				// 在单元格找到值
-				valueCell := tab.GetCell(row, col)
-
-				var value = wrapValue(globals, valueCell, header)
-
-				rowData[header.FieldName] = value
+// Both JSON exporters share row conversion, but retain their own tag actions.
+func tableData(globals *model.Globals, tab *model.DataTable, action string) []map[string]interface{} {
+	headers := globals.Types.AllFieldByName(tab.OriginalHeaderType)
+	var rows []map[string]interface{}
+	for row := 1; row < len(tab.Rows); row++ {
+		values := make(map[string]interface{})
+		for col, field := range headers {
+			if globals.CanDoAction(action, field) {
+				continue
 			}
-
-			tabData = append(tabData, rowData)
+			values[field.FieldName] = wrapValue(globals, tab.GetCell(row, col), field)
 		}
-
-		fileData[tab.HeaderType] = tabData
+		rows = append(rows, values)
 	}
+	return rows
+}
 
+func Output(globals *model.Globals, directory string) error {
+	for _, tab := range globals.Datas.AllTables() {
+		fileData := metadata(globals)
+		fileData[tab.HeaderType] = tableData(globals, tab, model.ActionNoGenFieldJsonDir)
+		data, err := json.MarshalIndent(fileData, "", "\t")
+		if err != nil {
+			return err
+		}
+		if err := helper.WriteFile(filepath.Join(directory, tab.HeaderType+".json"), data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func Generate(globals *model.Globals) ([]byte, error) {
+	fileData := metadata(globals)
+	for _, tab := range globals.Datas.AllTables() {
+		fileData[tab.HeaderType] = tableData(globals, tab, model.ActionNoGenFieldJson)
+	}
 	return json.MarshalIndent(fileData, "", "\t")
 }

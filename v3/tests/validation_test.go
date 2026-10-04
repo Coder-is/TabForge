@@ -148,6 +148,74 @@ func TestTypedIndexDuplicates(t *testing.T) {
 	})
 }
 
+func TestEnumArrayValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		valid       bool
+	}{
+		{"empty", "", true},
+		{"names", "Ready|None", true},
+		{"aliases", "就绪|None", true},
+		{"unknown element", "Ready|Missing", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			emu := indexedTable(t, "int32", "", "1")
+			types := emu.sheet("Type")
+			helper.WriteRowValues(types, "枚举", "State", "", "None", "int32", "", "0")
+			helper.WriteRowValues(types, "枚举", "State", "就绪", "Ready", "int32", "", "1")
+			helper.WriteRowValues(types, "表头", "Probe", "States", "States", "State", "|")
+			data := emu.CreateCSVFile("Data")
+			helper.WriteRowValues(data, "ID", "Marker", "States")
+			helper.WriteRowValues(data, "1", "row", tc.value)
+			err := compiler.Compile(emu.G)
+			if !tc.valid {
+				requireTableError(t, err, "UnknownEnumValue")
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestJSONExportTagActions(t *testing.T) {
+	emu := indexedTable(t, "int32", "", "1")
+	if err := compiler.Compile(emu.G); err != nil {
+		t.Fatal(err)
+	}
+	emu.G.Types.FieldByName("Probe", "Marker").Tags = []string{"private"}
+	for _, action := range []string{model.ActionNoGenFieldJson, model.ActionNoGenFieldJsonDir} {
+		emu.G.TagActions = []model.TagAction{{Verb: action, Tags: []string{"private"}}}
+		combined, err := jsondata.Generate(emu.G)
+		if err != nil {
+			t.Fatal(err)
+		}
+		directory := filepath.Join(t.TempDir(), "nested", "json")
+		if err := jsondata.Output(emu.G, directory); err != nil {
+			t.Fatal(err)
+		}
+		separate, err := os.ReadFile(filepath.Join(directory, "Probe.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, output := range []struct {
+			data []byte
+			hide bool
+		}{{combined, action == model.ActionNoGenFieldJson}, {separate, action == model.ActionNoGenFieldJsonDir}} {
+			var table struct{ Probe []map[string]interface{} }
+			if err := json.Unmarshal(output.data, &table); err != nil {
+				t.Fatal(err)
+			}
+			if len(table.Probe) != 1 {
+				t.Fatalf("expected one row: %s", output.data)
+			}
+			_, present := table.Probe[0]["Marker"]
+			if present == output.hide {
+				t.Fatalf("wrong tag action %s: %s", action, output.data)
+			}
+		}
+	}
+}
+
 func TestDistinctIndicesAndInvalidInput(t *testing.T) {
 	for _, tc := range []struct {
 		kind, splitter string

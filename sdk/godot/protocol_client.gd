@@ -131,27 +131,39 @@ func _poll(handle: Request) -> void:
 		var content_type := ""
 		for header in handle._http.get_response_headers():
 			if header.to_lower().begins_with("content-type:"): content_type = header.get_slice(":", 1).get_slice(";", 0).strip_edges().to_lower()
-		var expected := "text/event-stream" if handle._operation.transport == "http_sse" and handle._status >= 200 and handle._status < 300 else "application/json"
+		var expected := "text/event-stream" if _is_stream(handle) else "application/json"
 		if content_type != expected: _fail(handle, "unsupported_media_type", "Unexpected HTTP content type"); return
 	if status == HTTPClient.STATUS_BODY:
 		var chunk := handle._http.read_response_body_chunk()
-		if not chunk.is_empty():
-			if handle._operation.transport == "http_sse" and handle._status >= 200 and handle._status < 300:
-				var parsed: Dictionary = handle._parser.feed(chunk)
-				if not parsed.error.is_empty(): _fail(handle, parsed.error, "Invalid SSE data"); return
-				for frame in parsed.frames:
-					_accept(handle, frame)
-					if handle.done: return
-			else:
-				if handle._buffer.size() + chunk.size() > max_response_bytes: _fail(handle, "response_too_large", "Response exceeds configured limit"); return
-				handle._buffer.append_array(chunk)
+		_receive(handle, chunk)
 		return
 	if status in [HTTPClient.STATUS_CONNECTED, HTTPClient.STATUS_DISCONNECTED] and handle._headers:
-		if handle._operation.transport == "http_sse" and handle._status >= 200 and handle._status < 300:
+		if _is_stream(handle):
 			_fail(handle, "incomplete_stream", "EOF before terminal event"); return
 		_unary(handle)
 	elif status == HTTPClient.STATUS_DISCONNECTED:
 		_fail(handle, "transport_error", "Connection closed before response")
+
+func _is_stream(handle: Request) -> bool:
+	return handle._operation.transport == "http_sse" and handle._status >= 200 and handle._status < 300
+
+func _receive(handle: Request, chunk: PackedByteArray) -> void:
+	if chunk.is_empty():
+		return
+	if not _is_stream(handle):
+		if handle._buffer.size() + chunk.size() > max_response_bytes:
+			_fail(handle, "response_too_large", "Response exceeds configured limit")
+			return
+		handle._buffer.append_array(chunk)
+		return
+	var parsed: Dictionary = handle._parser.feed(chunk)
+	if not parsed.error.is_empty():
+		_fail(handle, parsed.error, "Invalid SSE data")
+		return
+	for frame in parsed.frames:
+		_accept(handle, frame)
+		if handle.done:
+			return
 
 func _parse(bytes: PackedByteArray) -> Dictionary:
 	var decoded: Dictionary = UTF8.decode(bytes)

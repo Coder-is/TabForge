@@ -5,12 +5,8 @@ go 1.26.6
 toolchain go1.26.8
 
 require (
-	github.com/ahmetb/go-linq v3.0.0+incompatible
 	github.com/davyxu/golog v0.1.0
-	github.com/davyxu/protoplus v0.1.0
 	github.com/golang/protobuf v1.5.4
-	github.com/pkg/errors v0.8.1
-	github.com/pkg/profile v1.4.0
 	github.com/tealeg/xlsx v1.0.5
 	golang.org/x/net v0.59.0
 	golang.org/x/text v0.42.0

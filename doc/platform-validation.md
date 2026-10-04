@@ -2,6 +2,8 @@
 
 四端专用网络代码已加入仓库。支持声明以实际测试环境为准：代码存在、独立核心通过、编辑器运行、目标设备运行是不同阶段。
 
+首次业务接入见 [前后端指南](protocol-integration.md)，验收目录与构建产物见 [工程入口](../examples/platforms/README.md)。Godot 原生 headless 验证另见 [Godot SDK](../sdk/godot/README.md)。
+
 ## 2026-10-03 验收矩阵
 
 | 平台 | 接入实现 | 已执行 | 未执行 |
@@ -97,6 +99,6 @@ clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
 
 ## 自动回归与发布门槛
 
-现有 CI 在 Linux/macOS/Windows 检查 Go、TS、平台示例构建；新增 native-cores 任务在 Linux/macOS 执行 C++ sanitizer 与 C# 核心真实 HTTP 联调。Godot 原有 headless 任务保留。没有引擎许可证或真机 runner，CI **不会伪造** Unity/Unreal/Creator/真机通过记录。远程任务尚未触发，须提交后查看实际结果。
+现有 [CI 配置](../.github/workflows/test.yml) 在 Linux/macOS/Windows 检查 Go、TS、平台示例构建；native-cores 任务在 Linux/macOS 执行 C++ sanitizer 与 C# 核心真实 HTTP 联调，Godot headless 任务另行执行。没有引擎许可证或真机 runner，CI 不执行 Unity/Unreal/Creator 编辑器或真机测试。配置已随 `8b0dbb2` 推送到 main，实际执行结果查看 [GitHub Actions](https://github.com/Coder-is/TabForge/actions)；本文记录的是本地验收，不声称远程任务已通过。
 
 发布特定平台前，至少在其编辑器和一个实际目标构建运行上述用例，补齐 HTTPS、认证失败、代理缓冲、长流/慢消费者、场景退出和移动前后台切换。v1 不含 WebSocket、自动重连/回放、其他厂商小程序和模型供应商适配。

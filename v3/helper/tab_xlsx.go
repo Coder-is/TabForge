@@ -44,14 +44,13 @@ func (self *XlsxFile) Load(filename string) (err error) {
 			}
 		}()
 
-		if file, err = cache.Load(); err != nil {
+		file, err = cache.Load()
+		if err != nil {
 			return err
-		} else {
-
-			if !cache.UseCache() {
-				if err := cache.Save(); err != nil {
-					report.Log.Warnf("Cannot save cache for %s: %v", filename, err)
-				}
+		}
+		if !cache.UseCache() {
+			if err := cache.Save(); err != nil {
+				report.Log.Warnf("Cannot save cache for %s: %v", filename, err)
 			}
 		}
 	}
@@ -63,6 +62,7 @@ func (self *XlsxFile) Load(filename string) (err error) {
 
 func (self *XlsxFile) FromXFile(file *xlsx.File) {
 	self.file = file
+	self.sheets = make([]TableSheet, 0, len(file.Sheets))
 
 	for _, sheet := range file.Sheets {
 		self.sheets = append(self.sheets, newXlsxSheet(sheet))
@@ -70,12 +70,9 @@ func (self *XlsxFile) FromXFile(file *xlsx.File) {
 }
 
 func NewXlsxFile(cacheDir string) TableFile {
-
-	self := &XlsxFile{
+	return &XlsxFile{
 		cacheDir: cacheDir,
 	}
-
-	return self
 }
 
 type XlsxSheet struct {

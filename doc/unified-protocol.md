@@ -2,7 +2,7 @@
 
 目标是用同一套类型和接口约定连接后端、游戏客户端、网页、小程序及大模型应用。开发者维护 Proto 和接口清单，工具检查两者的一致性，生成类型和接入文档；各平台网络适配器负责实际收发。
 
-目前已实现 Proto RPC/清单校验、schema hash、TypeScript 类型和字段验证规则、Godot 元数据、Go HTTP 服务、TypeScript fetch、Godot GDScript、Unity C#、Unreal C++、Cocos Fetch/XHR 与微信小程序客户端，支持普通响应和 SSE。加固范围与升级要求见 [生产部署说明](production.md)，四端的运行方法与实际验证状态见 [平台验收](platform-validation.md)。
+目前已实现 Proto RPC/清单校验、schema hash、TypeScript 类型和字段验证规则、Godot/原生引擎元数据、Go HTTP 服务、TypeScript fetch、Godot GDScript、Unity C#、Unreal C++、Cocos Fetch/XHR 与微信小程序客户端，支持普通响应和 SSE。首次使用见 [前后端接入指南](protocol-integration.md)，加固范围与升级要求见 [生产部署说明](production.md)，四端的运行方法与实际验证状态见 [平台验收](platform-validation.md)。
 
 ## 协议的组成
 
@@ -73,7 +73,7 @@ data: {"protocolVersion":"1.0.0","schemaHash":"生成包的hash","requestId":"re
 
 完成或业务失败事件结束流；没有结束事件就 EOF 表示 `incomplete_stream`。响应头已经发送后的传输失败使用保留事件 `protocol.error`，其 data 包含 error，不包含 payload。客户端退出迭代或 AbortSignal 取消会中止 HTTP 请求；供应商工作是否同步停止由后端处理。v1 不自动重试、重连、续传，也不承诺 `Last-Event-ID` 回放。
 
-网络分片可能只有半个 UTF-8 字符或半个事件，也可能包含多个事件。必须先增量解码 UTF-8，再分帧，最后解析 JSON。SSEParser 支持 BOM、CR/LF/CRLF、注释和多个 data 行，默认限制每帧为 1 MiB 的 JavaScript 字符数。超时覆盖整个调用或流；Go 处理函数必须遵守 context 取消。HTTP 部署还需配置请求读取超时与反向代理缓冲。
+网络分片可能只有半个 UTF-8 字符或半个事件，也可能包含多个事件。字节流适配器需要保留跨片段 UTF-8 状态及帧边界；XHR 则使用平台已经解码的累计 responseText。各 SSE 解析器支持 BOM、CR/LF/CRLF、注释和多个 data 行。默认帧上限为 1 MiB，但 TS/Unity 按 UTF-16 字符计数，Go/Godot/Unreal 按字节计数，具体见 [各端限制](production.md#客户端限制)。超时覆盖整个调用或流；Go 处理函数必须遵守 context 取消。HTTP 部署还需配置请求读取超时与反向代理缓冲。
 
 ## 类型与演进
 
@@ -106,7 +106,7 @@ data: {"protocolVersion":"1.0.0","schemaHash":"生成包的hash","requestId":"re
 | Lua | 已有配置 Lua 输出 | 网络类型/编解码与网络适配 |
 | Java、Python、Rust 等后端 | 可用各自 protoc 插件 | 协议工具的语言运行时适配 |
 
-缺少 fetch、ReadableStream、AbortController 或 TextDecoder 的平台需实现 Transport。可复用协议与分帧核心，但不能据此宣称对应引擎或小程序已经验证兼容。
+微信、Cocos XHR、Godot、Unity 和 Unreal 已有专用网络适配，不要求宿主提供完整 fetch 环境。其他平台可实现 Transport 或 CallbackNetwork，复用协议与分帧核心；仍需在其编辑器和目标构建验证。
 
 ## 后续实施顺序
 
@@ -138,6 +138,6 @@ npm --prefix sdk/typescript test
 go test -race ./...
 ```
 
-不指定 `-protocol_out` 时只校验；生成目录写入并覆盖 contract.json、schema.pb、types.ts、PROTOCOL.md、wire_schema.json、protocol.gd 和 runtime.json。整个目录作为同一发布产物分发。二进制消息代码仍由 protoc 和各语言插件生成。
+不指定 `-protocol_out` 时只校验；生成目录写入并覆盖 contract.json、schema.pb、types.ts、PROTOCOL.md、wire_schema.json、protocol.gd 和 runtime.json。[产物用途](protocol-integration.md#1-定义并生成协议)与 SDK 初始化见接入指南。整个目录作为同一发布产物分发。二进制消息代码仍由 protoc 和各语言插件生成。
 
-跨语言集成测试需要 Node 24+；缺少该运行时的本地 Go 测试会跳过此项，CI 安装 Node 24 并执行全部验证。
+跨语言 TS 集成测试需要 Node 24+；缺少运行时的本地 Go 测试会跳过对应用例。Godot 与 C# 联调分别需要设置 GODOT_BIN / DOTNET_BIN。CI 的主任务安装 Node 24，Godot 和 native-cores 任务另外安装相应运行时；Unity/Unreal/Creator 编辑器与真机不在现有 CI 范围内。

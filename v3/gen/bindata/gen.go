@@ -1,9 +1,9 @@
 package bindata
 
 import (
-	"fmt"
+	"github.com/Coder-is/TabForge/v3/helper"
 	"github.com/Coder-is/TabForge/v3/model"
-	"io/ioutil"
+	"path/filepath"
 )
 
 func writeHeader(writer *BinaryWriter) error {
@@ -23,21 +23,27 @@ func exportTable(globals *model.Globals, writer *BinaryWriter, tab *model.DataTa
 		return err
 	}
 
-	writer.WriteString(tab.HeaderType)
-
-	totalDataRow := len(tab.Rows) - 1
-	writer.WriteUInt32(uint32(totalDataRow))
+	if err := writer.WriteString(tab.HeaderType); err != nil {
+		return err
+	}
+	if err := writer.WriteUInt32(uint32(len(tab.Rows) - 1)); err != nil {
+		return err
+	}
 
 	// 表的每一个行
 	for row := 1; row < len(tab.Rows); row++ {
 
-		if swriter, err := writeStruct(globals, tab, row); err != nil {
+		structWriter, err := writeStruct(globals, tab, row)
+		if err != nil {
 			return err
-		} else {
-			structData := swriter.Bytes()
-			// 结构体二进制边界
-			writer.WriteUInt32(uint32(len(structData)))
-			writer.Write(structData)
+		}
+		data := structWriter.Bytes()
+		// 每行结构体包含长度边界，读取方可以跳过未知字段。
+		if err := writer.WriteUInt32(uint32(len(data))); err != nil {
+			return err
+		}
+		if _, err := writer.Write(data); err != nil {
+			return err
 		}
 	}
 
@@ -79,7 +85,7 @@ func Output(globals *model.Globals, param string) (err error) {
 			return err
 		}
 
-		err = ioutil.WriteFile(fmt.Sprintf("%s/%s.bin", param, tab.HeaderType), writer.Bytes(), 0666)
+		err = helper.WriteFile(filepath.Join(param, tab.HeaderType+".bin"), writer.Bytes())
 
 		if err != nil {
 			return err

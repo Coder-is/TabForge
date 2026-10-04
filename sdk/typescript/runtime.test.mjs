@@ -1,12 +1,41 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SSEParser, StreamValidator, FetchTransport, ProtocolClient, parseUnary } from "./runtime.ts";
+import { CallbackTransport } from "./callback_transport.ts";
 
 const operation = { path: "/chat", transport: "http_sse", auth: "none", timeoutMS: 1000,
   events: { "text.delta": { field: "delta", terminal: false }, completed: { field: "completed", terminal: true } } };
 const body = (sequence, payload) => ({ protocolVersion: "1", requestId: "r", sequence: String(sequence), payload });
 const record = (sequence, name, payload) => `id: ${sequence}\nevent: ${name}\ndata: ${JSON.stringify(body(sequence, payload))}\n\n`;
 const frame = (sequence, name, payload) => ({ id: String(sequence), event: name, data: JSON.stringify(body(sequence, payload)) });
+
+test("fetch and callback transports reject invalid requests before starting the network", async () => {
+  let sent = 0;
+  const unexpectedNetwork = () => { sent++; throw new Error("Network must not start"); };
+  const settings = { schemaHash: "hash", wireSchema: { messages: {}, enums: {} } };
+  const transports = [
+    new FetchTransport("http://demo", "1", unexpectedNetwork, settings),
+    new CallbackTransport("http://demo", "1", unexpectedNetwork, settings)
+  ];
+  const unary = { ...operation, transport: "http_json", events: undefined };
+  for (const transport of transports) {
+    for (const options of [{ requestId: "r\n" }, { token: "token\r\n" }]) {
+      await assert.rejects(transport.call(unary, {}, options), error => error.code === "bad_request");
+    }
+    for (const timeoutMS of [0, -1, 1.5, NaN]) {
+      await assert.rejects(transport.call({ ...unary, timeoutMS }, {}), error => error.code === "bad_request");
+    }
+    await assert.rejects(transport.call(unary, undefined), error => error.code === "invalid_message");
+    const cyclic = {}; cyclic.self = cyclic;
+    for (const request of [cyclic, { value: 1n }]) {
+      await assert.rejects(transport.call(unary, request), error => error.code === "invalid_message");
+    }
+    await assert.rejects(transport.call(operation, {}), error => error.code === "invalid_operation");
+    await assert.rejects(transport.stream(unary, {})[Symbol.asyncIterator]().next(), error => error.code === "invalid_operation");
+  }
+  assert.equal(sent, 0);
+  assert.throws(() => parseUnary({ protocolVersion: "1", requestId: "r\n", data: {} }, "1"), error => error.code === "invalid_frame");
+});
 
 test("SSE parses BOM, all newline forms, comments and multiline data across every character cut", () => {
   const input = "\uFEFF: heartbeat\r\nid: 1\revent: delta\ndata: 你好\r\ndata: 世界\r\n\r\n";

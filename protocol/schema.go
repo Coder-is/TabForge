@@ -140,13 +140,18 @@ func (c *Contract) RuntimeJSON(indent string) ([]byte, error) {
 }
 
 type operation struct {
-	Path         string                 `json:"path"`
-	Transport    string                 `json:"transport"`
-	Auth         string                 `json:"auth"`
-	TimeoutMS    int                    `json:"timeoutMS"`
-	RequestType  string                 `json:"requestType"`
-	ResponseType string                 `json:"responseType"`
-	Events       map[string]interface{} `json:"events,omitempty"`
+	Path         string                    `json:"path"`
+	Transport    string                    `json:"transport"`
+	Auth         string                    `json:"auth"`
+	TimeoutMS    int                       `json:"timeoutMS"`
+	RequestType  string                    `json:"requestType"`
+	ResponseType string                    `json:"responseType"`
+	Events       map[string]operationEvent `json:"events,omitempty"`
+}
+
+type operationEvent struct {
+	Field    string `json:"field"`
+	Terminal bool   `json:"terminal"`
 }
 
 func (c *Contract) operations() map[string]operation {
@@ -154,10 +159,10 @@ func (c *Contract) operations() map[string]operation {
 	for _, e := range c.Endpoints {
 		o := operation{Path: e.Path, Transport: e.Transport, Auth: e.Auth, TimeoutMS: e.TimeoutMS, RequestType: string(e.Input.FullName()), ResponseType: string(e.Output.FullName())}
 		if len(e.Events) != 0 {
-			o.Events = map[string]interface{}{}
+			o.Events = make(map[string]operationEvent)
 			for _, ev := range e.Events {
 				f := e.Output.Fields().ByName(protoreflect.Name(ev.Field))
-				o.Events[ev.Name] = map[string]interface{}{"field": f.JSONName(), "terminal": ev.Terminal}
+				o.Events[ev.Name] = operationEvent{Field: f.JSONName(), Terminal: ev.Terminal}
 			}
 		}
 		ops[e.ID] = o

@@ -6,6 +6,8 @@
 
 将本目录的 protocol_client.gd、sse_parser.gd、utf8.gd、wire_validator.gd 复制到游戏的同一目录，再将生成包的 protocol.gd 放到项目内。生成文件携带接口元数据、schema hash 和字段验证规则，不注册全局 class_name。
 
+协议生成、七类产物用途和 Go 后端注册见 [前后端指南](../../doc/protocol-integration.md)。Godot 使用 protocol.gd 的 CONTRACT，Unity/Unreal 使用 runtime.json；它们来自同一个生成包，发布时与后端保持同一版本/hash。
+
 ```gdscript
 extends Node
 const Client = preload("res://tabforge/protocol_client.gd")

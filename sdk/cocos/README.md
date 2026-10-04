@@ -2,11 +2,14 @@
 
 `CocosTransport` 面向 Creator 3.8 系列，提供 Fetch 字节流与 XHR 两种后端；普通和流接口复用生成类型、字段验证和统一错误。微信发布目标使用 `WechatTransport`。浏览器 Fetch/XHR 已实测；Creator 编辑器、JSB、Android/iOS 构建仍需运行平台验收。
 
+以下代码的路径以 `examples/protocol/` 为基准；业务项目应调整路径并将 SDK 与生成文件一同打包：
+
 ```typescript
-import { ProtocolClient } from '../typescript/runtime.ts';
-import { CocosTransport, CancellationSource } from './transport.ts';
+import { ProtocolClient } from '../../sdk/typescript/runtime.ts';
+import { CocosTransport, CancellationSource } from '../../sdk/cocos/transport.ts';
 import { operations, protocolVersion, schemaHash, wireSchema } from './generated/types.ts';
 import type { ProtocolTypes } from './generated/types.ts';
+const baseURL = 'https://api.example.com';
 const transport = new CocosTransport(baseURL, protocolVersion, {
   schemaHash, wireSchema, backend: 'fetch'
 });
@@ -17,6 +20,8 @@ for await (const event of client.stream('chatStream', { prompt: '你好' }, { si
 }
 // Component.onDestroy 时 cancel.cancel()。
 ```
+
+服务接口、包络与生成文件分发见 [前后端指南](../../doc/protocol-integration.md)。验收组件调用的服务与基础演示不同，地址和构建产物见 [验收工程入口](../../examples/platforms/README.md)。
 
 Web 推荐 Fetch + ReadableStream + AbortController。JSB 可显式选择 `backend: 'xhr'`，或通过 `xhrFactory` 注入平台 XMLHttpRequest；网络 API 的增量能力需在该平台实测。只有 onprogress 在 HTTP 尚未完成时暴露累计 responseText，XHR 才提供流式能力；完成后才有全文会返回 `unsupported_transport`。XHR 会保留整个正文，默认额外限制为 4 MiB UTF-16 字符，可用 `maxXHRResponseChars` 调整。它保留回调边界处的高位代理字符，避免中文/emoji 分片丢失。XHR 由平台解码 UTF-8，无法提供字节级非法 UTF-8 检测；需要该保证时使用 Fetch 字节流。
 

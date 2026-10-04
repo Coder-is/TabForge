@@ -6,7 +6,7 @@ import (
 	"golang.org/x/net/html/charset"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,24 +34,12 @@ func (self *CSVFile) MaxCol() int {
 	return 0
 }
 
-func ConvGBKToUTF8(s []byte) ([]byte, error) {
-	I := bytes.NewReader(s)
-	O := transform.NewReader(I, simplifiedchinese.GBK.NewDecoder())
-	d, e := ioutil.ReadAll(O)
-	if e != nil {
-		return nil, e
-	}
-	return d, nil
+func ConvGBKToUTF8(data []byte) ([]byte, error) {
+	return io.ReadAll(transform.NewReader(bytes.NewReader(data), simplifiedchinese.GBK.NewDecoder()))
 }
 
-func ConvUTF8ToGBK(s []byte) ([]byte, error) {
-	I := bytes.NewReader(s)
-	O := transform.NewReader(I, simplifiedchinese.GBK.NewEncoder())
-	d, e := ioutil.ReadAll(O)
-	if e != nil {
-		return nil, e
-	}
-	return d, nil
+func ConvUTF8ToGBK(data []byte) ([]byte, error) {
+	return io.ReadAll(transform.NewReader(bytes.NewReader(data), simplifiedchinese.GBK.NewEncoder()))
 }
 
 func (self *CSVFile) Transform(convf func(s []byte) ([]byte, error)) {
@@ -94,7 +82,7 @@ func (self *CSVFile) Save(filename string) (err error) {
 
 func (self *CSVFile) Load(fileName string) error {
 
-	data, err := ioutil.ReadFile(fileName)
+	data, err := os.ReadFile(fileName)
 	if err != nil {
 		return err
 	}
@@ -185,13 +173,7 @@ func (self *CSVSheet) SetValue(row, col int, value string) bool {
 	return true
 }
 
-func (self *CSVSheet) WriteRow(valueList ...string) {
-
-	var rowData []string
-	for _, str := range valueList {
-
-		rowData = append(rowData, str)
-	}
-
-	self.file.records = append(self.file.records, rowData)
+func (self *CSVSheet) WriteRow(values ...string) {
+	// Keep a copy: callers may reuse or change the input slice.
+	self.file.records = append(self.file.records, append([]string(nil), values...))
 }

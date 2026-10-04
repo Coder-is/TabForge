@@ -1,7 +1,6 @@
 package gen
 
 import (
-	"github.com/ahmetb/go-linq"
 	"github.com/Coder-is/TabForge/util"
 	"github.com/Coder-is/TabForge/v3/model"
 	"text/template"
@@ -15,14 +14,13 @@ type TableIndices struct {
 }
 
 func KeyValueTypeNames(globals *model.Globals) (ret []string) {
-	linq.From(globals.IndexList).Where(func(raw interface{}) bool {
-		pragma := raw.(*model.IndexDefine)
-		return pragma.Kind == model.TableKind_KeyValue
-	}).Select(func(raw interface{}) interface{} {
-		pragma := raw.(*model.IndexDefine)
-
-		return pragma.TableType
-	}).Distinct().ToSlice(&ret)
+	seen := make(map[string]bool)
+	for _, pragma := range globals.IndexList {
+		if pragma.Kind == model.TableKind_KeyValue && !seen[pragma.TableType] {
+			ret = append(ret, pragma.TableType)
+			seen[pragma.TableType] = true
+		}
+	}
 
 	return
 }

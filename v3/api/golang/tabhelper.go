@@ -2,7 +2,7 @@ package tabtoy
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -18,7 +18,7 @@ type Table interface {
 func LoadFromFile(tab Table, filename string) error {
 
 	// 根据需要从你的源数据读取，这里从指定文件名的文件读取
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func LoadFromData(tab Table, data []byte) error {
 func LoadTableFromFile(tab Table, filename string) error {
 
 	// 根据需要从你的源数据读取，这里从指定文件名的文件读取
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}

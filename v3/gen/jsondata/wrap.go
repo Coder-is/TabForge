@@ -20,15 +20,13 @@ func wrapValue(globals *model.Globals, valueCell *model.Cell, valueType *model.T
 
 		return vlist
 
-	} else {
-
-		var value string
-		if valueCell != nil {
-			value = valueCell.Value
-		}
-
-		return wrapSingleValue(globals, valueType, value)
 	}
+
+	var value string
+	if valueCell != nil {
+		value = valueCell.Value
+	}
+	return wrapSingleValue(globals, valueType, value)
 }
 
 func wrapSingleValue(globals *model.Globals, valueType *model.TypeDefine, value string) interface{} {
@@ -61,11 +59,7 @@ func wrapSingleValue(globals *model.Globals, valueType *model.TypeDefine, value 
 	case goType == "bool":
 
 		v, _ := model.ParseBool(value)
-		if v {
-			return true
-		}
-
-		return false
+		return v
 	case goType == "int16":
 		i64, _ := strconv.ParseInt(value, 10, 16)
 		return int16(i64)

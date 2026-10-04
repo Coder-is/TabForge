@@ -101,11 +101,7 @@ func TestV3ExampleExportConsistency(t *testing.T) {
 					continue // ProtoJSON requires an existing descriptor, tested separately.
 				}
 				output := filepath.Join(dir, mode, entry.name)
-				if entry.genCustom != nil {
-					if err := os.MkdirAll(output, 0755); err != nil {
-						t.Fatal(err)
-					}
-				}
+				// Exporters create their own missing output directories.
 				entry.param = &output
 				entries = append(entries, entry)
 			}

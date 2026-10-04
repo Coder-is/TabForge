@@ -10,7 +10,7 @@ const (
 	ActionNoGenFieldJsonDir  = "nogenfield_jsondir"
 	ActionNoGenFieldBinary   = "nogenfield_binary"
 	ActionNoGenFieldPbBinary = "nogenfield_pbbin"
-	ActionNoGennFieldLua  	 = "nogenfield_lua"
+	ActionNoGennFieldLua     = "nogenfield_lua"
 	ActionNoGennFieldCsharp  = "nogenfield_csharp"
 	ActionNoGenTable         = "nogentab"
 )
@@ -45,27 +45,25 @@ func ParseTagAction(script string) (ret []TagAction, err error) {
 }
 
 func (self *Globals) CanDoAction(action string, obj interface{}) bool {
-
-	for _, ta := range self.TagActions {
-		if ta.Verb == action {
-			for _, tag := range ta.Tags {
-				switch v := obj.(type) {
-				case *HeaderField:
-					if v.TypeInfo.ContainTag(tag) {
-						return true
-					}
-				case *TypeDefine:
-					if v.ContainTag(tag) {
-						return true
-					}
-				case *IndexDefine:
-					if v.ContainTag(tag) {
-						return true
-					}
-				}
+	if header, ok := obj.(*HeaderField); ok {
+		if header.TypeInfo == nil {
+			return false
+		}
+		obj = header.TypeInfo
+	}
+	tagged, ok := obj.(interface{ ContainTag(string) bool })
+	if !ok {
+		return false
+	}
+	for _, selection := range self.TagActions {
+		if selection.Verb != action {
+			continue
+		}
+		for _, tag := range selection.Tags {
+			if tagged.ContainTag(tag) {
+				return true
 			}
 		}
 	}
-
 	return false
 }

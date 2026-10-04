@@ -8,11 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"mime"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,14 +25,6 @@ import (
 type UnaryHandler func(context.Context, proto.Message) (proto.Message, error)
 type StreamHandler func(context.Context, proto.Message, func(proto.Message) error) error
 type Authorize func(context.Context, protocol.ResolvedEndpoint, string) error
-
-type Error struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
-}
-
-func (e *Error) Error() string { return e.Message }
 
 // Server registrations and options must be configured before serving requests.
 // Auth is deny-by-default for bearer endpoints until Authorize is installed.
@@ -53,7 +44,16 @@ type Server struct {
 }
 
 func New(c *protocol.Contract) *Server {
-	return &Server{Contract: c, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, RequireSchemaHash: true, HeartbeatInterval: 15 * time.Second, schemaHash: c.Fingerprint(), unary: map[string]UnaryHandler{}, stream: map[string]StreamHandler{}}
+	return &Server{
+		Contract:          c,
+		MaxBodyBytes:      1 << 20,
+		MaxResponseBytes:  1 << 20,
+		RequireSchemaHash: true,
+		HeartbeatInterval: 15 * time.Second,
+		schemaHash:        c.Fingerprint(),
+		unary:             make(map[string]UnaryHandler),
+		stream:            make(map[string]StreamHandler),
+	}
 }
 
 func (s *Server) HandleUnary(id string, handler UnaryHandler) error {
@@ -76,16 +76,6 @@ func (s *Server) HandleStream(id string, handler StreamHandler) error {
 	}
 	s.stream[id] = handler
 	return nil
-}
-
-type envelope struct {
-	ProtocolVersion string          `json:"protocolVersion"`
-	SchemaHash      string          `json:"schemaHash"`
-	RequestID       string          `json:"requestId"`
-	Sequence        string          `json:"sequence,omitempty"`
-	Data            json.RawMessage `json:"data,omitempty"`
-	Payload         json.RawMessage `json:"payload,omitempty"`
-	Error           *Error          `json:"error,omitempty"`
 }
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
@@ -180,7 +170,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer body.Close()
 	// protojson needs the complete bounded request; never parse response chunks
 	// this way because SSE frames may span arbitrary network reads.
-	data, err := ioutil.ReadAll(body)
+	data, err := io.ReadAll(body)
 	if err != nil {
 		var oversized *http.MaxBytesError
 		if errors.As(err, &oversized) {
@@ -207,6 +197,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveStream(ctx, w, endpoint, requestID, request)
 		return
 	}
+	s.serveUnary(ctx, w, endpoint, requestID, request)
+}
+
+func (s *Server) serveUnary(ctx context.Context, w http.ResponseWriter, endpoint protocol.ResolvedEndpoint, requestID string, request proto.Message) {
 	s.mu.RLock()
 	handler := s.unary[endpoint.ID]
 	s.mu.RUnlock()
@@ -223,7 +217,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, requestID, status, failure.Code, failure.Message, failure.Retryable)
 		return
 	}
-	data, err = s.marshal(endpoint, response)
+	data, err := s.marshal(endpoint, response)
 	if err != nil {
 		s.fail(w, requestID, 500, "internal", "handler returned an invalid response", false)
 		return
@@ -235,216 +229,4 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(encoded)
-}
-
-func (s *Server) serveStream(ctx context.Context, w http.ResponseWriter, e protocol.ResolvedEndpoint, id string, request proto.Message) {
-	s.mu.RLock()
-	handler := s.stream[e.ID]
-	s.mu.RUnlock()
-	controller := http.NewResponseController(w)
-	if handler == nil || !canFlush(w) {
-		s.fail(w, id, 500, "internal", "stream handler or HTTP flushing unavailable", false)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(200)
-	if err := controller.Flush(); err != nil {
-		return
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var mu sync.Mutex
-	var sequence uint64
-	terminal, closed := false, false
-	write := func(name string, frame envelope) error {
-		frame.Sequence = strconv.FormatUint(sequence+1, 10)
-		frame.SchemaHash = s.schemaHash
-		data, err := json.Marshal(frame)
-		if err != nil {
-			return err
-		}
-		encoded := fmt.Sprintf("id: %s\nevent: %s\ndata: %s\n\n", frame.Sequence, name, data)
-		if len(encoded) > s.responseLimit() {
-			return fmt.Errorf("stream frame exceeds response limit")
-		}
-		if _, err = fmt.Fprint(w, encoded); err != nil {
-			cancel()
-			return err
-		}
-		if err := controller.Flush(); err != nil {
-			cancel()
-			return err
-		}
-		sequence++
-		return nil
-	}
-	done := make(chan struct{})
-	stopped := make(chan struct{})
-	if s.HeartbeatInterval > 0 {
-		go func() {
-			defer close(stopped)
-			ticker := time.NewTicker(s.HeartbeatInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-done:
-					return
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					mu.Lock()
-					if !closed && !terminal {
-						_, err := fmt.Fprint(w, ": ping\n\n")
-						if err == nil {
-							err = controller.Flush()
-						}
-						if err != nil {
-							cancel()
-						}
-					}
-					mu.Unlock()
-				}
-			}
-		}()
-	} else {
-		close(stopped)
-	}
-	defer func() { close(done); <-stopped }()
-	emit := func(response proto.Message) error {
-		mu.Lock()
-		defer mu.Unlock()
-		if closed || terminal {
-			return fmt.Errorf("stream is already closed")
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		event, err := e.EventFor(response)
-		if err != nil {
-			return err
-		}
-		data, err := s.marshal(e, response)
-		if err != nil {
-			return err
-		}
-		if err := write(event.Name, envelope{ProtocolVersion: s.Contract.Manifest.Version, RequestID: id, Payload: data}); err != nil {
-			return err
-		}
-		terminal = event.Terminal
-		if terminal {
-			if tracked, ok := w.(*responseWriter); ok {
-				tracked.event = event.Name
-			}
-		}
-		return nil
-	}
-	err := invokeStream(ctx, handler, request, emit)
-	mu.Lock()
-	defer mu.Unlock()
-	closed = true
-	if terminal || ctx.Err() == context.Canceled {
-		if !terminal {
-			if tracked, ok := w.(*responseWriter); ok {
-				tracked.code = "cancelled"
-			}
-		}
-		return
-	}
-	if ctx.Err() != nil {
-		err = ctx.Err()
-	}
-	if err == nil {
-		err = &Error{Code: "incomplete_stream", Message: "handler ended without a terminal event", Retryable: false}
-	}
-	_, failure := transportError(err)
-	if tracked, ok := w.(*responseWriter); ok {
-		tracked.code = failure.Code
-	}
-	if err := write("protocol.error", envelope{ProtocolVersion: s.Contract.Manifest.Version, RequestID: id, Error: failure}); err != nil && ctx.Err() == nil {
-		// A custom handler error can itself exceed the frame limit.
-		if tracked, ok := w.(*responseWriter); ok {
-			tracked.code = "internal"
-		}
-		write("protocol.error", envelope{ProtocolVersion: s.Contract.Manifest.Version, RequestID: id, Error: &Error{Code: "internal", Message: "request failed"}})
-	}
-}
-
-func (s *Server) marshal(e protocol.ResolvedEndpoint, message proto.Message) ([]byte, error) {
-	if message == nil || !message.ProtoReflect().IsValid() || message.ProtoReflect().Descriptor().FullName() != e.Output.FullName() {
-		return nil, fmt.Errorf("expected %s", e.Output.FullName())
-	}
-	data, err := protojson.MarshalOptions{Resolver: s.Contract.Types}.Marshal(message)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > s.responseLimit() {
-		return nil, fmt.Errorf("response exceeds configured limit")
-	}
-	// Reject a handler linked against a different schema with the same full name.
-	if err := (protojson.UnmarshalOptions{Resolver: s.Contract.Types}).Unmarshal(data, dynamicpb.NewMessage(e.Output)); err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-func transportError(err error) (int, *Error) {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return 504, &Error{Code: "timeout", Message: "request deadline exceeded", Retryable: true}
-	}
-	var e *Error
-	if errors.As(err, &e) {
-		switch e.Code {
-		case "bad_request":
-			return 400, e
-		case "unauthorized":
-			return 401, e
-		default:
-			return 500, e
-		}
-	}
-	return 500, &Error{Code: "internal", Message: "request failed", Retryable: false}
-}
-
-func (s *Server) fail(w http.ResponseWriter, id string, status int, code, message string, retryable bool) {
-	frame := envelope{ProtocolVersion: s.Contract.Manifest.Version, SchemaHash: s.schemaHash, RequestID: id, Error: &Error{Code: code, Message: message, Retryable: retryable}}
-	encoded, err := json.Marshal(frame)
-	if err != nil || len(encoded) > s.responseLimit() {
-		status, code = 500, "internal"
-		frame.Error = &Error{Code: code, Message: "request failed"}
-		encoded, _ = json.Marshal(frame)
-	}
-	if tracked, ok := w.(*responseWriter); ok {
-		tracked.code = code
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if len(encoded) <= s.responseLimit() {
-		w.Write(encoded)
-	}
-}
-
-func (s *Server) responseLimit() int {
-	if s.MaxResponseBytes > 0 {
-		return s.MaxResponseBytes
-	}
-	return 1 << 20
-}
-func invokeUnary(ctx context.Context, handler UnaryHandler, request proto.Message) (response proto.Message, err error) {
-	defer func() {
-		if recover() != nil {
-			response = nil
-			err = &Error{Code: "internal", Message: "request failed"}
-		}
-	}()
-	return handler(ctx, request)
-}
-func invokeStream(ctx context.Context, handler StreamHandler, request proto.Message, emit func(proto.Message) error) (err error) {
-	defer func() {
-		if recover() != nil {
-			err = &Error{Code: "internal", Message: "request failed"}
-		}
-	}()
-	return handler(ctx, request, emit)
 }

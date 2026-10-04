@@ -1,9 +1,9 @@
 package compiler
 
 import (
+	"fmt"
 	"github.com/Coder-is/TabForge/v3/helper"
 	"github.com/Coder-is/TabForge/v3/model"
-	"github.com/pkg/errors"
 	"strings"
 )
 
@@ -35,7 +35,7 @@ func readOneRow(sheet helper.TableSheet, tab *model.DataTable, row int) bool {
 func LoadDataTable(filegetter helper.FileGetter, fileName, headerType, resolveHeaderType string, typeTab *model.TypeTable) (ret []*model.DataTable, err error) {
 	file, err := filegetter.GetFile(fileName)
 	if err != nil {
-		return nil, errors.Wrap(err, fileName)
+		return nil, fmt.Errorf("%s: %w", fileName, err)
 	}
 
 	for _, sheet := range file.Sheets() {

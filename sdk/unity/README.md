@@ -4,6 +4,8 @@ UPM 包 `com.tabforge.protocol`，目标 Unity 2022.3 / Unity 6 原生运行时�
 
 Unity 接收的是 ProtoJSON `JToken`；生成的 `runtime.json` 规定接口、字段和类型，运行前验证请求，接收后验证响应。SDK 不把生成的 TS 类型误当成 C# 类。需要强类型消息时可另外用 protoc C# 并用对应 ProtoJSON 编解码器转换。
 
+把业务生成包中的 runtime.json 作为 TextAsset 放入项目并传给 Configure；示例资产构建会复制到验收工程 Resources。它必须与后端版本/hash 相同，不能只替换 Proto 消息而保留旧元数据。完整生成与后端注册见 [前后端指南](../../doc/protocol-integration.md)。
+
 ```csharp
 using Newtonsoft.Json.Linq;
 using TabForge.Protocol;

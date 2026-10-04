@@ -26,7 +26,7 @@ func TestFileLoaderBoundsAndDeduplicatesLoads(t *testing.T) {
 	calls := make(map[string]int)
 	started, release, done := make(chan string, count*2), make(chan struct{}), make(chan struct{})
 	go func() {
-		loader.commit(workers, func(filename, cacheDir string) interface{} {
+		loader.commit(workers, func(filename, cacheDir string) (TableFile, error) {
 			n := atomic.AddInt32(&active, 1)
 			for {
 				old := atomic.LoadInt32(&peak)
@@ -40,7 +40,7 @@ func TestFileLoaderBoundsAndDeduplicatesLoads(t *testing.T) {
 			started <- filename
 			<-release
 			atomic.AddInt32(&active, -1)
-			return NewCSVFile()
+			return NewCSVFile(), nil
 		})
 		close(done)
 	}()
@@ -69,9 +69,9 @@ func TestFileLoaderBoundsAndDeduplicatesLoads(t *testing.T) {
 			t.Errorf("normalized lookup failed: %v", err)
 		}
 	}
-	loader.commit(workers, func(string, string) interface{} {
+	loader.commit(workers, func(string, string) (TableFile, error) {
 		t.Error("commit reloaded already processed files")
-		return errors.New("unexpected load")
+		return nil, errors.New("unexpected load")
 	})
 }
 

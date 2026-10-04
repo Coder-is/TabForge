@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/tealeg/xlsx"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 )
@@ -109,7 +108,7 @@ func writeCacheFile(filename string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
 		return err
 	}
-	f, err := ioutil.TempFile(filepath.Dir(filename), ".tabtoy-cache-*")
+	f, err := os.CreateTemp(filepath.Dir(filename), ".tabtoy-cache-*")
 	if err != nil {
 		return err
 	}
@@ -143,7 +142,7 @@ func (self *TableCache) readCache() (xf *xlsx.File, err error) {
 	}
 
 	var cacheFile XlsxFileCache
-	data, err := ioutil.ReadFile(self.cacheFileName())
+	data, err := os.ReadFile(self.cacheFileName())
 	if err != nil {
 		return nil, nil
 	}

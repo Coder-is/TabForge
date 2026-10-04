@@ -9,9 +9,6 @@ import (
 // 检查数据与定义类型是否匹配
 func checkDataType(globals *model.Globals) {
 
-	var currHeader *model.HeaderField
-	var crrCell *model.Cell
-
 	for _, tab := range globals.Datas.AllTables() {
 
 		// 遍历输入数据的每一列
@@ -31,21 +28,18 @@ func checkDataType(globals *model.Globals) {
 					continue
 				}
 
-				crrCell = inputCell
-				currHeader = header
-
 				if header.TypeInfo.IsArray() {
 					for _, value := range inputCell.ValueList {
 
 						err := checkSingleValue(header, value)
 						if err != nil {
-							report.ReportError("DataMissMatchTypeDefine", currHeader.TypeInfo.FieldType, crrCell.String())
+							report.ReportError("DataMissMatchTypeDefine", header.TypeInfo.FieldType, inputCell.String())
 						}
 					}
 				} else if inputCell.Value != "" {
 					err := checkSingleValue(header, inputCell.Value)
 					if err != nil {
-						report.ReportError("DataMissMatchTypeDefine", currHeader.TypeInfo.FieldType, crrCell.String())
+						report.ReportError("DataMissMatchTypeDefine", header.TypeInfo.FieldType, inputCell.String())
 					}
 				}
 
@@ -55,74 +49,29 @@ func checkDataType(globals *model.Globals) {
 }
 
 func checkSingleValue(header *model.HeaderField, value string) error {
-	switch model.LanguagePrimitive(header.TypeInfo.FieldType, "go") {
-	case "int16":
-		if value == "" {
-			return nil
-		}
-		_, err := strconv.ParseInt(value, 10, 16)
-		if err != nil {
-			return err
-		}
-	case "int32":
-		if value == "" {
-			return nil
-		}
-		_, err := strconv.ParseInt(value, 10, 32)
-		if err != nil {
-			return err
-		}
-	case "int64":
-		if value == "" {
-			return nil
-		}
-		_, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return err
-		}
-	case "uint16":
-		if value == "" {
-			return nil
-		}
-		_, err := strconv.ParseUint(value, 10, 16)
-		if err != nil {
-			return err
-		}
-	case "uint32":
-		if value == "" {
-			return nil
-		}
-		_, err := strconv.ParseUint(value, 10, 32)
-		if err != nil {
-			return err
-		}
-	case "uint64":
-		if value == "" {
-			return nil
-		}
-		_, err := strconv.ParseUint(value, 10, 64)
-		if err != nil {
-			return err
-		}
-	case "float32":
-		_, err := strconv.ParseFloat(value, 32)
-		if err != nil {
-			return err
-		}
-	case "float64":
-		if value == "" {
-			return nil
-		}
-		_, err := strconv.ParseFloat(value, 64)
-		if err != nil {
-			return err
-		}
+	kind := model.LanguagePrimitive(header.TypeInfo.FieldType, "go")
+	// Empty numeric cells use defaults, except empty float32 array elements,
+	// which the existing table format rejects.
+	if value == "" && kind != "float32" {
+		return nil
+	}
+	switch kind {
+	case "int16", "int32", "int64":
+		bits, _ := strconv.Atoi(kind[3:])
+		_, err := strconv.ParseInt(value, 10, bits)
+		return err
+	case "uint16", "uint32", "uint64":
+		bits, _ := strconv.Atoi(kind[4:])
+		_, err := strconv.ParseUint(value, 10, bits)
+		return err
+	case "float32", "float64":
+		bits, _ := strconv.Atoi(kind[5:])
+		_, err := strconv.ParseFloat(value, bits)
+		return err
 	case "bool":
 		_, err := model.ParseBool(value)
-		if err != nil {
-			return err
-		}
+		return err
+	default:
+		return nil
 	}
-
-	return nil
 }

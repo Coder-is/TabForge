@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -58,7 +58,7 @@ func loadExternalSchema(globals *model.Globals) (*externalSchema, error) {
 	if globals.ProtoDescriptorFile == "" || globals.ProtoMappingFile == "" {
 		return nil, fmt.Errorf("existing Protobuf export requires both -proto_desc and -proto_map")
 	}
-	data, err := ioutil.ReadFile(globals.ProtoDescriptorFile)
+	data, err := os.ReadFile(globals.ProtoDescriptorFile)
 	if err != nil {
 		return nil, fmt.Errorf("read Proto descriptor: %v", err)
 	}
@@ -70,7 +70,7 @@ func loadExternalSchema(globals *model.Globals) (*externalSchema, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve Proto descriptors (compile with --include_imports): %v", err)
 	}
-	data, err = ioutil.ReadFile(globals.ProtoMappingFile)
+	data, err = os.ReadFile(globals.ProtoMappingFile)
 	if err != nil {
 		return nil, fmt.Errorf("read Proto mapping: %v", err)
 	}

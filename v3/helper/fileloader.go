@@ -1,7 +1,7 @@
 package helper
 
 import (
-	"errors"
+	"fmt"
 	"github.com/Coder-is/TabForge/v3/report"
 	"path/filepath"
 	"runtime"
@@ -20,6 +20,11 @@ type FileLoader struct {
 	cacheDir string
 }
 
+type fileResult struct {
+	file TableFile
+	err  error
+}
+
 func (self *FileLoader) AddFile(filename string) {
 
 	self.inputFile = append(self.inputFile, filepath.Clean(filename))
@@ -30,7 +35,7 @@ func (self *FileLoader) Commit() {
 }
 
 // Keep at most one load per file and bound simultaneous XLSX parsing.
-func (self *FileLoader) commit(workers int, load func(string, string) interface{}) {
+func (self *FileLoader) commit(workers int, load func(string, string) (TableFile, error)) {
 	seen := make(map[string]bool)
 	var files []string
 	for _, filename := range self.inputFile {
@@ -53,7 +58,8 @@ func (self *FileLoader) commit(workers int, load func(string, string) interface{
 		go func() {
 			defer task.Done()
 			for filename := range jobs {
-				self.fileByName.Store(filename, load(filename, self.cacheDir))
+				file, err := load(filename, self.cacheDir)
+				self.fileByName.Store(filename, fileResult{file: file, err: err})
 			}
 		}()
 	}
@@ -66,72 +72,45 @@ func (self *FileLoader) commit(workers int, load func(string, string) interface{
 	self.inputFile = self.inputFile[0:0]
 }
 
-func loadFileByExt(filename string, cacheDir string) (result interface{}) {
+func loadFileByExt(filename string, cacheDir string) (file TableFile, err error) {
 	// Structured table errors must reach the caller even when loading in a worker.
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			if err, ok := recovered.(*report.TableError); ok {
-				result = err
+			if tableErr, ok := recovered.(*report.TableError); ok {
+				file, err = nil, tableErr
 			} else {
 				panic(recovered)
 			}
 		}
 	}()
 
-	var tabFile TableFile
 	switch filepath.Ext(filename) {
 	case ".xlsx", ".xls", ".xlsm":
-
-		tabFile = NewXlsxFile(cacheDir)
-
-		err := tabFile.Load(filename)
-
-		if err != nil {
-			return err
-		}
-
+		file = NewXlsxFile(cacheDir)
 	case ".csv":
-		tabFile = NewCSVFile()
-
-		err := tabFile.Load(filename)
-
-		if err != nil {
-			return err
-		}
-
+		file = NewCSVFile()
 	default:
 		report.ReportError("UnknownInputFileExtension", filename)
 	}
 
-	return tabFile
+	if err := file.Load(filename); err != nil {
+		return nil, err
+	}
+	return file, nil
 }
 
 func (self *FileLoader) GetFile(filename string) (TableFile, error) {
 	filename = filepath.Clean(filename)
 
 	if self.syncLoad {
-
-		result := loadFileByExt(filename, self.cacheDir)
-		if err, ok := result.(error); ok {
-			return nil, err
-		}
-
-		return result.(TableFile), nil
-
-	} else {
-		if result, ok := self.fileByName.Load(filename); ok {
-
-			if err, ok := result.(error); ok {
-				return nil, err
-			}
-
-			return result.(TableFile), nil
-
-		} else {
-			return nil, errors.New("not found")
-		}
+		return loadFileByExt(filename, self.cacheDir)
 	}
-
+	result, ok := self.fileByName.Load(filename)
+	if !ok {
+		return nil, fmt.Errorf("file not loaded: %s", filename)
+	}
+	loaded := result.(fileResult)
+	return loaded.file, loaded.err
 }
 
 func NewFileLoader(syncLoad bool, cacheDir string) *FileLoader {

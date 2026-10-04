@@ -2,32 +2,17 @@ package pbdata
 
 import (
 	"github.com/Coder-is/TabForge/v3/model"
-	"github.com/golang/protobuf/proto"
-	descriptorpb "github.com/golang/protobuf/protoc-gen-go/descriptor"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
 	"strconv"
 )
 
 func tableValue2PbValueList(globals *model.Globals, cell *model.Cell, valueType *model.TypeDefine, list protoreflect.List) {
 
-	pbType := model.LanguagePrimitive(valueType.FieldType, "pb")
-
-	if globals.Types.IsEnumKind(pbType) {
-
-		for _, str := range cell.ValueList {
-			enumValue := globals.Types.ResolveEnumValue(pbType, str)
-			v, _ := strconv.ParseInt(enumValue, 10, 32)
-			list.Append(protoreflect.ValueOfEnum(protoreflect.EnumNumber(v)))
-		}
-
-	} else {
-		for _, str := range cell.ValueList {
-
-			v := tableValue2PbValue(globals, str, valueType)
-			list.Append(v)
-		}
+	for _, value := range cell.ValueList {
+		list.Append(tableValue2PbValue(globals, value, valueType))
 	}
-
 }
 
 func tableValue2PbValue(globals *model.Globals, cellValue string, valueType *model.TypeDefine) protoreflect.Value {

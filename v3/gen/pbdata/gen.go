@@ -1,13 +1,13 @@
 package pbdata
 
 import (
-	"fmt"
 	"github.com/Coder-is/TabForge/v3/gen"
+	"github.com/Coder-is/TabForge/v3/helper"
 	"github.com/Coder-is/TabForge/v3/model"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
-	"io/ioutil"
+	"path/filepath"
 )
 
 func exportTable(globals *model.Globals, pbFile protoreflect.FileDescriptor, tab *model.DataTable, combineRoot *dynamicpb.Message) {
@@ -114,7 +114,7 @@ func Output(globals *model.Globals, param string) (err error) {
 			return err
 		}
 
-		err = ioutil.WriteFile(fmt.Sprintf("%s/%s.pbb", param, tab.HeaderType), data, 0666)
+		err = helper.WriteFile(filepath.Join(param, tab.HeaderType+".pbb"), data)
 
 		if err != nil {
 			return err

@@ -3,12 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/Coder-is/TabForge/build"
-	"github.com/pkg/profile"
 	"os"
-)
 
-var enableProfile = false
+	"github.com/Coder-is/TabForge/build"
+)
 
 func main() {
 
@@ -25,10 +23,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if enableProfile {
-		profiler := profile.Start(profile.CPUProfile, profile.ProfilePath("."))
-		defer profiler.Stop()
-	}
 	if *paramProtocol != "" || *paramProtocolOut != "" || *paramProtocolAgainst != "" {
 		if err := protocolEntry(); err != nil {
 			fmt.Fprintln(os.Stderr, err)

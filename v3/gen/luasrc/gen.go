@@ -1,79 +1,43 @@
 package luasrc
 
 import (
-	"fmt"
+	"path/filepath"
+
 	"github.com/Coder-is/TabForge/v3/gen"
+	"github.com/Coder-is/TabForge/v3/helper"
 	"github.com/Coder-is/TabForge/v3/model"
-	"github.com/davyxu/protoplus/codegen"
-	"io/ioutil"
 )
 
-func Generate(globals *model.Globals) (data []byte, err error) {
+func Generate(globals *model.Globals) ([]byte, error) {
 	if err := gen.ValidateNames(globals, "lua"); err != nil {
 		return nil, err
 	}
-
-	err = codegen.NewCodeGen("luasrc").
-		RegisterTemplateFunc(codegen.UsefulFunc).
-		RegisterTemplateFunc(gen.UsefulFunc).
-		RegisterTemplateFunc(UsefulFunc).
-		ParseTemplate(templateText_luasrc, globals).
-		WriteBytes(&data).Error()
-
-	return
+	return gen.Render("luasrc", templateText_luasrc, globals, UsefulFunc)
 }
 
-func Output(globals *model.Globals, param string) (err error) {
+func Output(globals *model.Globals, directory string) error {
 	if err := gen.ValidateNames(globals, "lua"); err != nil {
 		return err
 	}
-
-	type LocalContext struct {
-		Tab *model.DataTable
-		G   *model.Globals
-	}
-
-	var typeData []byte
-	err = codegen.NewCodeGen("luatype").
-		RegisterTemplateFunc(codegen.UsefulFunc).
-		RegisterTemplateFunc(gen.UsefulFunc).
-		RegisterTemplateFunc(UsefulFunc).
-		ParseTemplate(templateText_luatype, globals).
-		WriteBytes(&typeData).Error()
+	typeData, err := gen.Render("luatype", templateText_luatype, globals, UsefulFunc)
 	if err != nil {
 		return err
 	}
-
-	err = ioutil.WriteFile(fmt.Sprintf("%s/_%sType.lua", param, globals.CombineStructName), typeData, 0666)
-
-	if err != nil {
+	if err := helper.WriteFile(filepath.Join(directory, "_"+globals.CombineStructName+"Type.lua"), typeData); err != nil {
 		return err
 	}
-
 	for _, tab := range globals.Datas.AllTables() {
-
-		var ctx LocalContext
-		ctx.Tab = tab
-		ctx.G = globals
-
-		var data []byte
-		err = codegen.NewCodeGen("luadir").
-			RegisterTemplateFunc(codegen.UsefulFunc).
-			RegisterTemplateFunc(gen.UsefulFunc).
-			RegisterTemplateFunc(UsefulFunc).
-			ParseTemplate(templateText_luadir, ctx).
-			WriteBytes(&data).Error()
-
+		context := struct {
+			Tab *model.DataTable
+			G   *model.Globals
+		}{Tab: tab, G: globals}
+		data, err := gen.Render("luadir", templateText_luadir, context, UsefulFunc)
 		if err != nil {
 			return err
 		}
-
-		err = ioutil.WriteFile(fmt.Sprintf("%s/%s.lua", param, tab.HeaderType), data, 0666)
-
-		if err != nil {
+		if err := helper.WriteFile(filepath.Join(directory, tab.HeaderType+".lua"), data); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }

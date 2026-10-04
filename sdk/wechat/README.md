@@ -2,9 +2,11 @@
 
 `WechatTransport` 使用真实 `wx.request`，普通响应读取 ArrayBuffer，SSE 使用 `enableChunked`、`onHeadersReceived` 和 `onChunkReceived`。不依赖 fetch、TextDecoder 或 AbortController；增量 UTF-8 解码器和取消信号在 SDK 内实现。适用范围是暴露这些 API 的微信小程序/小游戏，其他厂商小程序需要对应网络适配。
 
+以下代码的路径以 `examples/protocol/` 为基准，宿主提供 `wx`；放到业务小程序时调整导入路径并打包：
+
 ```typescript
-import { ProtocolClient } from '../typescript/runtime.ts';
-import { WechatTransport, CancellationSource } from './transport.ts';
+import { ProtocolClient } from '../../sdk/typescript/runtime.ts';
+import { WechatTransport, CancellationSource } from '../../sdk/wechat/transport.ts';
 import { operations, protocolVersion, schemaHash, wireSchema } from './generated/types.ts';
 import type { ProtocolTypes } from './generated/types.ts';
 const client = new ProtocolClient<ProtocolTypes>(operations,
@@ -16,6 +18,8 @@ for await (const event of client.stream('chatStream', { prompt: '你好' }, { si
 }
 // 页面 onUnload / 游戏退出时 cancel.cancel()，或退出流迭代。
 ```
+
+服务地址、七类生成文件和错误处理见 [前后端指南](../../doc/protocol-integration.md)。可运行小程序与构建命令见 [验收工程](../../examples/platforms/README.md)；正式业务不要使用验收专用坏帧路由。
 
 项目可用 esbuild 打包，示例产物使用 CommonJS。SDK 无 npm 运行时依赖，但宿主必须支持 ES2020 语法、异步迭代、Promise、Symbol.asyncIterator、Set 和 Uint8Array。基础库目标至少 3.2.2：分块请求需 2.20.2，手动重定向参数需 3.2.2。旧平台未提供分块回调或只返回完整正文时，流调用明确报 `unsupported_transport`，不会把最终正文假装成实时流。
 

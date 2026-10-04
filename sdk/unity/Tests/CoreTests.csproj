@@ -7,6 +7,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Runtime/ProtocolCore.cs" Link="ProtocolCore.cs" />
+    <Compile Include="../Runtime/JsonSyntax.cs" Link="JsonSyntax.cs" />
+    <Compile Include="../Runtime/SseParser.cs" Link="SseParser.cs" />
+    <Compile Include="../Runtime/WireValidator.cs" Link="WireValidator.cs" />
     <Compile Include="CoreTests.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
   </ItemGroup>
