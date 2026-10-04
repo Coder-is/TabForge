@@ -2,6 +2,8 @@
 
 四种语言共用 `examples/complete/Generated`，运行前用当前工具完整导出。具体包安装方式、可读取格式和快照 API 见 [第三版工作流](../../doc/backend-workflow.md)。
 
+首次接入按指南中的“准备一次完整导出 → 选择并安装后端运行时”操作；部署更新时参考“加载、校验与重新加载”和“常见错误排查”。Go 的完整主程序、Node 的 ESM / TS 配置、Python wheel、Java Maven 接入都已给出。
+
 ```bash
 go run . -project=examples/complete
 go run ./examples/complete/Clients/go

@@ -4,7 +4,7 @@
 | --- | --- |
 | 策划双击导出、纯 Proto 结构生成、编辑器/后端包接入 | [第一版项目工作流](project-workflow.md)、[完整示例](../examples/complete/README.md) |
 | Unity/Cocos/Godot 插件，独立协议包导入和运行时读取 | [第二版编辑器工作流](editor-workflow.md) |
-| Go、Node、Java、Python 第三方包与数据快照 | [第三版后端工作流](backend-workflow.md)、[四端示例](../examples/backend/README.md) |
+| Go、Node、Java、Python 安装、读取、重新加载与排错 | [第三部分：后端第三方包接入](backend-workflow.md)、[四端示例](../examples/backend/README.md) |
 | 了解项目、编译工具、导出 Excel/CSV 配置 | [项目首页与 V3 教程](../README.md) |
 | 从 Proto 建立前后端协议并接入客户端 | [前后端接入指南](protocol-integration.md) |
 | 运行普通 JSON 与 SSE 演示 | [协议示例](../examples/protocol/README.md) |
