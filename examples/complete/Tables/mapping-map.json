@@ -1,0 +1,17 @@
+{
+  "root_message": "tabforge.demo.config.Tables",
+  "tables": {
+    "Item": {
+      "field": "by_id", "key_field": "ID",
+      "fields": {
+        "ID": "id", "Name": "name", "RewardID": "reward.item_id", "RewardCount": "reward.count",
+        "Costs": "costs", "Levels": "levels", "Stats": "stats", "Rarity": "rarity", "IconHash": "icon_hash",
+        "UnlockLevel": "unlock_level", "TextEffect": "text_effect", "PowerEffect": "power_effect",
+        "Enabled": "enabled", "SignedTotal": "signed_total", "Weight": "weight", "Price": "price", "Labels": "labels",
+        "OwnerID": "owner_id", "Stock": "stock", "CreatedAt": "created_at", "TTL": "ttl", "Extra": "extra",
+        "Mask": "mask", "Metadata": "metadata", "Priority": "priority", "Switches": "switches", "Bonuses": "bonuses"
+      }
+    },
+    "Settings": { "field": "settings", "fields": { "MaxLevel": "max_level" } }
+  }
+}

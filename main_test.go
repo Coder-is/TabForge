@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,83 @@ func TestCLIV3Only(t *testing.T) {
 		output, err := exec.Command(binary, "-h").CombinedOutput()
 		if err != nil || !bytes.Contains(output, []byte(`default "v3"`)) {
 			t.Fatalf("V3 default missing from help: %v\n%s", err, output)
+		}
+	})
+	t.Run("portable-project-init-and-discovery", func(t *testing.T) {
+		projectRoot := filepath.Join(dir, "new project 中文 with spaces")
+		cmd := exec.Command(binary, "-init="+projectRoot)
+		cmd.Env = append(os.Environ(), "PATH=")
+		if output, err := cmd.CombinedOutput(); err != nil || !bytes.Contains(output, []byte("导出成功")) {
+			t.Fatalf("portable initialization: %v\n%s", err, output)
+		}
+		for _, name := range []string{"tabforge.json", "Tables/Items.xlsx", "Generated/schema/go/config.pb.go", "Generated/data/tables.pbb", "Generated/data/tables-map.json", "Tools/TabForge/Export.command", "Tools/TabForge/Export.bat"} {
+			if _, err := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(name))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		toolName := "tabforge"
+		if runtime.GOOS == "windows" {
+			toolName += ".exe"
+		}
+		portable := filepath.Join(projectRoot, "Tools", "TabForge", toolName)
+		for _, cwd := range []string{filepath.Join(projectRoot, "Tables"), t.TempDir()} {
+			cmd := exec.Command(portable)
+			cmd.Dir = cwd
+			cmd.Env = append(os.Environ(), "PATH=")
+			if output, err := cmd.CombinedOutput(); err != nil || !bytes.Contains(output, []byte("导出成功")) {
+				t.Fatalf("project discovery from %s: %v\n%s", cwd, err, output)
+			}
+		}
+		original, err := os.ReadFile(filepath.Join(projectRoot, "Tables", "Items.xlsx"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command(binary, "-init="+projectRoot).CombinedOutput(); err == nil || !bytes.Contains(output, []byte("overwrite")) {
+			t.Fatalf("existing files overwritten: %v\n%s", err, output)
+		}
+		current, err := os.ReadFile(filepath.Join(projectRoot, "Tables", "Items.xlsx"))
+		if err != nil || !bytes.Equal(original, current) {
+			t.Fatal("initialization changed source files")
+		}
+		if output, err := exec.Command(binary, "-project="+projectRoot, "-index=Index.csv").CombinedOutput(); err == nil {
+			t.Fatalf("project accepted conflicting flags: %s", output)
+		}
+		// Copying into an independent Go module must not depend on example
+		// messages compiled into this repository. Use the consumer's own imports.
+		if err := filepath.WalkDir(filepath.Join(projectRoot, "Protocols"), func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || filepath.Ext(path) != ".proto" {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(path, bytes.ReplaceAll(data, []byte("github.com/Coder-is/TabForge/examples/complete/Generated"), []byte("example.com/portable/Generated")), 0644)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		clientPath := filepath.Join(projectRoot, "Clients", "go", "main.go")
+		clientSource, err := os.ReadFile(clientPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(clientPath, bytes.ReplaceAll(clientSource, []byte("github.com/Coder-is/TabForge/examples/complete/Generated"), []byte("example.com/portable/Generated")), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command(portable, "-project="+projectRoot).CombinedOutput(); err != nil {
+			t.Fatalf("consumer regeneration: %v\n%s", err, output)
+		}
+		module := "module example.com/portable\n\ngo 1.26.6\n\nrequire github.com/Coder-is/TabForge v0.0.0\n\nreplace github.com/Coder-is/TabForge => " + strconv.Quote(filepath.ToSlash(root)) + "\n"
+		if err := os.WriteFile(filepath.Join(projectRoot, "go.mod"), []byte(module), 0644); err != nil {
+			t.Fatal(err)
+		}
+		consumer := exec.Command("go", "run", "-mod=mod", "./Clients/go", projectRoot)
+		consumer.Dir = projectRoot
+		if output, err := consumer.CombinedOutput(); err != nil || !bytes.Contains(output, []byte("18446744073709551615")) {
+			t.Fatalf("independent Go consumer: %v\n%s", err, output)
 		}
 	})
 	t.Run("protocol-bundle-and-reload", func(t *testing.T) {

@@ -1,0 +1,10 @@
+{
+  "format": "tabforge.schema.v1",
+  "schemaHash": "a5c415d8c190f0b49e2779c69e83c7fc13f377308f362525b0258a8448b3a25a",
+  "entries": [
+    "common/common.proto",
+    "config.proto",
+    "rpc/chat.proto",
+    "structures.proto"
+  ]
+}

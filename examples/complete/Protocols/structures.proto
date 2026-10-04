@@ -1,0 +1,21 @@
+syntax = "proto3";
+package tabforge.demo.structures;
+option go_package = "github.com/Coder-is/TabForge/examples/complete/Generated/schema/go;configpb";
+
+// Not referenced by any RPC: pure data generation must still include this type.
+message Tree {
+  string name = 1;
+  repeated Tree children = 2;
+  enum State { IDLE = 0; ACTIVE = 1; }
+  State state = 3;
+  message Position { sint32 x = 1; sint32 y = 2; }
+  Position position = 4;
+}
+
+message ScalarVariants {
+  sint64 signed_zigzag = 1;
+  fixed32 unsigned_fixed = 2;
+  sfixed32 signed_fixed = 3;
+  fixed64 unsigned_fixed64 = 4;
+  sfixed64 signed_fixed64 = 5;
+}

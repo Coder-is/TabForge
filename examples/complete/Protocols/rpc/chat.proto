@@ -1,0 +1,16 @@
+syntax = "proto3";
+package tabforge.demo.chat;
+option go_package = "github.com/Coder-is/TabForge/examples/complete/Generated/schema/go/rpc;chatpb";
+
+message ChatRequest { string prompt = 1; uint64 conversation_id = 2; }
+message ChatResponse { string text = 1; }
+message TextDelta { string text = 1; }
+message Completed { ChatResponse response = 1; }
+message Failed { string message = 1; }
+message ChatEvent {
+  oneof payload { TextDelta delta = 1; Completed completed = 2; Failed failed = 3; }
+}
+service ChatService {
+  rpc Complete(ChatRequest) returns (ChatResponse);
+  rpc Stream(ChatRequest) returns (stream ChatEvent);
+}

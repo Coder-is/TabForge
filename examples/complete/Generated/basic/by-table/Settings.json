@@ -1,0 +1,11 @@
+{
+	"@Tool": "github.com/Coder-is/TabForge",
+	"@Version": "",
+	"Settings": [
+		{
+			"ServerIP": "127.0.0.1",
+			"ServerPort": 18082,
+			"Welcome": "欢迎使用TabForge"
+		}
+	]
+}

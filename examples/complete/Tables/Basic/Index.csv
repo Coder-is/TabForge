@@ -1,0 +1,5 @@
+模式,表类型,表文件名
+类型表,,Type.csv
+数据表,Actor,Actors.csv
+数据表,Actor,ActorsExtra.csv
+键值表,Settings,Settings.csv

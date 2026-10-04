@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "output": "Generated",
+  "schema": { "dir": "Protocols", "go": true },
+  "protocol": "Protocols/contract.json",
+  "tables": [
+    {
+      "index": "Tables/Index.csv",
+      "mapping": "Tables/mapping.json",
+      "outputs": {
+        "protobuf": "data/tables.pbb",
+        "protojson": "data/tables.json",
+        "protobuf_dir": "data/by-table"
+      }
+    },
+    {
+      "index": "Tables/Index.csv",
+      "mapping": "Tables/mapping-map.json",
+      "outputs": {
+        "protobuf": "data/tables-map.pbb",
+        "protojson": "data/tables-map.json"
+      }
+    },
+    {
+      "index": "Tables/Basic/Index.csv",
+      "package": "basic",
+      "tags": "nogenfield_json:server",
+      "outputs": {
+        "json": "basic/tables.json",
+        "json_dir": "basic/by-table",
+        "go": "basic/go/table_gen.go",
+        "csharp": "basic/csharp/Table.cs",
+        "java": "basic/java/Table.java",
+        "lua": "basic/lua/tables.lua",
+        "lua_dir": "basic/lua/by-table",
+        "binary": "basic/tables.bin",
+        "binary_dir": "basic/binary",
+        "proto": "basic/table.proto",
+        "protobuf": "basic/tables.pbb",
+        "jsontype": "basic/types.json"
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+syntax = "proto3";
+package tabforge.demo.config;
+option go_package = "github.com/Coder-is/TabForge/examples/complete/Generated/schema/go;configpb";
+
+import "common/common.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/wrappers.proto";
+
+message Item {
+  int32 id = 7;
+  string name = 12;
+  tabforge.demo.common.Reward reward = 20;
+  repeated tabforge.demo.common.Reward costs = 24;
+  repeated int32 levels = 30;
+  map<string, int32> stats = 35;
+  tabforge.demo.common.Rarity rarity = 40;
+  bytes icon_hash = 45;
+  // Empty cell is absent; an explicit zero retains presence.
+  optional int32 unlock_level = 50;
+  oneof effect {
+    string text_effect = 55;
+    int32 power_effect = 60;
+  }
+  bool enabled = 61;
+  int64 signed_total = 62;
+  float weight = 63;
+  double price = 64;
+  repeated string labels = 65;
+  uint64 owner_id = 66;
+  uint32 stock = 67;
+  google.protobuf.Timestamp created_at = 68;
+  google.protobuf.Duration ttl = 69;
+  google.protobuf.Struct extra = 70;
+  google.protobuf.FieldMask mask = 71;
+  google.protobuf.Any metadata = 72;
+  google.protobuf.Int32Value priority = 73;
+  repeated bool switches = 74;
+  map<string, tabforge.demo.common.Reward> bonuses = 75;
+}
+
+message Settings { int32 max_level = 8; }
+message Tables {
+  repeated Item items = 10;
+  map<int32, Item> by_id = 20;
+  Settings settings = 30;
+}

@@ -1,0 +1,4 @@
+字段名,字段类型,标识名,值,数组切割,标记
+ServerIP,string,服务器IP,127.0.0.1,,
+ServerPort,uint16,服务器端口,18082,,
+Welcome,string,欢迎语,欢迎使用TabForge,,

@@ -1,0 +1,24 @@
+{
+  "name": "tabforge",
+  "displayName": "TabForge",
+  "description": "Export Excel/CSV and Proto projects with the portable TabForge compiler.",
+  "version": "0.1.0",
+  "publisher": "tabforge",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": ["workspaceContains:tabforge.json"],
+  "capabilities": { "untrustedWorkspaces": { "supported": false } },
+  "contributes": {
+    "commands": [{ "command": "tabforge.export", "title": "TabForge: 导出项目" }],
+    "configuration": {
+      "title": "TabForge",
+      "properties": {
+        "tabforge.exportOnSave": { "type": "boolean", "default": false, "description": "Automatically export when project source files change." },
+        "tabforge.toolPath": { "type": "string", "default": "", "description": "Optional absolute path to a TabForge executable. Portable project tools and bundled tools are detected automatically." }
+      }
+    }
+  },
+  "scripts": { "test": "node --test extension.test.cjs" }
+}

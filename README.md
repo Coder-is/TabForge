@@ -4,7 +4,19 @@
 
 基于 [davyxu/tabtoy](https://github.com/davyxu/tabtoy) 的 V3 版本开发，保留原作者的 MIT 许可和版权说明，使用独立的 Git 提交历史。导表当前只支持 V3，新增已有 Proto 映射、ProtoJSON 导出，以及缓存、并发加载和错误处理改进。
 
-项目提供两个独立入口：
+## 第一版项目工作流
+
+策划按模板填写文件，放入 `Tables/` 后双击项目导出工具；开发者在 `Protocols/` 维护 Proto，在 VS Code 中导出，或作为 Go 包引入生成与结构加载能力。项目规则统一存放在 `tabforge.json`，路径不依赖命令执行目录。内置 Proto 编译与 Go 消息生成，不需要安装 protoc。
+
+```bash
+go run . -project=examples/complete  # 导出完整结构示例
+go run . -init=/path/to/NewProject  # 创建模板与当前平台便携工具
+go run ./cmd/package               # 构建 Windows/macOS ZIP 与 VSIX
+```
+
+便携包内置可执行文件，策划无需安装开发环境。完整示例覆盖复杂 Proto 结构、普通导表、数据读取与 RPC。纯消息定义也能生成，导出失败会保留上次成功产物。见 [项目工作流](doc/project-workflow.md)、[完整示例](examples/complete/README.md)、[VS Code 插件](editors/vscode/README.md)。第一版内置 Go/TS 的 Proto 类型产物；其他引擎编辑器面板后续接入。
+
+原有工具提供两个独立入口：
 
 | 场景 | 维护的输入 | 输出与接入 |
 | --- | --- | --- |
@@ -41,6 +53,8 @@ go run ./examples/protocol
 
 | 目录 | 用途 |
 | --- | --- |
+| `project/`、`editors/vscode/` | 项目导出内核和 VS Code 插件 |
+| `examples/complete/`、`cmd/package/` | 完整模板和便携 ZIP/VSIX 打包 |
 | `protocol/` | 清单/描述文件校验、产物生成、兼容性检查和 Go HTTP/SSE 服务 |
 | `sdk/` | TypeScript、微信、Cocos、Unity、Unreal、Godot 客户端 |
 | `examples/protocol/` | 示例 Proto、清单、七类生成文件和固定响应服务 |
@@ -164,6 +178,8 @@ bash v3/example/existingproto/Make.sh
 
 | 参数 | 用途与默认值 |
 | --- | --- |
+| `-project` | 按 tabforge.json 导出；传入配置文件或项目目录，不与旧导出参数混用 |
+| `-init` | 创建完整模板、复制当前平台工具并首次导出，不覆盖已有文件 |
 | `-protocol` | 协议清单路径；不带输出参数时只校验 Proto RPC 与清单 |
 | `-protocol_out` | 协议七类产物的输出目录，覆盖同名文件，要求 `-protocol` |
 | `-protocol_against` | 已发布的旧清单路径，检查旧客户端接入新服务端的兼容性，要求 `-protocol` |

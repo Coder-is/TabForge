@@ -1,11 +1,21 @@
 {
   "name": "@tabforge/protocol-runtime",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
   "type": "module",
+  "license": "MIT",
+  "files": ["dist", "README.md", "LICENSE"],
+  "exports": {
+    ".": { "types": "./dist/runtime.d.ts", "import": "./dist/runtime.js" },
+    "./data": { "types": "./dist/data.d.ts", "import": "./dist/data.js" },
+    "./schema": { "types": "./dist/schema.d.ts", "import": "./dist/schema.js" },
+    "./callback": { "types": "./dist/callback_transport.d.ts", "import": "./dist/callback_transport.js" }
+  },
   "scripts": {
-    "test": "node --test runtime.test.mjs schema.test.mjs platform.test.mjs",
+    "pretest": "npm run build",
+    "test": "node --test runtime.test.mjs schema.test.mjs platform.test.mjs data.test.mjs package.test.mjs",
     "check": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.release.json && node build.mjs",
+    "prepack": "npm run build",
     "build:platforms": "node ../../examples/platforms/build.mjs"
   },
   "devDependencies": {

@@ -17,6 +17,8 @@ bash examples/protocol/Make.sh
 
 自建协议时使用 `protoc --include_imports --descriptor_set_out=...` 生成描述文件，并让清单引用它。描述文件路径相对于清单所在目录解析。单独 `-protocol` 只校验，不输出文件。
 
+也可使用 [项目工作流](project-workflow.md)：把 Proto 与清单放入 `Protocols/`，在 `tabforge.json` 中指定 `schema` 与可选 `protocol`。项目入口内置 Proto 编译、Go 消息代码生成，清单不用 descriptor 字段；不需要 RPC 时只指定 `schema` 即可。
+
 | 生成文件 | 使用方与用途 |
 | --- | --- |
 | `contract.json` | Go 服务加载的可分发清单；描述文件路径改为同目录 `schema.pb` |
@@ -27,7 +29,7 @@ bash examples/protocol/Make.sh
 | `runtime.json` | Unity/Unreal 使用的版本、hash、接口表与字段规则 |
 | `PROTOCOL.md` | 生成的接口、字段、鉴权与事件接入说明 |
 
-把整套生成文件作为一个版本产物发布。客户端和后端默认严格匹配版本及 hash。生成器不代替 `protoc` 的语言插件；需要 Protobuf 二进制消息类时另行生成。Unity/Unreal 当前使用 JSON 对象及运行时验证，没有自动生成 C#/C++ 类型化服务桩。
+把整套生成文件作为一个版本产物发布。客户端和后端默认严格匹配版本及 hash。此处的旧协议入口不生成二进制消息类；项目入口可同时生成 Go 消息代码，其他语言仍需相应插件。Unity/Unreal 当前使用 JSON 对象及运行时验证，没有自动生成 C#/C++ 类型化服务桩。
 
 ## 2. 接入 Go 后端
 
@@ -76,7 +78,7 @@ SDK 校验接口、请求/响应字段、版本、hash、request ID 和连续序
 
 TS Fetch 与微信/Cocos 回调传输会在发起网络请求前检查调用类型、token、非空 requestId、接口 timeoutMS 和正文。requestId 只允许 1–128 个 ASCII 字母、数字、`_`、`.`、`-`；token 不得含回车或换行；timeoutMS 来自接口元数据，须为正的安全整数。正文须符合 wireSchema 且可序列化为 JSON。具体错误见[TS SDK](../sdk/typescript/README.md)。
 
-本仓库 TS 包标记为 `private`，当前以源码或业务打包产物分发。浏览器不能直接执行 `.ts`；使用项目构建器，或运行已打包的验收网页。仓库示例可用 Node 24+ 的 TypeScript 支持运行，命令见 [协议示例](../examples/protocol/README.md)。
+TS SDK 可复制源码，也可用 `npm pack` 生成本地 npm 包，包含 JS 与声明文件，尚未发布到 registry。浏览器源码示例使用项目构建器或已打包的验收网页。仓库示例可用 Node 24+ 运行，见 [协议示例](../examples/protocol/README.md)。
 
 ## 4. 选择平台适配器
 

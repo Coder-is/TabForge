@@ -13,6 +13,8 @@
     "allowImportingTsExtensions": true
   },
   "include": [
+    "data.ts",
+    "../../examples/complete/Clients/web/client.ts",
     "runtime.ts",
     "typecheck.ts",
     "../../examples/protocol/client.ts",

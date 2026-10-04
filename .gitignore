@@ -58,3 +58,10 @@ examples/platforms/unreal/Plugins/
 examples/platforms/unreal/Binaries/
 examples/platforms/unreal/Intermediate/
 examples/platforms/unreal/Saved/
+sdk/typescript/dist/
+editors/vscode/bin/
+*.vsix
+.tabforge-export.lock
+.tabforge-stage-*/
+*.tabforge-backup/
+outputs/

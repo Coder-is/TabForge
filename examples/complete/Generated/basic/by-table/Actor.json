@@ -1,0 +1,56 @@
+{
+	"@Tool": "github.com/Coder-is/TabForge",
+	"@Version": "",
+	"Actor": [
+		{
+			"Enabled": true,
+			"ID": 1,
+			"Labels": [
+				"近战",
+				"防御"
+			],
+			"Name": "坦克",
+			"Rewards": [
+				100,
+				200
+			],
+			"Role": 1,
+			"ServerNote": "客户端JSON隐藏此字段",
+			"Skills": [
+				2,
+				3
+			]
+		},
+		{
+			"Enabled": true,
+			"ID": 2,
+			"Labels": [
+				"远程"
+			],
+			"Name": "法师",
+			"Rewards": [
+				300,
+				0
+			],
+			"Role": 2,
+			"ServerNote": "内部字段",
+			"Skills": [
+				4,
+				5
+			]
+		},
+		{
+			"Enabled": false,
+			"ID": 3,
+			"Labels": [],
+			"Name": "合并后的角色",
+			"Rewards": [
+				0,
+				0
+			],
+			"Role": 0,
+			"ServerNote": "",
+			"Skills": []
+		}
+	]
+}

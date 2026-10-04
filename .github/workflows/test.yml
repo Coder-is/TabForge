@@ -27,6 +27,7 @@ jobs:
       - run: npm ci --prefix sdk/typescript --ignore-scripts
       - run: npm --prefix sdk/typescript run check
       - run: npm --prefix sdk/typescript test
+      - run: node --test editors/vscode/extension.test.cjs
       - run: npm --prefix sdk/typescript run build:platforms
       - run: go test -race ./...
 

@@ -1,0 +1,15 @@
+syntax = "proto3";
+package tabforge.demo.common;
+option go_package = "github.com/Coder-is/TabForge/examples/complete/Generated/schema/go/common;commonpb";
+
+enum Rarity {
+  UNKNOWN = 0;
+  NORMAL = 1;
+  EPIC = 2;
+}
+
+// Shared by configuration files and other application messages.
+message Reward {
+  int32 item_id = 3;
+  uint64 count = 9;
+}

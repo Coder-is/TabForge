@@ -1,0 +1,109 @@
+{
+  "byId": {
+    "1001": {
+      "id": 1001,
+      "name": "新手剑😀",
+      "reward": {
+        "itemId": 2001,
+        "count": "18446744073709551615"
+      },
+      "costs": [
+        {
+          "itemId": 2002,
+          "count": "3"
+        }
+      ],
+      "levels": [
+        1,
+        5,
+        10
+      ],
+      "stats": {
+        "attack": 12,
+        "defense": 5
+      },
+      "rarity": "NORMAL",
+      "iconHash": "YWJj",
+      "unlockLevel": 0,
+      "textEffect": "火焰",
+      "enabled": true,
+      "signedTotal": "-9223372036854775808",
+      "weight": 1.5,
+      "price": 12.25,
+      "labels": [
+        "新手",
+        "武器"
+      ],
+      "ownerId": "18446744073709551615",
+      "stock": 4294967295,
+      "createdAt": "2026-10-04T00:00:00Z",
+      "ttl": "1.500s",
+      "extra": {
+        "level": 1,
+        "visible": true
+      },
+      "mask": "id,name",
+      "metadata": {
+        "@type": "type.googleapis.com/tabforge.demo.common.Reward",
+        "itemId": 2003,
+        "count": "9"
+      },
+      "priority": 0,
+      "switches": [
+        true,
+        false
+      ],
+      "bonuses": {
+        "login": {
+          "itemId": 2004,
+          "count": "2"
+        }
+      }
+    },
+    "1002": {
+      "id": 1002,
+      "name": "史诗剑",
+      "reward": {
+        "itemId": 2002,
+        "count": "5"
+      },
+      "costs": [
+        {
+          "itemId": 2003,
+          "count": "8"
+        }
+      ],
+      "levels": [
+        10,
+        20
+      ],
+      "stats": {
+        "attack": 35
+      },
+      "rarity": "EPIC",
+      "iconHash": "YWJj",
+      "powerEffect": 99,
+      "weight": 2.5,
+      "price": 99.5,
+      "labels": [
+        "稀有",
+        "武器"
+      ],
+      "ownerId": "42",
+      "stock": 10
+    },
+    "1003": {
+      "id": 1003,
+      "name": "合并表中的药水",
+      "reward": {
+        "itemId": 2001,
+        "count": "2"
+      },
+      "rarity": "NORMAL",
+      "enabled": true
+    }
+  },
+  "settings": {
+    "maxLevel": 100
+  }
+}

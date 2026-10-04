@@ -98,7 +98,14 @@ func (c *Contract) reachableTypes() ([]protoreflect.MessageDescriptor, []protore
 }
 
 func (c *Contract) TypeScript() ([]byte, error) {
+	return c.typeScript(true)
+}
+
+func (c *Contract) typeScript(withOperations bool) ([]byte, error) {
 	messages, enums := c.reachableTypes()
+	if !withOperations {
+		messages, enums = c.allTypes()
+	}
 	// Qualification avoids most naming conflicts; explicitly reject remaining
 	// collisions rather than generating duplicate TypeScript declarations.
 	names := map[string]protoreflect.FullName{}
@@ -168,18 +175,26 @@ func (c *Contract) TypeScript() ([]byte, error) {
 		}
 		b.WriteString(";\n")
 	}
-	b.WriteString("\nexport interface ProtocolTypes {\n")
-	for _, e := range c.Endpoints {
-		fmt.Fprintf(&b, "  %s: { request: %s; response: %s };\n", quote(e.ID), tsName(e.Input.FullName()), tsName(e.Output.FullName()))
+	if !withOperations {
+		b.WriteString("\nexport interface MessageTypes {\n")
+		for _, m := range messages {
+			fmt.Fprintf(&b, "  %s: %s;\n", quote(string(m.FullName())), tsName(m.FullName()))
+		}
+		b.WriteString("}\n")
+	} else {
+		b.WriteString("\nexport interface ProtocolTypes {\n")
+		for _, e := range c.Endpoints {
+			fmt.Fprintf(&b, "  %s: { request: %s; response: %s };\n", quote(e.ID), tsName(e.Input.FullName()), tsName(e.Output.FullName()))
+		}
+		b.WriteString("}\n\nexport const operations = ")
+		data, err := json.MarshalIndent(c.operations(), "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		b.WriteString(strings.ReplaceAll(string(data), `"__proto__":`, `["__proto__"]:`))
+		b.WriteString(" as const;\n")
+		fmt.Fprintf(&b, "export const protocolVersion = %s;\n", quote(c.Manifest.Version))
 	}
-	b.WriteString("}\n\nexport const operations = ")
-	data, err := json.MarshalIndent(c.operations(), "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	b.WriteString(strings.ReplaceAll(string(data), `"__proto__":`, `["__proto__"]:`))
-	b.WriteString(" as const;\n")
-	fmt.Fprintf(&b, "export const protocolVersion = %s;\n", quote(c.Manifest.Version))
 	fmt.Fprintf(&b, "export const schemaHash = %s;\n", quote(c.Fingerprint()))
 	schema, err := json.MarshalIndent(c.WireSchema(), "", "  ")
 	if err != nil {

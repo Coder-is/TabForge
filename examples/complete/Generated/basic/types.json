@@ -1,0 +1,104 @@
+{
+	"@Tool": "github.com/Coder-is/TabForge",
+	"@Version": "",
+	"Objects": [
+		{
+			"Name": "Role",
+			"Type": "Enum",
+			"Fields": [
+				{
+					"Name": "None",
+					"Type": "int32",
+					"Comment": "",
+					"Value": "0"
+				},
+				{
+					"Name": "Warrior",
+					"Type": "int32",
+					"Comment": "战士",
+					"Value": "1"
+				},
+				{
+					"Name": "Mage",
+					"Type": "int32",
+					"Comment": "法师",
+					"Value": "2"
+				}
+			]
+		},
+		{
+			"Name": "Actor",
+			"Type": "Struct",
+			"Fields": [
+				{
+					"Name": "ID",
+					"Type": "int32",
+					"Comment": "ID",
+					"MakeIndex": true
+				},
+				{
+					"Name": "Name",
+					"Type": "string",
+					"Comment": "名称"
+				},
+				{
+					"Name": "Role",
+					"Type": "Role",
+					"Comment": "职业"
+				},
+				{
+					"Name": "Enabled",
+					"Type": "bool",
+					"Comment": "启用"
+				},
+				{
+					"Name": "Skills",
+					"Type": "int32",
+					"Comment": "技能",
+					"ArraySplitter": "|"
+				},
+				{
+					"Name": "Labels",
+					"Type": "string",
+					"Comment": "标签",
+					"ArraySplitter": "|"
+				},
+				{
+					"Name": "Rewards",
+					"Type": "int32",
+					"Comment": "多列奖励",
+					"ArraySplitter": "|"
+				},
+				{
+					"Name": "ServerNote",
+					"Type": "string",
+					"Comment": "服务端备注",
+					"Tags": [
+						"server"
+					]
+				}
+			]
+		},
+		{
+			"Name": "Settings",
+			"Type": "Struct",
+			"Fields": [
+				{
+					"Name": "ServerIP",
+					"Type": "string",
+					"Comment": "服务器IP"
+				},
+				{
+					"Name": "ServerPort",
+					"Type": "uint16",
+					"Comment": "服务器端口"
+				},
+				{
+					"Name": "Welcome",
+					"Type": "string",
+					"Comment": "欢迎语"
+				}
+			]
+		}
+	]
+}
