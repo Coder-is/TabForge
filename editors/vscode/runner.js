@@ -15,17 +15,28 @@ function findProject(start) {
 
 function toolPath(root, extensionPath, override = '', platform = process.platform, arch = process.arch) {
     const filename = platform === 'win32' ? 'tabforge.exe' : 'tabforge';
-    const choices = [override, path.join(root, 'Tools', 'TabForge', filename), path.join(extensionPath, 'bin', `${platform}-${arch}`, filename)];
+    const bundled = [...new Set([arch, 'arm64', 'x64'])].map(cpu => path.join(extensionPath, 'bin', `${platform}-${cpu}`, filename));
+    const choices = [override, ...bundled, path.join(root, 'Tools', 'TabForge', filename)];
     return choices.find(candidate => candidate && path.isAbsolute(candidate) && fs.existsSync(candidate));
 }
 
-function runExport(tool, config, onOutput) {
-    const child = spawn(tool, ['-project=' + config], { cwd: path.dirname(config), shell: false, windowsHide: true });
-    child.stdout.on('data', data => onOutput(data.toString()));
-    child.stderr.on('data', data => onOutput(data.toString()));
+function runExport(tool, config, onOutput, options = {}) {
+    const args = ['-project=' + config];
+    if (options.report) args.push('-report');
+    if (options.check) args.push('-check');
+    const child = spawn(tool, args, { cwd: path.dirname(config), shell: false, windowsHide: true });
+    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+    child.stdout.on('data', onOutput);
+    child.stderr.on('data', onOutput);
     const completion = new Promise((resolve, reject) => {
         child.once('error', reject);
-        child.once('close', (code, signal) => code === 0 ? resolve() : reject(new Error(`Export exited with ${code ?? signal}`)));
+        child.once('close', (code, signal) => {
+            try {
+                const lock = path.join(path.dirname(config), '.tabforge-export.lock');
+                if (child.pid && fs.readFileSync(lock, 'utf8').trim() === String(child.pid)) fs.unlinkSync(lock);
+            } catch { /* The child usually removes its own lock. */ }
+            code === 0 ? resolve() : reject(new Error(`Export exited with ${code ?? signal}`));
+        });
     });
     return { child, completion };
 }

@@ -21,7 +21,7 @@ func checkFieldNames(typeTab *model.TypeTable) {
 
 		if !token.IsIdentifier(td.Define.FieldName) {
 			cell := td.Tab.GetValueByName(td.Row, "字段名")
-			report.ReportError("InvalidFieldName", cell.String())
+			report.ReportError("InvalidFieldName", cell)
 		}
 	}
 }
@@ -30,7 +30,7 @@ func checkEmptyEnumValues(typeTab *model.TypeTable) {
 	for _, td := range typeTab.Raw() {
 		if td.Define.Kind == model.TypeUsage_Enum && td.Define.Value == "" {
 			cell := td.Tab.GetValueByName(td.Row, "值")
-			report.ReportError("EnumValueEmpty", cell.String())
+			report.ReportError("EnumValueEmpty", cell)
 		}
 	}
 }
@@ -56,7 +56,7 @@ func checkDuplicateEnumValues(typeTab *model.TypeTable) {
 
 			cell := td.Tab.GetValueByName(td.Row, "值")
 
-			report.ReportError("DuplicateEnumValue", cell.String())
+			report.ReportError("DuplicateEnumValue", cell)
 		}
 
 		seen[key] = true

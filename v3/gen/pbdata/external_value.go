@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Coder-is/TabForge/v3/model"
+	"github.com/Coder-is/TabForge/v3/report"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
@@ -24,7 +25,7 @@ func (schema *externalSchema) exportRow(globals *model.Globals, table *externalT
 		fd := column.path[len(column.path)-1]
 		value, present, err := externalCellValue(globals, cell, column.source, fd)
 		if err != nil {
-			return nil, fmt.Errorf("table %s column %s -> %s, %s: %v", table.table.HeaderType, column.source.FieldName, fd.FullName(), cell.String(), err)
+			return nil, &report.SourceError{Location: cell.SourceLocation(), Cause: fmt.Errorf("table %s column %s -> %s, %s: %v", table.table.HeaderType, column.source.FieldName, fd.FullName(), cell.String(), err)}
 		}
 		if !present {
 			continue
@@ -48,7 +49,11 @@ func (schema *externalSchema) exportRow(globals *model.Globals, table *externalT
 	}
 	message := dynamicpb.NewMessage(table.message)
 	if err := (protojson.UnmarshalOptions{Resolver: schema.types}).Unmarshal(data, message); err != nil {
-		return nil, fmt.Errorf("table %s row %d (%s): %v", table.table.HeaderType, row+1, strings.Join(locations, "; "), err)
+		cause := fmt.Errorf("table %s row %d (%s): %v", table.table.HeaderType, row+1, strings.Join(locations, "; "), err)
+		if cell := table.table.GetCell(row, 0); cell != nil {
+			return nil, &report.SourceError{Location: cell.SourceLocation(), Cause: cause}
+		}
+		return nil, cause
 	}
 	return message.ProtoReflect(), nil
 }

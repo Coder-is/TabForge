@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TabForge 项目",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "schema"
+      ]
+    },
+    {
+      "required": [
+        "tables"
+      ]
+    }
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "项目配置格式版本，第二版继续使用 version 1。"
+    },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "专用生成目录。成功后整体替换，请不要放手写文件。",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$",
+      "default": "Generated"
+    },
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "相对于项目的路径，使用 / 分隔。",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$",
+          "default": "Protocols"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "相对于项目的路径，使用 / 分隔。",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+          },
+          "description": "可选入口；不填写时编译目录内所有 Proto。"
+        },
+        "imports": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "相对于项目的路径，使用 / 分隔。",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+          }
+        },
+        "go": {
+          "type": "boolean",
+          "default": false,
+          "description": "生成 Go Protobuf 类型；要求应用 Proto 设置 go_package。"
+        }
+      }
+    },
+    "protocol": {
+      "type": "string",
+      "minLength": 1,
+      "description": "可选 RPC 接口清单；需要 schema。",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+    },
+    "tables": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "outputs"
+        ],
+        "properties": {
+          "index": {
+            "type": "string",
+            "minLength": 1,
+            "description": "表格索引；其中引用的文件相对于索引所在目录。",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+          },
+          "mapping": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Proto 映射文件，root_message 指定数据根类型。",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+          },
+          "package": {
+            "type": "string"
+          },
+          "root": {
+            "type": "string",
+            "default": "Table"
+          },
+          "tags": {
+            "type": "string"
+          },
+          "outputs": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "json": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "go": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "csharp": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "java": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "lua": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "binary": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "proto": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "protobuf": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "protojson": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "jsontype": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "json_dir": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "lua_dir": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "binary_dir": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              },
+              "protobuf_dir": {
+                "type": "string",
+                "minLength": 1,
+                "description": "相对于项目的路径，使用 / 分隔。",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "protocol"
+        ]
+      },
+      "then": {
+        "required": [
+          "schema"
+        ]
+      }
+    }
+  ]
+}

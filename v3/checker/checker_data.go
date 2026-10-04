@@ -33,13 +33,13 @@ func checkDataType(globals *model.Globals) {
 
 						err := checkSingleValue(header, value)
 						if err != nil {
-							report.ReportError("DataMissMatchTypeDefine", header.TypeInfo.FieldType, inputCell.String())
+							report.ReportError("DataMissMatchTypeDefine", header.TypeInfo.FieldType, inputCell)
 						}
 					}
 				} else if inputCell.Value != "" {
 					err := checkSingleValue(header, inputCell.Value)
 					if err != nil {
-						report.ReportError("DataMissMatchTypeDefine", header.TypeInfo.FieldType, inputCell.String())
+						report.ReportError("DataMissMatchTypeDefine", header.TypeInfo.FieldType, inputCell)
 					}
 				}
 

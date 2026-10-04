@@ -181,7 +181,7 @@ func packageTarget(root, out, stage string, t target, licenses map[string][]byte
 
 	var vsix bytes.Buffer
 	writer = zip.NewWriter(&vsix)
-	for _, file := range []string{"package.json", "extension.js", "runner.js", "README.md"} {
+	for _, file := range []string{"package.json", "extension.js", "runner.js", "diagnostics.js", "tabforge.schema.json", "README.md"} {
 		data, err := os.ReadFile(filepath.Join(root, "editors", "vscode", file))
 		if err != nil {
 			return err
@@ -219,13 +219,23 @@ func packageTarget(root, out, stage string, t target, licenses map[string][]byte
 	if err := addFile(writer, binaryPath, data, 0755); err != nil {
 		return err
 	}
+	packageData, err := os.ReadFile(filepath.Join(root, "editors", "vscode", "package.json"))
+	if err != nil {
+		return err
+	}
+	var extension struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(packageData, &extension); err != nil {
+		return err
+	}
 	manifest := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
-  <Metadata><Identity Language="en-US" Id="tabforge" Version="0.1.0" Publisher="tabforge" TargetPlatform="%s"/><DisplayName>TabForge</DisplayName><Description xml:space="preserve">Portable Excel/CSV and Proto exporter.</Description><Tags>proto,excel,csv</Tags><Categories>Other</Categories><GalleryFlags>Public</GalleryFlags><Properties><Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.85.0"/><Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value=""/><Property Id="Microsoft.VisualStudio.Code.ExtensionPack" Value=""/><Property Id="Microsoft.VisualStudio.Code.ExecutesCode" Value="true"/></Properties><License>extension/LICENSE</License></Metadata>
+  <Metadata><Identity Language="en-US" Id="tabforge" Version="%s" Publisher="tabforge" TargetPlatform="%s"/><DisplayName>TabForge</DisplayName><Description xml:space="preserve">Portable Excel/CSV and Proto exporter.</Description><Tags>proto,excel,csv</Tags><Categories>Other</Categories><GalleryFlags>Public</GalleryFlags><Properties><Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.85.0"/><Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value=""/><Property Id="Microsoft.VisualStudio.Code.ExtensionPack" Value=""/><Property Id="Microsoft.VisualStudio.Code.ExecutesCode" Value="true"/></Properties><License>extension/LICENSE</License></Metadata>
   <Installation><InstallationTarget Id="Microsoft.VisualStudio.Code"/></Installation>
   <Dependencies/>
   <Assets><Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/></Assets>
-</PackageManifest>`, t.vscode)
+</PackageManifest>`, extension.Version, t.vscode)
 	if err := addFile(writer, "extension.vsixmanifest", []byte(manifest), 0644); err != nil {
 		return err
 	}
@@ -239,7 +249,61 @@ func packageTarget(root, out, stage string, t target, licenses map[string][]byte
 	if err := os.WriteFile(filepath.Join(out, "tabforge-"+t.vscode+".vsix"), vsix.Bytes(), 0644); err != nil {
 		return err
 	}
-	fmt.Printf("Created ZIP and VSIX for %s\n", t.vscode)
+	if err := packageEditors(root, out, stage, binary, t, license, licenses); err != nil {
+		return err
+	}
+	fmt.Printf("Created project ZIP, VSIX and three engine plugins for %s\n", t.vscode)
+	return nil
+}
+
+func packageEditors(root, out, stage, binary string, t target, license []byte, licenses map[string][]byte) error {
+	data, err := os.ReadFile(binary)
+	if err != nil {
+		return err
+	}
+	name := "tabforge"
+	if t.os == "windows" {
+		name += ".exe"
+	}
+	for _, kind := range []string{"unity", "cocos", "godot"} {
+		base := filepath.Join(stage, "editor-"+kind)
+		folder := map[string]string{"unity": "com.tabforge.editor", "cocos": "tabforge", "godot": "addons/tabforge"}[kind]
+		dest := filepath.Join(base, filepath.FromSlash(folder))
+		if err := copyTree(filepath.Join(root, "editors", kind), dest, func(path string) bool { return path != "bin" && !strings.HasSuffix(path, ".test.cjs") }); err != nil {
+			return err
+		}
+		bin := filepath.Join(dest, "bin", t.vscode, name)
+		if err := os.MkdirAll(filepath.Dir(bin), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(bin, data, 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dest, "LICENSE"), license, 0644); err != nil {
+			return err
+		}
+		for name, data := range licenses {
+			file := filepath.Join(dest, "THIRD_PARTY_LICENSES", filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(file, data, 0644); err != nil {
+				return err
+			}
+		}
+		var contents bytes.Buffer
+		writer := zip.NewWriter(&contents)
+		if err := addDirectory(writer, base, folder); err != nil {
+			writer.Close()
+			return err
+		}
+		if err := writer.Close(); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(out, "tabforge-"+kind+"-"+t.vscode+".zip"), contents.Bytes(), 0644); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

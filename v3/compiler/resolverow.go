@@ -43,7 +43,7 @@ func ParseRow(ret interface{}, tab *model.DataTable, row int, symbols *model.Typ
 		index := matchField(tobj, header.Cell.Value)
 
 		if index == -1 {
-			report.ReportError("HeaderNotMatchFieldName", header.Cell.String())
+			report.ReportError("HeaderNotMatchFieldName", header.Cell)
 		}
 
 		fieldValue := vobj.Field(index)

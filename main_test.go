@@ -171,6 +171,65 @@ func TestCLIV3Only(t *testing.T) {
 			}
 		}
 	})
+	t.Run("editor-export-check-import-and-report", func(t *testing.T) {
+		source := filepath.Join(dir, "second version 中文")
+		if output, err := exec.Command(binary, "-init="+source, "-report").CombinedOutput(); err != nil {
+			t.Fatalf("init: %v\n%s", err, output)
+		}
+		manifest := filepath.Join(source, "Generated", "export.json")
+		before, err := os.ReadFile(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command(binary, "-project="+source, "-check", "-report").CombinedOutput(); err != nil {
+			t.Fatalf("check: %v\n%s", err, output)
+		}
+		after, err := os.ReadFile(manifest)
+		if err != nil || !bytes.Equal(before, after) {
+			t.Fatal("check replaced the published bundle")
+		}
+		for _, kind := range []string{"unity", "cocos", "godot"} {
+			game := filepath.Join(dir, "game 中文 "+kind)
+			if err := os.MkdirAll(filepath.Join(game, map[string]string{"unity": "Assets", "cocos": "assets", "godot": "scripts"}[kind]), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "godot" {
+				if err := os.WriteFile(filepath.Join(game, "project.godot"), []byte("config_version=5\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{"-import=" + filepath.Join(source, "Generated"), "-editor=" + kind, "-editor_project=" + game, "-report"}
+			cmd := exec.Command(binary, args...)
+			cmd.Env = append(os.Environ(), "PATH=")
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%s import: %v\n%s", kind, err, output)
+			}
+			data, err := os.ReadFile(filepath.Join(game, ".tabforge-report.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var report struct {
+				Success      bool   `json:"success"`
+				EditorOutput string `json:"editorOutput"`
+			}
+			if err := json.Unmarshal(data, &report); err != nil || !report.Success || report.EditorOutput == "" {
+				t.Fatalf("import report: %v %s", err, data)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(source, "Protocols", "bad.proto"), []byte("syntax = \"proto3\";\nmessage Bad { string name = ; }"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command(binary, "-project="+source, "-check", "-report").CombinedOutput(); err == nil {
+			t.Fatalf("invalid input passed: %s", output)
+		}
+		data, err := os.ReadFile(filepath.Join(source, ".tabforge-report.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(data, []byte(`"success": false`)) || !bytes.Contains(data, []byte(`"code": "proto_compile"`)) {
+			t.Fatalf("failed report: %s", data)
+		}
+	})
 	for _, mode := range []string{"v2", "exportorv2", "v2tov3"} {
 		t.Run("reject-mode-"+mode, func(t *testing.T) {
 			output, err := exec.Command(binary, "-mode="+mode).CombinedOutput()

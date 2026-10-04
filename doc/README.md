@@ -3,6 +3,7 @@
 | 需要做什么 | 阅读入口 |
 | --- | --- |
 | 策划双击导出、纯 Proto 结构生成、编辑器/后端包接入 | [第一版项目工作流](project-workflow.md)、[完整示例](../examples/complete/README.md) |
+| Unity/Cocos/Godot 插件，独立协议包导入和运行时读取 | [第二版编辑器工作流](editor-workflow.md) |
 | 了解项目、编译工具、导出 Excel/CSV 配置 | [项目首页与 V3 教程](../README.md) |
 | 从 Proto 建立前后端协议并接入客户端 | [前后端接入指南](protocol-integration.md) |
 | 运行普通 JSON 与 SSE 演示 | [协议示例](../examples/protocol/README.md) |

@@ -108,8 +108,9 @@ func LoadSchema(path string) (*Schema, error) {
 	return NewSchema(set)
 }
 
-func (s *Schema) Fingerprint() string    { return s.contract.Fingerprint() }
-func (s *Schema) WireSchema() WireSchema { return s.contract.WireSchema() }
+func (s *Schema) Fingerprint() string                  { return s.contract.Fingerprint() }
+func (s *Schema) TypeScriptDataTypes() ([]byte, error) { return s.contract.typeScript(false) }
+func (s *Schema) WireSchema() WireSchema               { return s.contract.WireSchema() }
 func (s *Schema) DescriptorSet() *descriptorpb.FileDescriptorSet {
 	return s.contract.descriptorSet(true)
 }

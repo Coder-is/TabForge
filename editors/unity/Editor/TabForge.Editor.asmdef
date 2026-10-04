@@ -1,0 +1,1 @@
+{"name":"TabForge.Editor","references":["Unity.Newtonsoft.Json"],"includePlatforms":["Editor"],"autoReferenced":true}

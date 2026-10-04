@@ -64,7 +64,9 @@ internal static class CoreTests
     }
     private static async Task Integration(ProtocolContract contract, string url)
     {
-        using var http = new HttpClient();
+        // This fixture calls the local httptest server; workstation proxies
+        // must not intercept the loopback request or replace its JSON body.
+        using var http = new HttpClient(new HttpClientHandler { UseProxy = false });
         var request = JObject.Parse("{\"prompt\":\"你好😀\",\"conversationId\":\"18446744073709551615\"}");
         foreach (var id in new[] { "chatComplete", "chatStream" })
         {

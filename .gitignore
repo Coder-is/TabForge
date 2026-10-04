@@ -65,3 +65,9 @@ editors/vscode/bin/
 .tabforge-stage-*/
 *.tabforge-backup/
 outputs/
+.tabforge-report.json
+.tabforge-client.lock
+.tabforge-client-stage-*/
+editors/unity/bin/
+editors/cocos/bin/
+editors/godot/bin/

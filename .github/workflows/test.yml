@@ -28,6 +28,7 @@ jobs:
       - run: npm --prefix sdk/typescript run check
       - run: npm --prefix sdk/typescript test
       - run: node --test editors/vscode/extension.test.cjs
+      - run: node --test editors/cocos/runner.test.cjs
       - run: npm --prefix sdk/typescript run build:platforms
       - run: go test -race ./...
 
@@ -48,7 +49,7 @@ jobs:
       - name: Godot units and real Go integration
         env:
           GODOT_BIN: ${{ runner.temp }}/godot/Godot_v4.5.1-stable_linux.x86_64
-        run: go test -race -count=1 ./protocol/httptransport -run Godot
+        run: go test -race -count=1 ./protocol/httptransport ./clientbundle -run Godot
 
   native-cores:
     strategy:
@@ -77,4 +78,4 @@ jobs:
           DOTNET_BIN: dotnet
           DOTNET_CLI_TELEMETRY_OPTOUT: '1'
           DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
-        run: go test -race -count=1 -v ./internal/platformtest
+        run: go test -race -count=1 -v ./internal/platformtest ./clientbundle

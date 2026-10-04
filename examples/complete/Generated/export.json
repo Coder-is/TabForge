@@ -43,5 +43,15 @@
     "schema/schema.ts",
     "schema/types.ts",
     "schema/wire_schema.json"
+  ],
+  "data": [
+    {
+      "path": "data/tables.json",
+      "message": "tabforge.demo.config.Tables"
+    },
+    {
+      "path": "data/tables-map.json",
+      "message": "tabforge.demo.config.Tables"
+    }
   ]
 }

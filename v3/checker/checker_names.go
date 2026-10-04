@@ -12,7 +12,7 @@ func CheckFieldDefinition(types *model.TypeTable, field *model.TypeDefine, tab *
 	if cell == nil {
 		report.ReportError("InvalidTypeTable", field.ObjectType, field.FieldName, tab.FileName)
 	}
-	location := cell.String()
+	location := cell
 	previous := types.ObjectDefinition(field.ObjectType)
 	if model.PrimitiveExists(field.ObjectType) || previous != nil && (previous.IsBuiltin || previous.Kind != field.Kind) {
 		report.ReportError("ConflictingTypeName", location, field.ObjectType)
@@ -27,6 +27,6 @@ func CheckFieldDefinition(types *model.TypeTable, field *model.TypeDefine, tab *
 		report.ReportError(duplicateID, location, field.ObjectType, field.FieldName)
 	}
 	if field.Name != "" && types.FieldByName(field.ObjectType, field.Name) != nil {
-		report.ReportError("AmbiguousTypeFieldName", tab.GetValueByName(row, "标识名").String(), field.ObjectType, field.Name)
+		report.ReportError("AmbiguousTypeFieldName", tab.GetValueByName(row, "标识名"), field.ObjectType, field.Name)
 	}
 }

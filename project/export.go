@@ -27,16 +27,32 @@ import (
 )
 
 type Result struct {
-	Format     string   `json:"format"`
-	SchemaHash string   `json:"schemaHash,omitempty"`
-	Files      []string `json:"files"`
-	Output     string   `json:"-"`
+	Format     string     `json:"format"`
+	SchemaHash string     `json:"schemaHash,omitempty"`
+	Files      []string   `json:"files"`
+	Output     string     `json:"-"`
+	Data       []DataFile `json:"data,omitempty"`
+}
+
+// DataFile associates an exported ProtoJSON document with its root message.
+type DataFile struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
 }
 
 // Export generates in a sibling staging directory, then publishes the complete
 // output. Validation or generation failures leave the previous output untouched.
 // Do not write handwritten files into this dedicated generated directory.
 func (p *Project) Export(ctx context.Context) (*Result, error) {
+	return p.generate(ctx, true)
+}
+
+// Check runs the same compiler and generators without replacing published files.
+func (p *Project) Check(ctx context.Context) (*Result, error) {
+	return p.generate(ctx, false)
+}
+
+func (p *Project) generate(ctx context.Context, publishOutput bool) (*Result, error) {
 	if err := p.validate(); err != nil {
 		return nil, err
 	}
@@ -113,7 +129,20 @@ func (p *Project) Export(ctx context.Context) (*Result, error) {
 			return nil, err
 		}
 		if err := p.exportTable(config, stage); err != nil {
-			return nil, fmt.Errorf("%s: %w", config.Index, err)
+			return nil, &tableJobError{index: filepath.Join(p.Root, filepath.FromSlash(config.Index)), cause: err}
+		}
+		if config.Mapping != "" && config.Outputs["protojson"] != "" {
+			data, err := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(config.Mapping)))
+			if err != nil {
+				return nil, err
+			}
+			var mapping struct {
+				RootMessage string `json:"root_message"`
+			}
+			if err := json.Unmarshal(data, &mapping); err != nil {
+				return nil, err
+			}
+			result.Data = append(result.Data, DataFile{Path: config.Outputs["protojson"], Message: strings.TrimPrefix(mapping.RootMessage, ".")})
 		}
 	}
 	if err := filepath.WalkDir(stage, func(path string, entry os.DirEntry, err error) error {
@@ -143,8 +172,10 @@ func (p *Project) Export(ctx context.Context) (*Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := publish(stage, out); err != nil {
-		return nil, err
+	if publishOutput {
+		if err := publish(stage, out); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }

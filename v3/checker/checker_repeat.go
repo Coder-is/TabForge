@@ -29,10 +29,10 @@ func checkRepeat(globals *model.Globals) {
 				text := cell.Value
 				key, err := indexValue(globals.Types, field, text)
 				if err != nil {
-					report.ReportError("InvalidIndexType", cell.String(), field.FieldType, err)
+					report.ReportError("InvalidIndexType", cell, field.FieldType, err)
 				}
 				if seen[key] {
-					report.ReportError("DuplicateValueInMakingIndex", cell.String())
+					report.ReportError("DuplicateValueInMakingIndex", cell)
 				}
 				seen[key] = true
 			}

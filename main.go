@@ -17,7 +17,7 @@ func main() {
 		build.Print()
 		return
 	}
-	if *paramProject != "" || *paramInit != "" || len(os.Args) == 1 {
+	if *paramProject != "" || *paramInit != "" || *paramImport != "" || *paramCheck || *paramReport || *paramEditor != "" || *paramEditorProject != "" || len(os.Args) == 1 {
 		if err := projectEntry(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)

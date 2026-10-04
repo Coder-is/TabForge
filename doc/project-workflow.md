@@ -1,5 +1,7 @@
 # 第一版项目工作流
 
+第一版的项目格式和后端 API 继续可用。Unity、Cocos、Godot 编辑器接入及结构化报告见 [第二版工作流](editor-workflow.md)。
+
 项目以 `tabforge.json` 为入口。策划使用随项目提供的工具；编辑器和后端构建调用同一个 `project.Export` 内核。项目导出与原有命令行参数入口共存。
 
 ## 开始使用
@@ -60,7 +62,7 @@ VS Code 安装对应平台 `.vsix` 后，执行 **TabForge: 导出项目**。可
 
 不要求 RPC、路由或 HTTP/SSE。`Generated/schema` 包含 `schema.pb`、`types.ts`、`data.ts`、`schema.ts`、`wire_schema.json`、`SCHEMA.md`、`bundle.json` 和可选的 `go/`。
 
-标准 Proto imports 内置。TS 类型描述 ProtoJSON，64 位整数是字符串；TS 数据 SDK 暂无 Protobuf 二进制编解码。Go 类型使用官方 Protobuf 运行时。C#/C++ 的 Proto 强类型生成尚未内置；普通表 C#/Java 代码生成继续可用。
+标准 Proto imports 内置。TS 类型描述 ProtoJSON，64 位整数是字符串；TS 数据 SDK 暂无 Protobuf 二进制编解码。Go 类型使用官方 Protobuf 运行时。第二版 Unity 导入增加 C# ProtoJSON DTO；C#/C++ 的 Protobuf 二进制类型生成仍未内置。普通表 C#/Java 代码生成继续可用。
 
 ## 后端第三方包
 

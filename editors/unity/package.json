@@ -1,0 +1,9 @@
+{
+  "name":"com.tabforge.editor",
+  "version":"0.2.0",
+  "displayName":"TabForge Editor",
+  "description":"Validate, generate and import ProtoJSON configuration.",
+  "unity":"2022.3",
+  "license":"MIT",
+  "dependencies":{"com.unity.nuget.newtonsoft-json":"3.2.2"}
+}

@@ -54,7 +54,7 @@ func checkHeaderTypes(tab *model.DataTable, symbols *model.TypeTable) {
 		if !model.PrimitiveExists(header.TypeInfo.FieldType) &&
 			!symbols.ObjectExists(header.TypeInfo.FieldType) { // 对象检查
 
-			report.ReportError("UnknownFieldType", header.TypeInfo.FieldType, header.Cell.String())
+			report.ReportError("UnknownFieldType", header.TypeInfo.FieldType, header.Cell)
 		}
 	}
 
@@ -82,11 +82,11 @@ func resolveHeaderFields(tab *model.DataTable, tableObjectType string, typeTab *
 
 		tf := typeTab.FieldByName(tableObjectType, header.Cell.Value)
 		if tf == nil {
-			report.ReportError("HeaderFieldNotDefined", header.Cell.String(), tableObjectType)
+			report.ReportError("HeaderFieldNotDefined", header.Cell, tableObjectType)
 		}
 
 		if headerValueExists(index+1, header.Cell.Value, tab.Headers) && !tf.IsArray() {
-			report.ReportError("DuplicateHeaderField", header.Cell.String())
+			report.ReportError("DuplicateHeaderField", header.Cell)
 		}
 
 		// 解析好的类型

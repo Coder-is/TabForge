@@ -55,7 +55,7 @@ func checkEnumFieldValue(globals *model.Globals, header *model.HeaderField, valu
 
 	enumValue := globals.Types.GetEnumValue(header.TypeInfo.FieldType, value)
 	if enumValue == nil {
-		report.ReportError("UnknownEnumValue", header.TypeInfo.FieldType, inputCell.String())
+		report.ReportError("UnknownEnumValue", header.TypeInfo.FieldType, inputCell)
 	}
 
 }

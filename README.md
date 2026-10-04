@@ -4,17 +4,19 @@
 
 基于 [davyxu/tabtoy](https://github.com/davyxu/tabtoy) 的 V3 版本开发，保留原作者的 MIT 许可和版权说明，使用独立的 Git 提交历史。导表当前只支持 V3，新增已有 Proto 映射、ProtoJSON 导出，以及缓存、并发加载和错误处理改进。
 
-## 第一版项目工作流
+## 项目工作流与编辑器接入
 
 策划按模板填写文件，放入 `Tables/` 后双击项目导出工具；开发者在 `Protocols/` 维护 Proto，在 VS Code 中导出，或作为 Go 包引入生成与结构加载能力。项目规则统一存放在 `tabforge.json`，路径不依赖命令执行目录。内置 Proto 编译与 Go 消息生成，不需要安装 protoc。
 
 ```bash
 go run . -project=examples/complete  # 导出完整结构示例
 go run . -init=/path/to/NewProject  # 创建模板与当前平台便携工具
-go run ./cmd/package               # 构建 Windows/macOS ZIP 与 VSIX
+go run ./cmd/package -out=outputs/releases/v2 # 构建便携包与四种编辑器插件
 ```
 
-便携包内置可执行文件，策划无需安装开发环境。完整示例覆盖复杂 Proto 结构、普通导表、数据读取与 RPC。纯消息定义也能生成，导出失败会保留上次成功产物。见 [项目工作流](doc/project-workflow.md)、[完整示例](examples/complete/README.md)、[VS Code 插件](editors/vscode/README.md)。第一版内置 Go/TS 的 Proto 类型产物；其他引擎编辑器面板后续接入。
+便携包内置可执行文件，策划无需安装开发环境。完整示例覆盖复杂 Proto 结构、普通导表、数据读取与 RPC。纯消息定义也能生成，导出失败会保留上次成功产物。见 [项目工作流](doc/project-workflow.md)、[完整示例](examples/complete/README.md)。
+
+第二版新增 Unity、Cocos Creator、Godot 编辑器入口，支持创建示例、只校验、导出并导入、导入已有 Generated 包及错误报告。Unity 生成 C# ProtoJSON 类型，Cocos 生成 TS 类型，Godot 使用结构脚本和字典校验；资产重新导入保留 UUID。VS Code 新增 Problems 诊断与配置补全。安装、读取代码和验证范围见 [第二版工作流](doc/editor-workflow.md)。
 
 原有工具提供两个独立入口：
 
@@ -53,8 +55,8 @@ go run ./examples/protocol
 
 | 目录 | 用途 |
 | --- | --- |
-| `project/`、`editors/vscode/` | 项目导出内核和 VS Code 插件 |
-| `examples/complete/`、`cmd/package/` | 完整模板和便携 ZIP/VSIX 打包 |
+| `project/`、`clientbundle/`、`editors/` | 项目导出、引擎资产导入和四种编辑器插件 |
+| `examples/complete/`、`cmd/package/` | 完整模板和便携项目/插件 ZIP、VSIX 打包 |
 | `protocol/` | 清单/描述文件校验、产物生成、兼容性检查和 Go HTTP/SSE 服务 |
 | `sdk/` | TypeScript、微信、Cocos、Unity、Unreal、Godot 客户端 |
 | `examples/protocol/` | 示例 Proto、清单、七类生成文件和固定响应服务 |

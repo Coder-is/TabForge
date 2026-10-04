@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { findProject, toolPath, runExport, isSourceFile } = require('./runner.js');
+const { diagnosticEntries } = require('./diagnostics.js');
 
 test('finds enclosing projects and detects platform binaries without PATH', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tabforge project '));
@@ -35,4 +36,18 @@ test('automatic export ignores generated replacement events, backups and unrelat
   const config = { output: 'Build/Generated', schema: { dir: 'Protocols', imports: ['Shared'] }, tables: [{ index: 'Tables/Index.csv', mapping: 'Config/mapping.json' }] };
   for (const file of ['tabforge.json', 'Protocols/common.proto', 'Shared/common.proto', 'Tables/Items.xlsx', 'Config/mapping.json']) assert.equal(isSourceFile(root, path.join(root, file), config), true, file);
   for (const file of ['Build/Generated/schema/types.ts', 'Build/Generated.tabforge-backup/data/tables.json', 'Build/.tabforge-stage-1/schema/bundle.json', 'Tables/~$Items.xlsx', 'Clients/package.json']) assert.equal(isSourceFile(root, path.join(root, file), config), false, file);
+});
+
+test('structured diagnostics locate Proto sources and describe workbook cells without opening binary text', () => {
+  const config = path.resolve('project/tabforge.json');
+  const proto = path.resolve('project/Protocols/data.proto');
+  const workbook = path.resolve('project/Tables/Items.xlsx');
+  const entries = diagnosticEntries({format:'tabforge.report.v1', diagnostics:[
+    {code:'proto_compile',message:'syntax error',path:proto,line:4,column:8},
+    {code:'UnknownEnumValue',message:'unknown enum',path:workbook,sheet:'Items',cell:'H3',line:3,column:8,hint:'Use EPIC'}
+  ]}, config);
+  assert.equal(entries[0].path, proto); assert.equal(entries[0].line, 3); assert.equal(entries[0].column, 7);
+  assert.equal(entries[1].path, config); assert.match(entries[1].message, /Items.xlsx Items H3/); assert.match(entries[1].message, /Use EPIC/);
+  assert.deepEqual(diagnosticEntries({},config), []);
+  assert.deepEqual(diagnosticEntries({format:'tabforge.report.v1',diagnostics:[]},config), []);
 });

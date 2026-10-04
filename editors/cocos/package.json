@@ -1,0 +1,93 @@
+{
+  "package_version": 2,
+  "name": "tabforge",
+  "version": "0.2.0",
+  "description": "Generate, validate and import ProtoJSON configuration into Creator projects.",
+  "editor": ">=3.8.0 <4.0.0",
+  "main": "./main.js",
+  "license": "MIT",
+  "contributions": {
+    "menu": [
+      {
+        "path": "TabForge",
+        "label": "项目面板",
+        "message": "open-panel"
+      },
+      {
+        "path": "TabForge",
+        "label": "创建完整示例",
+        "message": "init"
+      },
+      {
+        "path": "TabForge",
+        "label": "校验项目",
+        "message": "check"
+      },
+      {
+        "path": "TabForge",
+        "label": "导出并导入",
+        "message": "export"
+      },
+      {
+        "path": "TabForge",
+        "label": "导入已有协议包",
+        "message": "import"
+      },
+      {
+        "path": "TabForge",
+        "label": "查看最近报告",
+        "message": "report"
+      }
+    ],
+    "messages": {
+      "init": {
+        "methods": [
+          "init"
+        ]
+      },
+      "check": {
+        "methods": [
+          "check"
+        ]
+      },
+      "export": {
+        "methods": [
+          "exportProject"
+        ]
+      },
+      "import": {
+        "methods": [
+          "importBundle"
+        ]
+      },
+      "report": {
+        "methods": [
+          "openReport"
+        ]
+      },
+      "open-panel": {
+        "methods": [
+          "openPanel"
+        ]
+      },
+      "query-status": {
+        "methods": [
+          "queryStatus"
+        ]
+      },
+      "cancel": {
+        "methods": [
+          "cancel"
+        ]
+      }
+    }
+  },
+  "panels": {
+    "default": {
+      "title": "TabForge",
+      "type": "dockable",
+      "main": "./panel.js",
+      "icon": "./icon.svg"
+    }
+  }
+}
