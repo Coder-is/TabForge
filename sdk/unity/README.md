@@ -29,14 +29,30 @@ Completed 表示协议流已结束；`failed` 这类业务终止事件仍通过 
 
 **WebGL 的 SSE 暂不支持**，需要 JS fetch 桥；普通请求仍走 UnityWebRequest。IL2CPP、Android/iOS、代理和 HTTPS 证书须在目标构建验证。本机没有 Unity 编辑器，当前通过的是 .NET 8 下 C# 核心及 Go HTTP/SSE 联调，不是 UnityWebRequest 实测。
 
+## 源码职责
+
+| 文件 | 职责 |
+| --- | --- |
+| [ProtocolCore.cs](Runtime/ProtocolCore.cs) | 协议元数据、错误、JSON 入口、流事件与会话校验 |
+| [JsonSyntax.cs](Runtime/JsonSyntax.cs) | 严格 JSON 语法检查 |
+| [SseParser.cs](Runtime/SseParser.cs) | SSE 增量分帧 |
+| [WireValidator.cs](Runtime/WireValidator.cs) | 字段与 Protobuf 内建类型校验 |
+| [TabForgeClient.cs](Runtime/TabForgeClient.cs) | UnityWebRequest、请求生命周期与主线程回调 |
+
+UPM 自动编译 Runtime 目录。手工集成源码时应复制完整 Runtime 目录；单独引用 `ProtocolCore.cs` 无法编译。独立 .NET 核心测试显式包含前四个文件，不包含 Unity 网络层。
+
+## 验证
+
 ```bash
 dotnet run --project sdk/unity/Tests/CoreTests.csproj -- examples/protocol/generated/runtime.json
 # Go 跨语言测试会启动实际服务：
-DOTNET_BIN=dotnet go test -race -v ./internal/platformtest
+DOTNET_BIN=dotnet go test -race -count=1 -v ./internal/platformtest
 # 编辑器 PlayMode 验收（先启动平台服务、生成验收资产）：
 UNITY_EDITOR=/absolute/path/to/Unity node examples/platforms/run-unity.mjs
 ```
 
 PlayMode 用例覆盖 JSON/SSE、Unicode、uint64、实时事件、取消、超时、错误帧及组件退出清理；运行脚本检查结果 XML，缺环境不算通过。详见 [平台验收](../../doc/platform-validation.md)。
+
+本地联调启用 HTTP 代理时，将回环地址加入现有 `NO_PROXY` / `no_proxy`；环境配置与其他开发检查见[维护指南](../../doc/development.md)。
 
 API 依据：[DownloadHandlerScript](https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/networking/downloadhandlerscript)、[官方 Newtonsoft 包](https://docs.unity3d.com/Packages/com.unity.nuget.newtonsoft-json@3.2/manual/index.html)。

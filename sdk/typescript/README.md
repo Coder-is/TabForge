@@ -30,6 +30,10 @@ FetchTransport 要求 ES2022、fetch、ReadableStream、TextDecoder 和 AbortCon
 
 启用 wireSchema 后，客户端验证未知字段、数值范围、枚举、map、数组、required、oneof 与 well-known types；失败抛出 invalid_message。自定义 Transport 需要应用相同验证规则。生成的 JSON 类型不直接等于二进制库的 message 类型。部署与旧客户端升级见 [生产说明](../../doc/production.md)。
 
+Fetch 和回调传输在建立网络请求前使用相同校验：bearer 接口缺 token 报 `unauthorized`；token 含换行、非空 requestId 不符合 `[A-Za-z0-9_.-]{1,128}`，或接口 timeoutMS 不是正的安全整数时，报 `bad_request`。请求不能序列化为 JSON（如循环引用、BigInt 或顶层 undefined）报 `invalid_message`；普通/流式调用与接口不匹配报 `invalid_operation`。requestId 和 token 可通过调用选项传入，timeoutMS 来自生成的接口元数据。
+
+源码职责：`runtime.ts` 包含客户端、Fetch、SSE 与包络；`callback_transport.ts` 处理回调网络、队列和取消；`schema.ts` 校验字段及 Protobuf 内建类型；`utf8.ts` 提供增量 UTF-8 解码。修改共用规则时同时覆盖 Fetch 和回调后端，定位与联调命令见[开发维护指南](../../doc/development.md)。
+
 开发检查使用 Node 24+：
 
 ```bash

@@ -53,3 +53,5 @@ UNREAL_PLUGIN_BUILD=/absolute/path/to/packaged-plugin node examples/platforms/ru
 两个运行器设置服务/协议路径、清理旧报告并检查本次结果，缺环境或没有通过记录不能算成功。Cocos 用 Creator 3.8 打开工程，创建场景、挂载 `TabForgeSmoke`，选择 fetch/xhr/wechat 并查看控制台报告。
 
 本机没有 Unity、Unreal、Cocos Creator 编辑器，目前只完成独立核心或 Web 网络后端测试。准备步骤、报告路径、目标构建与发布前待测项以 [平台验收矩阵](../../doc/platform-validation.md) 为准；Godot 原生接入和独立 headless 验证见 [Godot SDK](../../sdk/godot/README.md)。
+
+2026-10-04 的重构回归包含 TS 25 项单元测试、Go/Node/C# 真实 HTTP 联调、Godot headless 与 C++ sanitizer，见[当次结果](../../doc/platform-validation.md#2026-10-04-重构回归)。网页 Fetch/XHR 仍为另一套 24 项用例；浏览器及微信开发者工具实测保留在 2026-10-03 历史报告。源码与本地验证环境见[开发维护指南](../../doc/development.md)。

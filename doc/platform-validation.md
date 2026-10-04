@@ -18,6 +18,21 @@
 
 统一用例包括普通 JSON、中文/emoji、uint64 最大值、SSE 序号和终止、发送前类型检查、服务器尚未结束时收事件后取消、提前退出迭代、全程 deadline、服务器缺少结束事件、跳号/hash/字段错误、无结束事件 EOF、超大帧。Node 回归另检查取消/退出/超时让服务端 context 真正结束；单元测试补非法 UTF-8、分片、队列背压、不支持实时分块等边界。
 
+## 2026-10-04 重构回归
+
+以下是提交 `8c9162c` 的本地回归结果，变更范围见[重构记录](refactoring.md)。浏览器和微信开发者工具仍以上一日的验收记录为准，本次未重新执行编辑器或真机验收。
+
+| 检查 | 当次结果 |
+| --- | --- |
+| 完整 Go 竞态测试 | `go test -race -count=1 ./...` 通过，实际运行 Node 和 C# HTTP/SSE 联调 |
+| TypeScript | 类型检查、25 项单元测试与平台资产构建通过 |
+| Unity 独立核心 | .NET 8 核心与 Go HTTP/SSE 联调通过；核心测试工程覆盖拆分后的四个源文件 |
+| Godot 原生核心 | 4.5.1 macOS arm64 headless 单元测试与 Go HTTP/SSE 联调均为 0 failures |
+| Unreal 独立核心 | C++17、`-Wall -Wextra -Werror`、ASan/UBSan 通过 |
+| 生成产物兼容性 | 同一输入的 13 种表格导出方式生成 22 个文件，协议包生成 7 个文件；29 个文件与重构前逐字节相同 |
+
+TS 单元测试的 25 项与网页 Fetch/XHR 的 24 项属于不同测试集。Godot 联调退出时仍有资源保留提示，重构前也可复现；详情与验证边界见[重构记录](refactoring.md#验证结果)。本地可选运行时与代理配置见[维护指南](development.md#可选运行时与引擎验证)。
+
 ## 共用服务与验收资产
 
 在仓库根目录执行：
@@ -99,6 +114,6 @@ clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
 
 ## 自动回归与发布门槛
 
-现有 [CI 配置](../.github/workflows/test.yml) 在 Linux/macOS/Windows 检查 Go、TS、平台示例构建；native-cores 任务在 Linux/macOS 执行 C++ sanitizer 与 C# 核心真实 HTTP 联调，Godot headless 任务另行执行。没有引擎许可证或真机 runner，CI 不执行 Unity/Unreal/Creator 编辑器或真机测试。配置已随 `8b0dbb2` 推送到 main，实际执行结果查看 [GitHub Actions](https://github.com/Coder-is/TabForge/actions)；本文记录的是本地验收，不声称远程任务已通过。
+现有 [CI 配置](../.github/workflows/test.yml) 在 Linux/macOS/Windows 检查 Go、TS、平台示例构建；native-cores 任务在 Linux/macOS 执行 C++ sanitizer 与 C# 核心真实 HTTP 联调，Godot headless 任务另行执行。没有引擎许可证或真机 runner，CI 不执行 Unity/Unreal/Creator 编辑器或真机测试。实际执行结果查看 [GitHub Actions](https://github.com/Coder-is/TabForge/actions)；本文记录的是本地验收，不声称远程任务已通过。
 
 发布特定平台前，至少在其编辑器和一个实际目标构建运行上述用例，补齐 HTTPS、认证失败、代理缓冲、长流/慢消费者、场景退出和移动前后台切换。v1 不含 WebSocket、自动重连/回放、其他厂商小程序和模型供应商适配。

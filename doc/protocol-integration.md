@@ -74,6 +74,8 @@ for await (const event of client.stream("chatStream", request, { signal: cancel.
 
 SDK 校验接口、请求/响应字段、版本、hash、request ID 和连续序号。`failed` 是业务定义的终止事件，应用检查其 payload；`protocol.error` 或本地验证失败是传输/协议错误，TS 抛出 `ProtocolError`，原生 SDK 调用错误回调。原生 SDK 的 Completed/OnComplete 仅表示协议正常终止，不代表业务必然成功。
 
+TS Fetch 与微信/Cocos 回调传输会在发起网络请求前检查调用类型、token、非空 requestId、接口 timeoutMS 和正文。requestId 只允许 1–128 个 ASCII 字母、数字、`_`、`.`、`-`；token 不得含回车或换行；timeoutMS 来自接口元数据，须为正的安全整数。正文须符合 wireSchema 且可序列化为 JSON。具体错误见[TS SDK](../sdk/typescript/README.md)。
+
 本仓库 TS 包标记为 `private`，当前以源码或业务打包产物分发。浏览器不能直接执行 `.ts`；使用项目构建器，或运行已打包的验收网页。仓库示例可用 Node 24+ 的 TypeScript 支持运行，命令见 [协议示例](../examples/protocol/README.md)。
 
 ## 4. 选择平台适配器
@@ -111,7 +113,10 @@ go run . -protocol=new/contract.json -protocol_against=released/contract.json -p
 | 错误码 | 优先检查 |
 | --- | --- |
 | `version_mismatch` / `schema_mismatch` | 前后端是否加载同一生成包，有无旧包缓存或混合部署 |
-| `bad_request` / `invalid_message` | ProtoJSON 字段、未知成员、oneof、64 位整数字符串和取值范围 |
+| `bad_request` | 请求头与正文格式；TS 本地校验还检查 token 换行、requestId 格式和 timeoutMS |
+| `invalid_message` | ProtoJSON 字段、未知成员、oneof、64 位整数字符串、取值范围，以及请求能否序列化为 JSON |
+| `invalid_operation` | 接口 ID 是否存在，普通接口使用 call，流式接口使用 stream |
+| `unauthorized` | bearer 接口是否提供 token，以及后端 Authorize 是否接受它 |
 | `invalid_sequence` | SSE id/sequence 是否从 1 连续递增，代理或业务是否重复/丢失帧 |
 | `incomplete_stream` | 后端是否发送结束事件，代理是否缓冲、截断或超时 |
 | `unsupported_transport` | 目标网络 API 是否在 HTTP 完成前提供真实增量数据 |

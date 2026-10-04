@@ -46,7 +46,7 @@ go run ./examples/protocol
 | `examples/protocol/` | 示例 Proto、清单、七类生成文件和固定响应服务 |
 | `examples/platforms/` | 平台验收服务、打包入口、编辑器工程、运行器和实测记录 |
 | `v3/` | Excel/CSV 导表、配置读取库和各语言配置示例 |
-| `doc/` | [文档导航](doc/README.md)、接入、架构、部署与验收 |
+| `doc/` | [文档导航](doc/README.md)、接入、架构、部署、验收与[开发维护](doc/development.md) |
 
 ## 构建
 
@@ -185,10 +185,9 @@ bash v3/example/existingproto/Make.sh
 | `-cachedir` | 缓存目录，默认 `./.tabtoycache`，启用缓存后生效 |
 | `-version` | 显示构建版本信息 |
 
-普通分表输出不会自动创建目录，请提前创建：
+单文件和分表输出都会自动创建缺失的父目录：
 
 ```bash
-mkdir -p out/json out/pb
 tabforge -index=Index.xlsx -package=main -go_out=out/table_gen.go \
   -json_dir=out/json -proto_out=out/table.proto -pbbin_dir=out/pb
 ```
@@ -234,6 +233,8 @@ tabforge -index=Index.xlsx -proto_desc=schema.pb -proto_map=mapping.json \
 
 类型表支持 `int16`、`int32`、`int64`、`uint16`、`uint32`、`uint64`、`float` / `float32`、`double` / `float64`、`bool` 和 `string`；`int`、`uint` 分别按 32 位处理。Java 的无符号整数映射到相应有符号类型，应用需自行处理取值范围。
 
+专用二进制导出支持无符号类型的完整范围：`uint16` 最大为 `65535`，`uint32` 最大为 `4294967295`，`uint64` 最大为 `18446744073709551615`；负数和超出范围的输入会报错。
+
 布尔值接受 `true` / `false`、`1` / `0`、`是` / `否`，也接受源码中定义的部分大小写形式。CSV 中包含逗号、双引号或换行的单元格须按 CSV 规则加双引号，内部双引号写为两个双引号；已有 Proto 示例中的 JSON 单元格采用此写法。
 
 V3 不支持自定义默认值。普通输出中的空标量使用类型默认值；空枚举使用类型表的第一个枚举项。已有 Proto 映射中的空单元格不赋值，optional / oneof 可区分空值与显式填写的 `0`、`false`。Excel 中的大整数建议存为文本，避免输入文件先丢失精度。
@@ -253,6 +254,8 @@ V3 不支持自定义默认值。普通输出中的空标量使用类型默认�
 类型表中填写“数组切割”即定义数组，例如 `int32` 字段的分隔符为 `|` 时，单列单元格 `2|3` 导出为 `[2, 3]`。单列空单元格导出空数组。
 
 多个同名数组列按列合并，每个单元格是一个元素，例如两列分别为 `1`、空，导出为 `[1, 0]`。**多列模式不会再按分隔符拆分每个单元格**。同一数组字段在拆分表中的列数须一致。
+
+枚举数组逐个校验元素，每个非空元素须对应已定义的枚举标识名或字段名；非法元素会报 `UnknownEnumValue`。空元素按该枚举的默认项处理。
 
 ### 索引与拆分表
 
@@ -349,13 +352,15 @@ npm ci --prefix sdk/typescript --ignore-scripts
 npm --prefix sdk/typescript run check
 npm --prefix sdk/typescript test
 npm --prefix sdk/typescript run build:platforms
-go test -race ./...
+go test -race -count=1 ./...
 go test ./v3/model -run '^$' -bench BenchmarkTypeFieldLookup -benchmem
 ```
 
 配置测试覆盖类型和数据校验、已有 Proto 映射、缓存故障恢复、并发失败处理，以及无缓存、冷缓存、热缓存和并发加载时的导出一致性，见 [检查清单](v3/checker/TODO.md)。协议测试覆盖产物生成/升级、JSON/SSE、类型与身份校验、超时/取消、大小限制与各端联调。
 
 TS 集成测试需要 Node 24+；Godot/C# 联调需要分别设置 GODOT_BIN / DOTNET_BIN，未提供运行时会跳过对应测试。独立 C++ 核心与编辑器验收命令见 [平台验收](doc/platform-validation.md)，CI 安装范围见 [生产说明](doc/production.md)。
+
+源码职责、扩展导出器和分层验证步骤见 [开发维护指南](doc/development.md)；2026-10-04 的变更与回归结果见 [代码重构记录](doc/refactoring.md)。
 
 V2 导出器、V2→V3 迁移工具及其专用参数、示例和文档已移除。旧模式 `v2`、`exportorv2`、`v2tov3` 会报错；旧参数如 `-protover`、`-cpp_out`、`-type_out`、`-pbt_out` 不再可用。迁移输入须使用本文的 V3 索引表、类型表和数据表格式。
 

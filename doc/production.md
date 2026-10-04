@@ -67,7 +67,7 @@ go run . -protocol=new/contract.json -protocol_against=released/contract.json
 
 比较方向是旧客户端接入新服务端。旧客户端会严格拒绝未知响应字段和事件，所以新增响应字段或事件也报告为破坏变化；可选请求字段的增加通常保持旧请求可用。检查器不做自动版本协商，也不证明业务语义相同。相同 schema hash 仍是默认运行条件，升级需要协调客户端版本。
 
-生成文件先写临时文件并 sync，再替换目标，避免单个文件被写到一半。整目录不是原子事务；CI 中生成到独立目录，验证完成后把整个目录作为同一发布产物部署，不要一边生成一边让服务端读取。
+协议生成包的文件先写临时文件并 sync，再替换目标，避免单个文件被写到一半。整目录不是原子事务；CI 中生成到独立目录，验证完成后把整个目录作为同一发布产物部署，不要一边生成一边让服务端读取。普通 V3 配置导出使用直接文件写入，自动创建父目录，不提供这一临时文件替换保证。
 
 ## 运行环境与验收
 
@@ -86,10 +86,14 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
 CI 配置见 [test.yml](../.github/workflows/test.yml)：主任务在 Linux/macOS/Windows 检查 Go、TS 与平台示例构建；Godot 任务用经过 SHA-512 验证的 4.5.1 Linux 运行时测试 GDScript；native-cores 在 Linux/macOS 使用 .NET 8.0.425 执行 C# 核心 HTTP 联调，并用 clang++ 执行 C++ ASan/UBSan。未设置 GODOT_BIN / DOTNET_BIN 的本地 Go 测试会跳过对应运行时用例，不能把跳过当作通过。
 
+本地 HTTP 联调启用代理时，须将回环地址加入现有 `NO_PROXY` / `no_proxy`。源码职责、可选运行时和分层检查见[开发维护指南](development.md)。
+
 本地 Godot 实测是 macOS arm64 原生 headless；Web 流、移动导出与真实模型服务没有据此获得验证。四端独立核心和网络后端结果，与编辑器/真机结果分别记录在 [平台验收](platform-validation.md)。
 
 2026-10-03 本地验收通过：完整 Go 竞态测试、TypeScript 类型检查与 24 项测试、Godot 单元测试及真实 Go 服务联调、CLI 七类产物生成与升级拦截。Go 1.26.8 下 govulncheck 未发现已知可达漏洞；另通过 Chromium Fetch/XHR 各 12 项、微信开发者工具 12 项、C# 核心 Go HTTP/SSE 联调、C++ 核心 sanitizer 测试；当次 SDK 开发依赖 npm audit 未发现已知漏洞。平台环境与结果见 [历史记录](../examples/platforms/reports/2026-10-03.json)。
 
-适配代码和 CI 配置已随提交 `8b0dbb2` 推送到 main；远程执行结果以 [GitHub Actions](https://github.com/Coder-is/TabForge/actions) 为准。本地通过记录不代表远程 CI 结果已核实。
+2026-10-04 重构回归通过：完整 Go 竞态测试（包含 Node/C# 真实 HTTP 联调）、TS 类型检查与 25 项单元测试、平台资产构建、Godot 单元与 HTTP 联调、C++ sanitizer。29 个表格及协议生成文件与重构前逐字节一致；详情见[重构记录](refactoring.md)与[当次矩阵](platform-validation.md#2026-10-04-重构回归)。漏洞扫描及浏览器/微信开发者工具结果保留上述 2026-10-03 的日期，本次未重新执行。
+
+远程执行结果以 [GitHub Actions](https://github.com/Coder-is/TabForge/actions) 为准。本地通过记录不代表远程 CI 结果已核实。
 
 上线项目还需根据自身目标流数量和消息大小做容量测试，配置 TLS、鉴权/配额、代理禁用 SSE 缓冲与合适的流超时，并测试滚动部署期间的旧客户端。这里没有内置自动重连、回放、幂等重试、WebSocket 或供应商转换；配置依然由原有 V3 导表入口导出。
