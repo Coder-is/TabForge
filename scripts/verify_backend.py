@@ -93,16 +93,23 @@ if(!store.snapshot)throw Error('lost snapshot');
         java = java_home / "bin/java" if java_home else "java"
         javac = java_home / "bin/javac" if java_home else "javac"
         gson = root / "sdk/java/target/dependency/gson-2.13.2.jar"
-        cp = os.pathsep.join([str(out / ("tabforge-data-" + version + ".jar")), str(gson)])
+        # Java 17 Windows launchers narrow command-line arguments to the ANSI
+        # code page. Use ASCII relative arguments while keeping the actual
+        # consumer working directory and bundle path under the Unicode root.
+        shutil.copy(out / ("tabforge-data-" + version + ".jar"), work / "runtime.jar")
+        shutil.copy(gson, work / "gson.jar")
+        shutil.copy(root / "examples/backend/java/Client.java", work / "Client.java")
+        shutil.copy(root / "sdk/java/src/test/java/io/tabforge/data/BackendSmoke.java", work / "BackendSmoke.java")
+        shutil.copy(cases, work / "cases.json")
+        cp = os.pathsep.join(["runtime.jar", "gson.jar"])
         classes = work / "java-classes"
         classes.mkdir()
-        run([javac, "--release", "17", "-encoding", "UTF-8", "-cp", cp, "-d", classes,
-             root / "examples/backend/java/Client.java",
-             root / "sdk/java/src/test/java/io/tabforge/data/BackendSmoke.java"])
-        java_cp = str(classes) + os.pathsep + cp
-        java_output = run([java, "-cp", java_cp, "Client", bundle])
+        run([javac, "--release", "17", "-encoding", "UTF-8", "-cp", cp, "-d", "java-classes",
+             "Client.java", "BackendSmoke.java"])
+        java_cp = "java-classes" + os.pathsep + cp
+        java_output = run([java, "-Dfile.encoding=UTF-8", "-cp", java_cp, "Client", "Generated"])
         assert "18446744073709551615" in java_output
-        java_smoke = run([java, "-cp", java_cp, "io.tabforge.data.BackendSmoke", bundle, cases])
+        java_smoke = run([java, "-Dfile.encoding=UTF-8", "-cp", java_cp, "io.tabforge.data.BackendSmoke", "Generated", "cases.json"])
 
         # Consume the source ZIP through a local module replace, with business types
         # imported from this consumer's generated package rather than repository examples.
