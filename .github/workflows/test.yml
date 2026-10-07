@@ -24,6 +24,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - run: npm ci --prefix sdk/typescript --ignore-scripts
       - run: npm --prefix sdk/typescript run check
       - run: npm --prefix sdk/typescript test
@@ -31,7 +34,7 @@ jobs:
       - run: node --test editors/cocos/runner.test.cjs
       - run: npm --prefix sdk/typescript run build:platforms
       - run: go run ./cmd/release -check
-      - run: go test -race ./...
+      - run: python scripts/run_ci_check.py go test -race ./...
 
   godot:
     runs-on: ubuntu-latest
@@ -77,7 +80,7 @@ jobs:
       - run: python -m pip install setuptools wheel
       - run: python -m unittest discover -s scripts -p test_verify_release.py -v
       - run: go run ./cmd/package-backend -python=python
-      - run: python scripts/verify_backend.py
+      - run: python scripts/run_ci_check.py python scripts/verify_backend.py
 
   release-delivery:
     runs-on: macos-latest
