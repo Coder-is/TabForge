@@ -21,7 +21,9 @@ go run ./cmd/package-backend -out=outputs/releases/v3 # 构建四种语言的后
 
 第三版补齐 Go、Node.js/TypeScript、Java、Python 的后端包。Generated 新增数据清单，关联文件与根消息并记录校验值；运行时直接加载整个包，支持结构校验、独立数据快照与失败保留旧数据。Go 读取 ProtoJSON / Protobuf，其他三端读取 ProtoJSON。安装、示例和验证范围见 [第三版工作流](doc/backend-workflow.md)。
 
-第四版提供统一版本源与发布交付入口：`go run ./cmd/release` 构建便携项目、四种编辑器插件和四种后端包，完成独立安装及本机解包验收后生成完整交付目录。包含构建身份、验收报告、发布清单和 SHA-256；版本检查用 `go run ./cmd/release -check`。维护与安装步骤见 [第四部分：发布交付与安装验收](doc/release-workflow.md)。
+第四版提供统一版本源与发布交付入口：`go run ./cmd/release` 构建便携项目、五种编辑器插件和四种后端包，完成独立安装及本机解包验收后生成完整交付目录。包含构建身份、验收报告、发布清单和 SHA-256；版本检查用 `go run ./cmd/release -check`。维护与安装步骤见 [第四部分：发布交付与安装验收](doc/release-workflow.md)。
+
+0.5.0 的模板默认自动发现表文件，策划新增或删除同类型文件无需改索引。新增 Unreal 编辑器与数据源码插件，并提供干净构建、GitHub 标签交付和公共发布准备。见 [自动发现](doc/discovery-workflow.md)、[Unreal 插件](editors/unreal/README.md)、[发布流程](doc/publishing.md)。Unreal 引擎编译与 UI/设备实测尚未执行。
 
 原有工具提供两个独立入口：
 

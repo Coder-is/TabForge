@@ -5,6 +5,7 @@ import (
 	"github.com/Coder-is/TabForge/v3/report"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 )
 
@@ -84,7 +85,7 @@ func loadFileByExt(filename string, cacheDir string) (file TableFile, err error)
 		}
 	}()
 
-	switch filepath.Ext(filename) {
+	switch strings.ToLower(filepath.Ext(filename)) {
 	case ".xlsx", ".xls", ".xlsm":
 		file = NewXlsxFile(cacheDir)
 	case ".csv":

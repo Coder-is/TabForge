@@ -257,7 +257,7 @@ func packageTarget(root, out, stage string, t target, licenses map[string][]byte
 	if err := packageEditors(root, out, stage, binary, t, license, licenses); err != nil {
 		return err
 	}
-	fmt.Printf("Created project ZIP, VSIX and three engine plugins for %s\n", t.vscode)
+	fmt.Printf("Created project ZIP, VSIX and four engine plugins for %s\n", t.vscode)
 	return nil
 }
 
@@ -270,9 +270,9 @@ func packageEditors(root, out, stage, binary string, t target, license []byte, l
 	if t.os == "windows" {
 		name += ".exe"
 	}
-	for _, kind := range []string{"unity", "cocos", "godot"} {
+	for _, kind := range []string{"unity", "cocos", "godot", "unreal"} {
 		base := filepath.Join(stage, "editor-"+kind)
-		folder := map[string]string{"unity": "com.tabforge.editor", "cocos": "tabforge", "godot": "addons/tabforge"}[kind]
+		folder := map[string]string{"unity": "com.tabforge.editor", "cocos": "tabforge", "godot": "addons/tabforge", "unreal": "TabForge"}[kind]
 		dest := filepath.Join(base, filepath.FromSlash(folder))
 		if err := copyTree(filepath.Join(root, "editors", kind), dest, func(path string) bool { return path != "bin" && !strings.HasSuffix(path, ".test.cjs") }); err != nil {
 			return err

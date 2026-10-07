@@ -70,6 +70,10 @@ func engine(t *testing.T, kind string) string {
 		if err := os.WriteFile(filepath.Join(root, "project.godot"), []byte("config_version=5\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
+	case "unreal":
+		if err := os.WriteFile(filepath.Join(root, "Game.uproject"), []byte(`{"FileVersion":3}`), 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return root
 }
@@ -96,7 +100,7 @@ func snapshot(t *testing.T, root string) map[string]string {
 }
 func TestPortableImportsAndMetadata(t *testing.T) {
 	source := fixture(t)
-	for _, kind := range []string{"unity", "cocos", "godot"} {
+	for _, kind := range []string{"unity", "cocos", "godot", "unreal"} {
 		t.Run(kind, func(t *testing.T) {
 			root := engine(t, kind)
 			r, err := Import(context.Background(), source, root, kind, true)
@@ -163,7 +167,7 @@ func TestPortableImportsAndMetadata(t *testing.T) {
 func TestImportRejectsUnsafeDestinationsAndManifest(t *testing.T) {
 	source := fixture(t)
 	root := engine(t, "cocos")
-	if _, err := Import(context.Background(), source, root, "unreal", false); err == nil {
+	if _, err := Import(context.Background(), source, root, "unknown", false); err == nil {
 		t.Fatal("unknown engine accepted")
 	}
 	out := filepath.Join(root, "assets", "resources", "tabforge")

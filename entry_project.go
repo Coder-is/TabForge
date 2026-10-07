@@ -21,7 +21,7 @@ var paramInit = flag.String("init", "", "create a complete portable example proj
 var paramCheck = flag.Bool("check", false, "validate a project or editor import without publishing generated assets")
 var paramReport = flag.Bool("report", false, "write .tabforge-report.json for editor diagnostics")
 var paramImport = flag.String("import", "", "import an existing Generated bundle without source files")
-var paramEditor = flag.String("editor", "", "editor client: unity, cocos or godot")
+var paramEditor = flag.String("editor", "", "editor client: unity, cocos, godot or unreal")
 var paramEditorProject = flag.String("editor_project", "", "engine project directory receiving generated assets")
 
 //go:embed examples/complete/tabforge.json examples/complete/Tables examples/complete/Protocols examples/complete/Clients examples/complete/README.md examples/complete/Tools examples/complete/LICENSE
@@ -85,7 +85,7 @@ func projectEntry() (runErr error) {
 	if (*paramEditor == "") != (*paramEditorProject == "") {
 		return fmt.Errorf("-editor and -editor_project must be specified together")
 	}
-	if *paramEditor != "" && *paramEditor != "unity" && *paramEditor != "cocos" && *paramEditor != "godot" {
+	if *paramEditor != "" && *paramEditor != "unity" && *paramEditor != "cocos" && *paramEditor != "godot" && *paramEditor != "unreal" {
 		return fmt.Errorf("unknown editor %q", *paramEditor)
 	}
 	if *paramImport != "" && (path != "" || *paramEditor == "") {

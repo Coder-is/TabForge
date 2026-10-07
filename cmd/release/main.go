@@ -11,7 +11,10 @@ import (
 	"github.com/Coder-is/TabForge/internal/release"
 )
 
-type options struct{ out, target, python, maven, npm, mavenRepo string }
+type options struct {
+	out, target, python, maven, npm, mavenRepo string
+	clean                                      bool
+}
 
 func main() {
 	var o options
@@ -21,6 +24,7 @@ func main() {
 	flag.StringVar(&o.maven, "maven", "mvn", "Maven executable")
 	flag.StringVar(&o.npm, "npm", "npm", "npm executable")
 	flag.StringVar(&o.mavenRepo, "maven-repo", "", "optional Maven dependency cache directory")
+	flag.BoolVar(&o.clean, "require-clean", false, "refuse uncommitted source when building a public delivery")
 	check := flag.Bool("check", false, "check version consistency without building")
 	sync := flag.Bool("sync", false, "sync package versions from release.json without building")
 	flag.Parse()
@@ -70,6 +74,9 @@ func buildUsing(root string, o options, execute func(string, string, ...string) 
 	info, err := release.BuildInfo(root, "")
 	if err != nil {
 		return err
+	}
+	if o.clean && info.Dirty {
+		return fmt.Errorf("public delivery requires a clean Git working tree")
 	}
 	if o.out == "" {
 		o.out = filepath.Join(root, "outputs", "releases", info.Version)

@@ -117,3 +117,7 @@ Go 全量竞态回归通过，覆盖完整导出、失败保留旧目录、回�
 | npm `.tgz` | 独立消费端导入、配置读取、大整数精度与声明检查通过 | registry 发布未执行 |
 
 发行包在 `outputs/releases/`，包括 ZIP、VSIX、npm 包和 `SHA256SUMS`。本机解包验证结果保存在该目录的 `validation.json`；这是本地构建产物，不提交到源码。
+
+## 0.5.0 自动发现
+
+新的完整模板用 discover 替代 index，每次扫描当前输入目录；策划按约定新增、删除文件后直接导出，不维护索引。旧配置继续可用。规则、冲突处理与示例见 [目录自动发现](discovery-workflow.md)。Unreal 新增 -editor=unreal 导入和源码插件，见 [插件说明](../editors/unreal/README.md)。

@@ -30,12 +30,13 @@ type SchemaConfig struct {
 }
 
 type TableConfig struct {
-	Index   string            `json:"index"`
-	Mapping string            `json:"mapping,omitempty"`
-	Package string            `json:"package,omitempty"`
-	Root    string            `json:"root,omitempty"`
-	Tags    string            `json:"tags,omitempty"`
-	Outputs map[string]string `json:"outputs"`
+	Index    string            `json:"index,omitempty"`
+	Discover *DiscoverConfig   `json:"discover,omitempty"`
+	Mapping  string            `json:"mapping,omitempty"`
+	Package  string            `json:"package,omitempty"`
+	Root     string            `json:"root,omitempty"`
+	Tags     string            `json:"tags,omitempty"`
+	Outputs  map[string]string `json:"outputs"`
 }
 
 type Project struct {
@@ -178,12 +179,28 @@ func (p *Project) validate() error {
 		paths = append(paths, "protocol")
 	}
 	for _, tab := range p.Config.Tables {
-		index, err := relativePath(p.Root, tab.Index)
+		if (tab.Index == "") == (tab.Discover == nil) {
+			return fmt.Errorf("table job requires exactly one of index or discover")
+		}
+		var source string
+		if tab.Discover != nil {
+			source = tab.Discover.Dir
+		} else {
+			source = tab.Index
+		}
+		index, err := relativePath(p.Root, source)
 		if err != nil {
 			return err
 		}
 		// Table references resolve from the index directory; protect that whole tree.
-		inputs = append(inputs, filepath.Dir(index))
+		if tab.Discover != nil {
+			if err := tab.Discover.validate(p.Root); err != nil {
+				return err
+			}
+			inputs = append(inputs, index)
+		} else {
+			inputs = append(inputs, filepath.Dir(index))
+		}
 		if tab.Mapping != "" {
 			if p.Config.Schema == nil {
 				return fmt.Errorf("%s: mapping requires schema", tab.Index)

@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 TARGETS = ("darwin-arm64", "darwin-x64", "win32-x64", "win32-arm64")
-KINDS = ("project", "vscode", "unity", "cocos", "godot")
+KINDS = ("project", "vscode", "unity", "cocos", "godot", "unreal")
 
 
 def archive_name(kind, target):
@@ -92,7 +92,7 @@ def check_archive(path, kind, target, version):
         if not any("THIRD_PARTY_LICENSES/" in n for n in names):
             raise ValueError("Third party licenses missing")
         roots = {"project": "TabForgeProject", "vscode": "extension", "unity": "com.tabforge.editor",
-                 "cocos": "tabforge", "godot": "addons/tabforge"}
+                 "cocos": "tabforge", "godot": "addons/tabforge", "unreal":"TabForge"}
         root = roots[kind]
         if root + "/LICENSE" not in names:
             raise ValueError("Package license missing")
@@ -107,6 +107,13 @@ def check_archive(path, kind, target, version):
                 raise ValueError("VSIX identity mismatch")
         if kind == "godot" and ('version="' + version + '"') not in archive.read(root + "/plugin.cfg").decode("utf-8"):
             raise ValueError("Godot version mismatch")
+        if kind == "unreal":
+            plugin = json.loads(archive.read(root + "/TabForge.uplugin"))
+            if plugin["VersionName"] != version or {m["Name"] for m in plugin["Modules"]} != {"TabForgeData","TabForgeEditor"}:
+                raise ValueError("Unreal plugin identity mismatch")
+            for file in ("TabForgeDataBundle.cpp","TabForgeWire.h","TabForgeJsonSyntax.h","TabForgeSse.h"):
+                if root + "/Source/TabForgeData/Private/" + file not in names:
+                    raise ValueError("Missing Unreal data runtime: " + file)
         if kind == "project":
             manifest = json.loads(archive.read(root + "/Generated/data_manifest.json"))
             if manifest["format"] != "tabforge.data.v1" or not manifest["data"]:
@@ -167,7 +174,7 @@ def native_check(out, target, info):
                 project = game / "TabForge"
                 args = ["-project=" + str(project), "-report"]
                 init = ["-init=" + str(project), "-report"]
-                if kind in ("unity", "cocos", "godot"):
+                if kind in ("unity", "cocos", "godot", "unreal"):
                     if kind == "unity":
                         (game / "Assets").mkdir()
                         generated = game / "Assets/TabForgeGenerated"
@@ -176,9 +183,13 @@ def native_check(out, target, info):
                         (game / "assets").mkdir()
                         generated = game / "assets/resources/tabforge"
                         resource = generated
-                    else:
+                    elif kind == "godot":
                         (game / "project.godot").write_text("config_version=5\n", encoding="utf-8")
                         generated = game / "tabforge_generated"
+                        resource = generated
+                    else:
+                        (game / "Game.uproject").write_text('{"FileVersion":3}', encoding="utf-8")
+                        generated = game / "Content/TabForgeGenerated"
                         resource = generated
                     editor = ["-editor=" + kind, "-editor_project=" + str(game)]
                     args.extend(editor)

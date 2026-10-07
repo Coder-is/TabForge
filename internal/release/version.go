@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -34,6 +35,7 @@ func Version(root string) (string, error) {
 var jsonManifests = []string{
 	"sdk/typescript/package.json", "sdk/typescript/package-lock.json",
 	"editors/vscode/package.json", "editors/unity/package.json", "editors/cocos/package.json",
+	"editors/unreal/TabForge.uplugin",
 }
 
 // Versions checks package identities without modifying source files. Sync only
@@ -57,7 +59,29 @@ func Versions(root string, sync bool) error {
 		}
 		var current []string
 		var updated []byte
-		if strings.HasSuffix(name, ".json") {
+		if strings.HasSuffix(name, ".uplugin") {
+			var plugin struct {
+				Version     int    `json:"Version"`
+				VersionName string `json:"VersionName"`
+			}
+			if err := json.Unmarshal(raw, &plugin); err != nil {
+				return err
+			}
+			if plugin.Version <= 0 || plugin.VersionName == "" {
+				return fmt.Errorf("%s: invalid plugin version", name)
+			}
+			current = append(current, plugin.VersionName)
+			updated = raw
+			if plugin.VersionName != version {
+				namePattern := regexp.MustCompile(`("VersionName"\s*:\s*")[^"]+(")`)
+				integerPattern := regexp.MustCompile(`("Version"\s*:\s*)[0-9]+`)
+				if len(namePattern.FindAll(raw, -1)) != 1 || len(integerPattern.FindAll(raw, -1)) != 1 {
+					return fmt.Errorf("%s: ambiguous plugin version", name)
+				}
+				updated = namePattern.ReplaceAll(raw, []byte("${1}"+version+"${2}"))
+				updated = integerPattern.ReplaceAll(updated, []byte("${1}"+strconv.Itoa(plugin.Version+1)))
+			}
+		} else if strings.HasSuffix(name, ".json") {
 			var manifest map[string]json.RawMessage
 			if err := json.Unmarshal(raw, &manifest); err != nil {
 				return fmt.Errorf("%s: %w", name, err)

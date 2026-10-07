@@ -6,6 +6,9 @@
 | Unity/Cocos/Godot 插件，独立协议包导入和运行时读取 | [第二版编辑器工作流](editor-workflow.md) |
 | Go、Node、Java、Python 安装、读取、重新加载与排错 | [第三部分：后端第三方包接入](backend-workflow.md)、[四端示例](../examples/backend/README.md) |
 | 同步交付版本、一键构建发布包、核对清单和安装验收 | [第四部分：发布交付与安装验收](release-workflow.md) |
+| 放入目录自动识别表文件，无需维护索引 | [目录自动发现](discovery-workflow.md) |
+| Unreal 编辑器插件与 ProtoJSON 快照读取 | [Unreal 插件](../editors/unreal/README.md) |
+| GitHub 标签交付、公共包仓库和市场发布准备 | [发布流程](publishing.md)、[0.5.0 版本说明](release-notes.md) |
 | 了解项目、编译工具、导出 Excel/CSV 配置 | [项目首页与 V3 教程](../README.md) |
 | 从 Proto 建立前后端协议并接入客户端 | [前后端接入指南](protocol-integration.md) |
 | 运行普通 JSON 与 SSE 演示 | [协议示例](../examples/protocol/README.md) |

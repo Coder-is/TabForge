@@ -6,7 +6,7 @@
 
 便携包解压后直接双击 `Tools/TabForge/Export.bat`（Windows）或 `Export.command`（macOS）。不需要安装 Go、Node、protoc，也不用设置 PATH。项目程序已经在 `tabforge.json` 中设置输出规则。
 
-修改 `Tables/Items.xlsx`，保存并关闭后导出；成功结果在 `Generated/`。增加同类型的数据文件时，在 `Tables/Index.csv` 中加一行。`Items.csv` 是 Excel 的原始内容对照，不参与默认导出，不要同时把它与 Excel 加入索引导致重复 ID。
+修改 `Tables/Items.xlsx`，保存并关闭后导出；成功结果在 `Generated/`。增加同类型数据文件时，按 Items*.xlsx / ItemsExtra*.csv 命名放入 Tables；无需修改 Index.csv。`Items.csv` 是 Excel 的原始内容对照，不参与默认导出，不要同时把它与 Excel 加入索引导致重复 ID。
 
 仓库源码不带预编译可执行文件，开发者可在仓库根目录执行 `go run . -project=examples/complete`。用 `go run . -init=/自己的/项目目录` 创建独立模板、复制当前系统的工具并首次导出；有开发环境的人只需做一次，之后策划双击即可。
 
@@ -15,7 +15,7 @@
 | 文件 | 用途 |
 | --- | --- |
 | `tabforge.json` | 项目级配置；程序维护一次 |
-| `Tables/Index.csv` | 引用类型表、Excel 物品表、合并表和设置表 |
+| `Tables/Index.csv` | 旧索引模式的参考，默认自动发现不读取它 |
 | `Tables/Type.csv` | 输入列名、类型和数组分隔符 |
 | `Tables/Items.xlsx` | 策划填写的复杂结构数据 |
 | `Tables/mapping.json` | 输入字段与 Proto 字段的映射 |
@@ -81,3 +81,5 @@ Go 示例使用第三方包 `databundle`，同时展示强类型二进制与动�
 - 消耗 JSON 拼写未知字段：报字段错误。
 
 恢复后再次导出。失败期间上次的生成文件应保持原样。输入文件必须保留第一行列头，不要在数据中插入整行空白；Excel 的大整数必须保持文本格式。
+
+当前模板默认使用自动发现；配置和文件命名见 [目录自动发现](../../doc/discovery-workflow.md)。

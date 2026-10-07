@@ -4,6 +4,7 @@ import { cp, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { DataBundle, DataStore } from "./dist/node-bundle.js";
 
 const source = new URL("../../examples/complete/Generated/", import.meta.url);
@@ -35,7 +36,7 @@ test("Node bundle loads source-free snapshots and failed reloads preserve old da
 });
 
 test("all ProtoJSON wire structures and unambiguous parsing work in the Node package", async () => {
-    const bundle = await DataBundle.open(new URL(source).pathname);
+    const bundle = await DataBundle.open(fileURLToPath(source));
     assert.equal(bundle.decode("tabforge.demo.structures.Tree", '{"name":"root","children":[{"name":"leaf","state":"ACTIVE"}]}').children[0].name, "leaf");
     for (const json of ['{"items":[{"ownerId":18446744073709551615}]}','{"items":[{"textEffect":"x","powerEffect":0}]}','{"unknown":1}','{"items":[{"rarity":"NO"}]}','{"items":[],"\\u0069tems":[]}', '{"items":[{"createdAt":"2026-02-30T00:00:00Z"}]}']) {
         assert.throws(() => bundle.decode("tabforge.demo.config.Tables", json));

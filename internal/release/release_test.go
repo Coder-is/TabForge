@@ -25,6 +25,7 @@ func fixture(t *testing.T) string {
 		write(name, "{\n  \"name\":\"sample\", \"version\": \"0.3.0\", \"dependencies\":{\"thing\":\"0.3.0\"}\n}\n")
 	}
 	write("sdk/typescript/package-lock.json", `{"packages":{"node_modules/thing":{"version":"0.3.0"},"":{"dependencies":{"thing":"0.3.0"},"version":"0.3.0"}},"version":"0.3.0"}`)
+	write("editors/unreal/TabForge.uplugin", `{"Version":4,"VersionName":"0.3.0","Modules":[]}`)
 	write("sdk/python/pyproject.toml", "[project]\nversion = \"0.3.0\"\n")
 	write("sdk/java/pom.xml", `<project><artifactId>tabforge-data</artifactId><version>0.3.0</version><dependencies><dependency><version>0.3.0</version></dependency></dependencies></project>`)
 	write("editors/godot/plugin.cfg", "[plugin]\nversion=\"0.3.0\"\n")

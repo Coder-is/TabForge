@@ -1,13 +1,19 @@
 [build-system]
-requires = ["setuptools>=58", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "tabforge-data"
-version = "0.4.0"
+version = "0.5.0"
 description = "Validated TabForge ProtoJSON data bundle snapshots"
+readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 
 [tool.setuptools]
 packages = ["tabforge_data"]
+
+[project.urls]
+Homepage = "https://github.com/Coder-is/TabForge"
+Repository = "https://github.com/Coder-is/TabForge"
+Issues = "https://github.com/Coder-is/TabForge/issues"

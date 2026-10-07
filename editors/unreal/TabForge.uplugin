@@ -1,0 +1,13 @@
+{
+  "FileVersion": 3,
+  "Version": 5,
+  "VersionName": "0.5.0",
+  "FriendlyName": "TabForge Editor and Data",
+  "Description": "Portable table export, validated ProtoJSON import and runtime snapshots.",
+  "Category": "Tools",
+  "CanContainContent": false,
+  "Modules": [
+    { "Name": "TabForgeData", "Type": "Runtime", "LoadingPhase": "Default" },
+    { "Name": "TabForgeEditor", "Type": "Editor", "LoadingPhase": "PostEngineInit" }
+  ]
+}

@@ -59,6 +59,7 @@ function isSourceFile(root, file, config) {
     if (config.protocol) sources.push(config.protocol);
     for (const table of config.tables || []) {
         if (table.index) sources.push(path.dirname(table.index));
+        if (table.discover?.dir) sources.push(table.discover.dir);
         if (table.mapping) sources.push(table.mapping);
     }
     return sources.some(inside);

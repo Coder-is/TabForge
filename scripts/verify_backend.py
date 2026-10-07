@@ -19,10 +19,10 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     out = Path(args.out).resolve()
-    package = json.loads((root / "sdk/typescript/package.json").read_text())
+    package = json.loads((root / "sdk/typescript/package.json").read_text(encoding="utf-8"))
     version = package["version"]
     checksummed = set()
-    for line in (out / "SHA256SUMS").read_text().splitlines():
+    for line in (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
         expected, name = line.split("  ", 1)
         checksummed.add(name)
         assert hashlib.sha256((out / name).read_bytes()).hexdigest() == expected, name

@@ -58,6 +58,12 @@ func (p *Project) Diagnose(err error) []Diagnostic {
 		base = filepath.Dir(job.index)
 		d.Path = job.index
 	}
+	var discovery *DiscoveryError
+	if errors.As(err, &discovery) {
+		d.Code, d.Path = "discovery_input", discovery.Path
+		d.Hint = "按约定目录和文件名放置输入；新增业务类型请由程序维护发现规则。"
+		return []Diagnostic{d}
+	}
 	var source reporter.ErrorWithPos
 	if errors.As(err, &source) {
 		pos := source.GetPosition()

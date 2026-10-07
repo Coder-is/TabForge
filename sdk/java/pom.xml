@@ -1,10 +1,18 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>io.tabforge</groupId><artifactId>tabforge-data</artifactId><version>0.4.0</version>
+  <groupId>io.tabforge</groupId><artifactId>tabforge-data</artifactId><version>0.5.0</version>
   <name>TabForge data runtime</name><description>Validated ProtoJSON bundle snapshots</description>
   <url>https://github.com/Coder-is/TabForge</url>
+  <scm><connection>scm:git:https://github.com/Coder-is/TabForge.git</connection><developerConnection>scm:git:ssh://git@github.com/Coder-is/TabForge.git</developerConnection><url>https://github.com/Coder-is/TabForge</url></scm>
+  <developers><developer><id>tabforge</id><name>TabForge maintainers</name><url>https://github.com/Coder-is/TabForge</url></developer></developers>
   <licenses><license><name>MIT</name><url>https://opensource.org/license/mit</url></license></licenses>
   <properties><maven.compiler.release>17</maven.compiler.release><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties>
   <dependencies><dependency><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId><version>2.13.2</version></dependency></dependencies>
   <build><plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.14.1</version></plugin></plugins></build>
+  <profiles><profile><id>central-release</id><build><plugins>
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-source-plugin</artifactId><version>3.4.0</version><executions><execution><id>sources</id><goals><goal>jar-no-fork</goal></goals></execution></executions></plugin>
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-javadoc-plugin</artifactId><version>3.12.0</version><executions><execution><id>javadoc</id><goals><goal>jar</goal></goals></execution></executions></plugin>
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-gpg-plugin</artifactId><version>3.2.8</version><configuration><bestPractices>true</bestPractices></configuration><executions><execution><id>sign</id><phase>verify</phase><goals><goal>sign</goal></goals></execution></executions></plugin>
+    <plugin><groupId>org.sonatype.central</groupId><artifactId>central-publishing-maven-plugin</artifactId><version>0.11.0</version><extensions>true</extensions><configuration><publishingServerId>central</publishingServerId><autoPublish>false</autoPublish></configuration></plugin>
+  </plugins></build></profile></profiles>
 </project>

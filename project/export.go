@@ -131,7 +131,11 @@ func (p *Project) generate(ctx context.Context, publishOutput bool) (*Result, er
 			return nil, err
 		}
 		if err := p.exportTable(config, stage); err != nil {
-			return nil, &tableJobError{index: filepath.Join(p.Root, filepath.FromSlash(config.Index)), cause: err}
+			index := filepath.Join(p.Root, filepath.FromSlash(config.Index))
+			if config.Discover != nil {
+				index = filepath.Join(p.Root, filepath.FromSlash(config.Discover.Dir), ".tabforge-discovered")
+			}
+			return nil, &tableJobError{index: index, cause: err}
 		}
 		if config.Mapping != "" {
 			data, err := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(config.Mapping)))
@@ -265,6 +269,14 @@ func (p *Project) exportTable(config TableConfig, stage string) (err error) {
 	}
 	g.IndexGetter = helper.NewFileLoader(true, "")
 	g.TableGetter = rootedGetter{filepath.Dir(index), helper.NewFileLoader(true, "")}
+	if config.Discover != nil {
+		g.IndexFile = ""
+		g.IndexList, err = p.discover(config.Discover)
+		if err != nil {
+			return err
+		}
+		g.TableGetter = rootedGetter{filepath.Join(p.Root, filepath.FromSlash(config.Discover.Dir)), helper.NewFileLoader(true, "")}
+	}
 	g.GenBinary = config.Outputs["binary"] != "" || config.Outputs["binary_dir"] != ""
 	if config.Mapping != "" {
 		g.ProtoDescriptorFile = filepath.Join(stage, "schema", "schema.pb")

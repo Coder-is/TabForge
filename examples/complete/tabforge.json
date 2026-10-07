@@ -1,28 +1,76 @@
 {
   "version": 1,
   "output": "Generated",
-  "schema": { "dir": "Protocols", "go": true },
+  "schema": {
+    "dir": "Protocols",
+    "go": true
+  },
   "protocol": "Protocols/contract.json",
   "tables": [
     {
-      "index": "Tables/Index.csv",
       "mapping": "Tables/mapping.json",
       "outputs": {
         "protobuf": "data/tables.pbb",
         "protojson": "data/tables.json",
         "protobuf_dir": "data/by-table"
+      },
+      "discover": {
+        "dir": "Tables",
+        "types": [
+          "Type.csv"
+        ],
+        "rules": [
+          {
+            "pattern": "Items*.xlsx",
+            "type": "Item"
+          },
+          {
+            "pattern": "ItemsExtra*.csv",
+            "type": "Item"
+          },
+          {
+            "pattern": "Settings*.csv",
+            "type": "Settings"
+          }
+        ],
+        "exclude": [
+          "Items.csv",
+          "Basic/**"
+        ]
       }
     },
     {
-      "index": "Tables/Index.csv",
       "mapping": "Tables/mapping-map.json",
       "outputs": {
         "protobuf": "data/tables-map.pbb",
         "protojson": "data/tables-map.json"
+      },
+      "discover": {
+        "dir": "Tables",
+        "types": [
+          "Type.csv"
+        ],
+        "rules": [
+          {
+            "pattern": "Items*.xlsx",
+            "type": "Item"
+          },
+          {
+            "pattern": "ItemsExtra*.csv",
+            "type": "Item"
+          },
+          {
+            "pattern": "Settings*.csv",
+            "type": "Settings"
+          }
+        ],
+        "exclude": [
+          "Items.csv",
+          "Basic/**"
+        ]
       }
     },
     {
-      "index": "Tables/Basic/Index.csv",
       "package": "basic",
       "tags": "nogenfield_json:server",
       "outputs": {
@@ -38,6 +86,24 @@
         "proto": "basic/table.proto",
         "protobuf": "basic/tables.pbb",
         "jsontype": "basic/types.json"
+      },
+      "discover": {
+        "dir": "Tables/Basic",
+        "types": [
+          "Type.csv"
+        ],
+        "rules": [
+          {
+            "pattern": "Actors*.csv",
+            "type": "Actor"
+          },
+          {
+            "pattern": "Settings*.csv",
+            "type": "Settings",
+            "mode": "kv"
+          }
+        ],
+        "exclude": []
       }
     }
   ]

@@ -51,8 +51,14 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 		if _, err := os.Stat(filepath.Join(engineRoot, "project.godot")); err != nil {
 			return nil, fmt.Errorf("Godot project needs project.godot: %w", err)
 		}
+	case "unreal":
+		relative = "Content/TabForgeGenerated"
+		projects, err := filepath.Glob(filepath.Join(engineRoot, "*.uproject"))
+		if err != nil || len(projects) != 1 {
+			return nil, fmt.Errorf("Unreal project needs exactly one .uproject file")
+		}
 	default:
-		return nil, fmt.Errorf("unknown editor %q (unity, cocos or godot)", kind)
+		return nil, fmt.Errorf("unknown editor %q (unity, cocos, godot or unreal)", kind)
 	}
 	out, err := safePath(engineRoot, relative)
 	if err != nil {
@@ -174,7 +180,7 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 			return nil, fmt.Errorf("%s: %w", entry.Path, err)
 		}
 		// Keep original paths so clients can refer to multiple data roots.
-		if strings.HasPrefix(entry.Path, "schema/") || strings.HasPrefix(entry.Path, "Runtime/") || entry.Path == "wire_schema.json" {
+		if strings.HasPrefix(entry.Path, "schema/") || strings.HasPrefix(entry.Path, "Runtime/") || entry.Path == "wire_schema.json" || (kind == "unreal" && entry.Path == "bundle.json") {
 			return nil, fmt.Errorf("data path conflicts with client runtime: %s", entry.Path)
 		}
 		if err := write(filepath.ToSlash(filepath.Join(resource, entry.Path)), data); err != nil {
@@ -182,6 +188,19 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 		}
 	}
 	switch kind {
+	case "unreal":
+		bundle := struct {
+			Format     string             `json:"format"`
+			SchemaHash string             `json:"schemaHash"`
+			Data       []project.DataFile `json:"data"`
+		}{"tabforge.unreal.data.v1", manifest.SchemaHash, append([]project.DataFile{}, manifest.Data...)}
+		data, err := json.MarshalIndent(bundle, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		if err := write("bundle.json", append(data, '\n')); err != nil {
+			return nil, err
+		}
 	case "cocos":
 		for _, name := range []string{"data.ts", "schema.ts", "json.ts"} {
 			data, err := sdk.ClientAssets.ReadFile("typescript/" + name)

@@ -39,19 +39,19 @@ class BundleTests(unittest.TestCase):
                 store.reload(root)
             self.assertIs(store.snapshot, bundle)
             manifest_path = root / "data_manifest.json"
-            manifest = json.loads(manifest_path.read_text())
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             next(entry for entry in manifest["data"] if entry["path"] == "data/tables.json")["sha256"] = hashlib.sha256(invalid).hexdigest()
-            manifest_path.write_text(json.dumps(manifest))
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "declared field"):
                 DataBundle.open(root)
             manifest["data"][0]["path"] = "../escape"
-            manifest_path.write_text(json.dumps(manifest))
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaises(ValueError):
                 DataBundle.open(root)
 
     def test_shared_wire_cases(self):
         bundle = DataBundle.open(ROOT / "examples/complete/Generated")
-        cases = json.loads((ROOT / "examples/backend/cases.json").read_text())
+        cases = json.loads((ROOT / "examples/backend/cases.json").read_text(encoding="utf-8"))
         for case in cases:
             with self.subTest(case=case):
                 if case["valid"]:

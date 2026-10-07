@@ -2,7 +2,7 @@
   "name": "tabforge",
   "displayName": "TabForge",
   "description": "Export Excel/CSV and Proto projects with the portable TabForge compiler.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "tabforge",
   "license": "MIT",
   "engines": {
@@ -24,15 +24,15 @@
     "commands": [
       {
         "command": "tabforge.export",
-        "title": "TabForge: 导出项目"
+        "title": "TabForge: \u5bfc\u51fa\u9879\u76ee"
       },
       {
         "command": "tabforge.check",
-        "title": "TabForge: 校验项目"
+        "title": "TabForge: \u6821\u9a8c\u9879\u76ee"
       },
       {
         "command": "tabforge.report",
-        "title": "TabForge: 查看最近报告"
+        "title": "TabForge: \u67e5\u770b\u6700\u8fd1\u62a5\u544a"
       }
     ],
     "configuration": {
@@ -59,5 +59,10 @@
   },
   "scripts": {
     "test": "node --test extension.test.cjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Coder-is/TabForge.git",
+    "directory": "editors/vscode"
   }
 }
