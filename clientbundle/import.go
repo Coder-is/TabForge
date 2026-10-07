@@ -72,8 +72,11 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 	if err != nil {
 		return nil, fmt.Errorf("cannot lock engine import: %w", err)
 	}
-	defer lock.Close()
-	defer os.Remove(lockPath)
+	defer func() {
+		// Windows cannot remove a lock file while its handle is still open.
+		lock.Close()
+		os.Remove(lockPath)
+	}()
 	if _, err := fmt.Fprintln(lock, os.Getpid()); err != nil {
 		return nil, err
 	}

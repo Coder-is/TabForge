@@ -117,6 +117,7 @@ jobs:
 
   native-cores:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -132,6 +133,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.425'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - name: C++ parser and strict JSON with sanitizers
         shell: bash
         run: |
@@ -142,4 +146,4 @@ jobs:
           DOTNET_BIN: dotnet
           DOTNET_CLI_TELEMETRY_OPTOUT: '1'
           DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
-        run: go test -race -count=1 -v ./internal/platformtest ./clientbundle
+        run: python scripts/run_ci_check.py go test -race -count=1 ./internal/platformtest ./clientbundle

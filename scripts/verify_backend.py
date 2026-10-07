@@ -38,6 +38,7 @@ def main():
         env = os.environ.copy()
         # All installs and caches used by this verifier belong to its temporary project.
         env["npm_config_cache"] = str(work / "npm-cache")
+        env["PYTHONIOENCODING"] = "utf-8"
 
         def run(command, cwd=work, extra=None):
             child_env = env.copy()
