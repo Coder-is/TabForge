@@ -146,4 +146,6 @@ jobs:
           DOTNET_BIN: dotnet
           DOTNET_CLI_TELEMETRY_OPTOUT: '1'
           DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
-        run: python scripts/run_ci_check.py go test -race -count=1 ./internal/platformtest ./clientbundle
+        # Both packages launch dotnet. Serialize packages so first-use NuGet
+        # migrations cannot race while creating the shared Unix mutex directory.
+        run: python scripts/run_ci_check.py go test -race -count=1 -p=1 ./internal/platformtest ./clientbundle

@@ -72,7 +72,7 @@ DOTNET_BIN=dotnet go test -race -count=1 -v ./internal/platformtest
 GODOT_BIN=/absolute/path/to/godot go test -race -count=1 -v ./protocol/httptransport -run Godot
 ```
 
-也可同时设置 `DOTNET_BIN` 与 `GODOT_BIN` 后执行完整 `go test -race -count=1 -v ./...`。未设置时，对应 C# / Godot 用例会跳过；Node 未安装或版本不足也会跳过其联调。
+也可同时设置 `DOTNET_BIN` 与 `GODOT_BIN` 后执行完整 `go test -race -count=1 -p=1 -v ./...`。多个包启动 .NET 时按包顺序执行，避免 Unix 上首次启动的 NuGet 迁移目录竞争；包内仍启用 race 检查。未设置时，对应 C# / Godot 用例会跳过；Node 未安装或版本不足也会跳过其联调。
 
 启用了系统 HTTP 代理的环境，将 `127.0.0.1`、`localhost`、`::1` 加入现有 `NO_PROXY` / `no_proxy`，让本地联调请求直达回环服务。保留原有排除项。
 
