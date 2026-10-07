@@ -21,6 +21,8 @@ go run ./cmd/package-backend -out=outputs/releases/v3 # 构建四种语言的后
 
 第三版补齐 Go、Node.js/TypeScript、Java、Python 的后端包。Generated 新增数据清单，关联文件与根消息并记录校验值；运行时直接加载整个包，支持结构校验、独立数据快照与失败保留旧数据。Go 读取 ProtoJSON / Protobuf，其他三端读取 ProtoJSON。安装、示例和验证范围见 [第三版工作流](doc/backend-workflow.md)。
 
+第四版提供统一版本源与发布交付入口：`go run ./cmd/release` 构建便携项目、四种编辑器插件和四种后端包，完成独立安装及本机解包验收后生成完整交付目录。包含构建身份、验收报告、发布清单和 SHA-256；版本检查用 `go run ./cmd/release -check`。维护与安装步骤见 [第四部分：发布交付与安装验收](doc/release-workflow.md)。
+
 原有工具提供两个独立入口：
 
 | 场景 | 维护的输入 | 输出与接入 |
@@ -60,6 +62,7 @@ go run ./examples/protocol
 | --- | --- |
 | `project/`、`clientbundle/`、`editors/` | 项目导出、引擎资产导入和四种编辑器插件 |
 | `examples/complete/`、`cmd/package/` | 完整模板和便携项目/插件 ZIP、VSIX 打包 |
+| `release.json`、`cmd/release/`、`cmd/package-backend/` | 统一交付版本、完整构建与安装验收、四种后端包打包 |
 | `protocol/` | 清单/描述文件校验、产物生成、兼容性检查和 Go HTTP/SSE 服务 |
 | `sdk/` | TypeScript、微信、Cocos、Unity、Unreal、Godot 客户端 |
 | `examples/protocol/` | 示例 Proto、清单、七类生成文件和固定响应服务 |

@@ -15,6 +15,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="outputs/releases/v3")
     parser.add_argument("--java-home", default=os.environ.get("JAVA_HOME", ""))
+    parser.add_argument("--npm", default="npm")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     out = Path(args.out).resolve()
@@ -43,9 +44,12 @@ def main():
             if extra:
                 child_env.update(extra)
             command = [str(value) for value in command]
-            if os.name == "nt" and command[0] == "npm":
-                npm = Path(shutil.which("npm"))
-                command = [shutil.which("node"), str(npm.parent / "node_modules/npm/bin/npm-cli.js")] + command[1:]
+            if command[0] == "npm":
+                npm = Path(shutil.which(args.npm) or args.npm)
+                if os.name == "nt" and npm.suffix.lower() in (".cmd", ".bat"):
+                    command = [shutil.which("node"), str(npm.parent / "node_modules/npm/bin/npm-cli.js")] + command[1:]
+                else:
+                    command[0] = str(npm)
             result = subprocess.run(command, cwd=cwd, env=child_env,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, encoding="utf-8", timeout=240)

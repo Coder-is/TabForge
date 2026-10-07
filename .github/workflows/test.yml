@@ -30,6 +30,7 @@ jobs:
       - run: node --test editors/vscode/extension.test.cjs
       - run: node --test editors/cocos/runner.test.cjs
       - run: npm --prefix sdk/typescript run build:platforms
+      - run: go run ./cmd/release -check
       - run: go test -race ./...
 
   godot:
@@ -74,8 +75,42 @@ jobs:
           java-version: '17'
       - run: npm ci --prefix sdk/typescript --ignore-scripts
       - run: python -m pip install setuptools wheel
+      - run: python -m unittest discover -s scripts -p test_verify_release.py -v
       - run: go run ./cmd/package-backend -python=python
       - run: python scripts/verify_backend.py
+
+  release-delivery:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.8'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - run: npm ci --prefix sdk/typescript --ignore-scripts
+      - run: python -m pip install setuptools wheel
+      - name: Build and install native delivery
+        shell: bash
+        run: |
+          target=darwin-x64
+          if [ "$(uname -m)" = arm64 ]; then target=darwin-arm64; fi
+          go run ./cmd/release -python=python -target="$target" -out=outputs/delivery
+          python scripts/verify_release.py --out=outputs/delivery --integrity-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validated-delivery
+          path: outputs/delivery/
+          if-no-files-found: error
 
   native-cores:
     strategy:

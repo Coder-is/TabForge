@@ -2,7 +2,7 @@
   "name": "tabforge",
   "displayName": "TabForge",
   "description": "Export Excel/CSV and Proto projects with the portable TabForge compiler.",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "publisher": "tabforge",
   "license": "MIT",
   "engines": {

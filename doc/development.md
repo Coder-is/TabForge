@@ -6,6 +6,8 @@
 
 | 要修改的行为 | 源码入口 |
 | --- | --- |
+| 交付版本、构建身份与发布清单 | [release.json](../release.json)、[internal/release/](../internal/release)、[cmd/release/](../cmd/release) |
+| 安装包与解包验收 | [verify_backend.py](../scripts/verify_backend.py)、[verify_release.py](../scripts/verify_release.py) |
 | CLI 参数、模式选择 | [flag.go](../flag.go)、[main.go](../main.go)、[entry_v3.go](../entry_v3.go) |
 | 索引、类型和数据表编译、合并 | [v3/compiler/](../v3/compiler)；流程入口 [flow.go](../v3/compiler/flow.go) |
 | 字段、枚举、重复值和输出名称校验 | [v3/checker/](../v3/checker)、[gen/names.go](../v3/gen/names.go) |
@@ -48,6 +50,7 @@ npm ci --prefix sdk/typescript --ignore-scripts
 npm --prefix sdk/typescript run check
 npm --prefix sdk/typescript test
 npm --prefix sdk/typescript run build:platforms
+go run ./cmd/release -check
 go test -race -count=1 ./...
 git diff --check
 ```

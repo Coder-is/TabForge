@@ -4,8 +4,6 @@ package main
 
 import (
 	"archive/zip"
-	"crypto/sha256"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -15,6 +13,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/Coder-is/TabForge/internal/release"
 )
 
 func main() {
@@ -81,21 +81,18 @@ func build(out, maven, python, npm, mavenRepo string) error {
 	if err != nil {
 		return err
 	}
+	if err := release.Versions(root, false); err != nil {
+		return err
+	}
+	version, err := release.Version(root)
+	if err != nil {
+		return err
+	}
 	out, err = filepath.Abs(out)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(out, 0755); err != nil {
-		return err
-	}
-	var version struct {
-		Version string `json:"version"`
-	}
-	raw, err := os.ReadFile(filepath.Join(root, "sdk/typescript/package.json"))
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(raw, &version); err != nil {
 		return err
 	}
 	if err := run(filepath.Join(root, "sdk", "typescript"), npm, "pack", "--pack-destination", out); err != nil {
@@ -111,7 +108,7 @@ func build(out, maven, python, npm, mavenRepo string) error {
 	if err := run(root, maven, args...); err != nil {
 		return err
 	}
-	name := "tabforge-data-" + version.Version
+	name := "tabforge-data-" + version
 	for _, pair := range [][2]string{{"sdk/java/target/" + name + ".jar", name + ".jar"}, {"sdk/java/pom.xml", name + ".pom"}} {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(pair[0])))
 		if err != nil {
@@ -121,25 +118,10 @@ func build(out, maven, python, npm, mavenRepo string) error {
 			return err
 		}
 	}
-	if err := goArchive(root, filepath.Join(out, "tabforge-go-"+version.Version+".zip")); err != nil {
+	if err := goArchive(root, filepath.Join(out, "tabforge-go-"+version+".zip")); err != nil {
 		return err
 	}
-	var sums strings.Builder
-	files, err := os.ReadDir(out)
-	if err != nil {
-		return err
-	}
-	for _, file := range files {
-		if file.IsDir() || file.Name() == "SHA256SUMS" || (!strings.HasSuffix(file.Name(), ".jar") && !strings.HasSuffix(file.Name(), ".pom") && !strings.HasSuffix(file.Name(), ".tgz") && !strings.HasSuffix(file.Name(), ".whl") && !strings.HasSuffix(file.Name(), ".zip") && !strings.HasSuffix(file.Name(), ".vsix")) {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(out, file.Name()))
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(&sums, "%x  %s\n", sha256.Sum256(data), file.Name())
-	}
-	return os.WriteFile(filepath.Join(out, "SHA256SUMS"), []byte(sums.String()), 0644)
+	return release.WritePackageSums(out)
 }
 
 // This source archive is a Go module usable via replace, containing the runtime

@@ -1,6 +1,6 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>io.tabforge</groupId><artifactId>tabforge-data</artifactId><version>0.3.0</version>
+  <groupId>io.tabforge</groupId><artifactId>tabforge-data</artifactId><version>0.4.0</version>
   <name>TabForge data runtime</name><description>Validated ProtoJSON bundle snapshots</description>
   <url>https://github.com/Coder-is/TabForge</url>
   <licenses><license><name>MIT</name><url>https://opensource.org/license/mit</url></license></licenses>

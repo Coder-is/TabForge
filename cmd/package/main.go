@@ -6,7 +6,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Coder-is/TabForge/internal/release"
 	"github.com/Coder-is/TabForge/project"
 )
 
@@ -29,20 +29,37 @@ var targets = []target{{"darwin", "arm64", "darwin-arm64"}, {"darwin", "amd64", 
 func main() {
 	out := flag.String("out", "outputs/releases", "release directory")
 	selected := flag.String("target", "all", "all, darwin-arm64, darwin-x64, win32-x64 or win32-arm64")
+	infoPath := flag.String("build-info", "", "optional shared build-info JSON")
 	flag.Parse()
-	if err := build(*out, *selected); err != nil {
+	if err := build(*out, *selected, *infoPath); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func build(out, selected string) error {
+func build(out, selected, infoPath string) error {
 	root, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
 		return fmt.Errorf("run from the repository root: %w", err)
+	}
+	if err := release.Versions(root, false); err != nil {
+		return err
+	}
+	info, err := release.BuildInfo(root, infoPath)
+	if err != nil {
+		return err
+	}
+	if selected != "all" {
+		found := false
+		for _, t := range targets {
+			found = found || selected == t.vscode
+		}
+		if !found {
+			return fmt.Errorf("unknown target %q", selected)
+		}
 	}
 	if err := os.MkdirAll(out, 0755); err != nil {
 		return err
@@ -62,7 +79,7 @@ func build(out, selected string) error {
 		if err != nil {
 			return err
 		}
-		err = packageTarget(root, out, stage, t, licenses)
+		err = packageTarget(root, out, stage, t, licenses, info)
 		os.RemoveAll(stage)
 		if err != nil {
 			return err
@@ -71,22 +88,10 @@ func build(out, selected string) error {
 	if !matched {
 		return fmt.Errorf("unknown target %q", selected)
 	}
-	var sums strings.Builder
-	entries, err := os.ReadDir(out)
-	if err != nil {
+	if err := release.WriteJSON(filepath.Join(out, "build-info.json"), info); err != nil {
 		return err
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".zip") && !strings.HasSuffix(entry.Name(), ".vsix") && !strings.HasSuffix(entry.Name(), ".tgz") && !strings.HasSuffix(entry.Name(), ".whl") && !strings.HasSuffix(entry.Name(), ".jar") && !strings.HasSuffix(entry.Name(), ".pom")) {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(out, entry.Name()))
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(&sums, "%x  %s\n", sha256.Sum256(data), entry.Name())
-	}
-	return os.WriteFile(filepath.Join(out, "SHA256SUMS"), []byte(sums.String()), 0644)
+	return release.WritePackageSums(out)
 }
 
 func copyTree(source, dest string, allow func(string) bool) error {
@@ -122,7 +127,7 @@ func copyTree(source, dest string, allow func(string) bool) error {
 	})
 }
 
-func packageTarget(root, out, stage string, t target, licenses map[string][]byte) error {
+func packageTarget(root, out, stage string, t target, licenses map[string][]byte, info release.Info) error {
 	projectDir := filepath.Join(stage, "TabForgeProject")
 	if err := copyTree(filepath.Join(root, "examples", "complete"), projectDir, func(name string) bool {
 		return !strings.HasPrefix(name, "Generated") && !strings.HasPrefix(name, ".tabforge-")
@@ -134,7 +139,7 @@ func packageTarget(root, out, stage string, t target, licenses map[string][]byte
 		name += ".exe"
 	}
 	binary := filepath.Join(projectDir, "Tools", "TabForge", name)
-	cmd := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w", "-o", binary, ".")
+	cmd := exec.Command("go", "build", "-trimpath", "-ldflags="+info.LDFlags(), "-o", binary, ".")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+t.os, "GOARCH="+t.arch)
 	if data, err := cmd.CombinedOutput(); err != nil {
