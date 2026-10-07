@@ -1,0 +1,3 @@
+# Generated bundle manifests bind exact file bytes. Preserve them when a
+# Windows checkout enables core.autocrlf, including JSON and binary payloads.
+examples/complete/Generated/** -text
