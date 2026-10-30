@@ -6,7 +6,6 @@ toolchain go1.26.8
 
 require (
 	github.com/bufbuild/protocompile v0.14.1
-	github.com/davyxu/golog v0.1.0
 	github.com/golang/protobuf v1.5.4
 	github.com/tealeg/xlsx v1.0.5
 	golang.org/x/text v0.42.0

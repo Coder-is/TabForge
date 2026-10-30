@@ -344,6 +344,7 @@ func thirdPartyLicenses(root string) (map[string][]byte, error) {
 		if module.Dir == "" {
 			return nil, fmt.Errorf("module source unavailable for license collection: %s", module.Path)
 		}
+		found := false
 		for _, name := range []string{"LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "NOTICE", "NOTICE.txt"} {
 			data, err := os.ReadFile(filepath.Join(module.Dir, name))
 			if os.IsNotExist(err) {
@@ -353,6 +354,11 @@ func thirdPartyLicenses(root string) (map[string][]byte, error) {
 				return nil, err
 			}
 			files[module.Path+"@"+module.Version+"/"+name+".txt"] = data
+			found = true
+		}
+		// Never ship a dependency without its license terms.
+		if !found {
+			return nil, fmt.Errorf("no license file for dependency %s@%s", module.Path, module.Version)
 		}
 	}
 	license, err := os.ReadFile(filepath.Join(runtime.GOROOT(), "LICENSE"))

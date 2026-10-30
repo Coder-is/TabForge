@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -77,5 +78,22 @@ func TestCopiedLaunchersUseUnixLineEndings(t *testing.T) {
 	batch, _ := os.ReadFile(filepath.Join(dest, "Export.bat"))
 	if string(batch) != "@echo off\r\n" {
 		t.Fatalf("batch file changed: %q", batch)
+	}
+}
+
+// Every runtime dependency must ship its license; a module without one fails.
+func TestThirdPartyLicensesCoverEveryDependency(t *testing.T) {
+	licenses, err := thirdPartyLicenses(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, module := range []string{"google.golang.org/protobuf@", "github.com/tealeg/xlsx@"} {
+		found := false
+		for name := range licenses {
+			found = found || strings.HasPrefix(name, module)
+		}
+		if !found {
+			t.Fatalf("missing license for %s in %v", module, licenses)
+		}
 	}
 }
