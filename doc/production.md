@@ -71,7 +71,7 @@ go run . -protocol=new/contract.json -protocol_against=released/contract.json
 
 ## 运行环境与验收
 
-依赖使用 Protobuf 1.36.12、兼容层 1.5.4、x/net 0.59.0、x/text 0.42.0。项目最低 Go 补丁版固定为 1.26.6，toolchain 与 CI 固定 1.26.8。TypeScript Fetch 源码面向 ES2022 与标准 fetch/Streams/AbortController/TextDecoder；微信/Cocos 示例打包为 ES2020，使用对应平台 Transport。原生 SDK 的宿主和版本要求见 [接入指南](protocol-integration.md#4-选择平台适配器)。
+依赖使用 Protobuf 1.36.12、兼容层 1.5.4、x/text 0.42.0。项目最低 Go 补丁版固定为 1.26.6，toolchain 与 CI 固定 1.26.8。TypeScript Fetch 源码面向 ES2022 与标准 fetch/Streams/AbortController/TextDecoder；微信/Cocos 示例打包为 ES2020，使用对应平台 Transport。原生 SDK 的宿主和版本要求见 [接入指南](protocol-integration.md#4-选择平台适配器)。
 
 ```bash
 npm ci --prefix sdk/typescript --ignore-scripts

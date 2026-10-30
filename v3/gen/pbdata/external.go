@@ -327,7 +327,17 @@ func GenerateJSON(globals *model.Globals) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return protojson.MarshalOptions{Indent: "  ", Resolver: schema.types}.Marshal(message)
+	data, err := protojson.MarshalOptions{Resolver: schema.types}.Marshal(message)
+	if err != nil {
+		return nil, err
+	}
+	// protojson deliberately varies its whitespace between builds; re-indent
+	// so outputs and their manifest hashes are reproducible.
+	var output bytes.Buffer
+	if err := json.Indent(&output, data, "", "  "); err != nil {
+		return nil, err
+	}
+	return output.Bytes(), nil
 }
 
 func outputExternal(globals *model.Globals, dir string) error {

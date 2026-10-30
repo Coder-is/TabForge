@@ -226,6 +226,12 @@ namespace tabtoy
                         this.ReadBool(ref dummy);
                     }
                     break;
+                case 112: // float64
+                    {
+                        var dummy = new List<double>();
+                        this.ReadDouble(ref dummy);
+                    }
+                    break;
                 case 111: // struct
                     {
                         UInt32 len = 0;
@@ -299,7 +305,7 @@ namespace tabtoy
 
         public void ReadDouble(ref double v)
         {
-            ValidateDataBound(sizeof(float));
+            ValidateDataBound(sizeof(double));
 
             v = _binaryReader.ReadDouble();
         }
@@ -396,6 +402,13 @@ namespace tabtoy
         {
             float value = 0;
             ReadFloat(ref value);
+            v.Add(value);
+        }
+
+        public void ReadDouble(ref List<double> v)
+        {
+            double value = 0;
+            ReadDouble(ref value);
             v.Add(value);
         }
 

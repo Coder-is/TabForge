@@ -3,6 +3,8 @@ package luasrc
 import (
 	"github.com/Coder-is/TabForge/v3/gen"
 	"github.com/Coder-is/TabForge/v3/model"
+	"math"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -20,7 +22,7 @@ func WrapValue(globals *model.Globals, cell *model.Cell, valueType *model.TypeDe
 				if index > 0 {
 					sb.WriteString(",")
 				}
-				sb.WriteString(gen.WrapSingleValue(globals, valueType, elementValue))
+				sb.WriteString(wrapSingleValue(globals, valueType, elementValue))
 			}
 		}
 
@@ -35,8 +37,29 @@ func WrapValue(globals *model.Globals, cell *model.Cell, valueType *model.TypeDe
 			value = cell.Value
 		}
 
-		return gen.WrapSingleValue(globals, valueType, value)
+		return wrapSingleValue(globals, valueType, value)
 	}
+}
+
+func wrapSingleValue(globals *model.Globals, valueType *model.TypeDefine, value string) string {
+	text := gen.WrapSingleValue(globals, valueType, value)
+	switch model.LanguagePrimitive(valueType.FieldType, "go") {
+	case "int16", "int32", "int64", "uint16", "uint32", "uint64", "float32", "float64":
+		// The checker accepts "+1", "NaN" and "Inf", but Lua has no unary plus or
+		// NaN/Inf literals (they would be syntax errors or nil globals).
+		if f, err := strconv.ParseFloat(text, 64); err == nil {
+			switch {
+			case math.IsNaN(f):
+				return "(0/0)"
+			case math.IsInf(f, 1):
+				return "math.huge"
+			case math.IsInf(f, -1):
+				return "-math.huge"
+			}
+		}
+		return strings.TrimPrefix(text, "+")
+	}
+	return text
 }
 
 func init() {

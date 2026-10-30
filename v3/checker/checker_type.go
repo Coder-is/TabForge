@@ -4,6 +4,7 @@ import (
 	"github.com/Coder-is/TabForge/v3/model"
 	"github.com/Coder-is/TabForge/v3/report"
 	"go/token"
+	"strconv"
 )
 
 func CheckType(typeTab *model.TypeTable) {
@@ -11,6 +12,8 @@ func CheckType(typeTab *model.TypeTable) {
 	checkFieldNames(typeTab)
 
 	checkEmptyEnumValues(typeTab)
+
+	checkEnumValueFormat(typeTab)
 
 	checkDuplicateEnumValues(typeTab)
 
@@ -31,6 +34,19 @@ func checkEmptyEnumValues(typeTab *model.TypeTable) {
 		if td.Define.Kind == model.TypeUsage_Enum && td.Define.Value == "" {
 			cell := td.Tab.GetValueByName(td.Row, "值")
 			report.ReportError("EnumValueEmpty", cell)
+		}
+	}
+}
+
+// Generators emit enum values verbatim; leading zeros would be octal in Go/Java.
+func checkEnumValueFormat(typeTab *model.TypeTable) {
+	for _, td := range typeTab.Raw() {
+		if td.Define.Kind != model.TypeUsage_Enum || td.Define.Value == "" {
+			continue
+		}
+		if v, err := strconv.ParseInt(td.Define.Value, 10, 32); err != nil || strconv.FormatInt(v, 10) != td.Define.Value {
+			cell := td.Tab.GetValueByName(td.Row, "值")
+			report.ReportError("InvalidEnumValue", cell)
 		}
 	}
 }

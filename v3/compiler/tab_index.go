@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"github.com/Coder-is/TabForge/v3/model"
+	"github.com/Coder-is/TabForge/v3/report"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +15,11 @@ func parseIndexRow(tab *model.DataTable, symbols *model.TypeTable) (pragmaList [
 		var pragma model.IndexDefine
 		if !ParseRow(&pragma, tab, row, symbols) {
 			continue
+		}
+
+		// Unknown modes resolve to None, which would silently skip the table.
+		if pragma.Kind == model.TableKind_None {
+			report.ReportError("UnknownTableKind", tab.GetValueByName(row, "模式"))
 		}
 
 		if pragma.Kind == model.TableKind_Type {

@@ -15,8 +15,6 @@ func wrapSingleValue(globals *model.Globals, valueType *model.TypeDefine, value 
 	switch {
 	case valueType.FieldType == "string": // 字符串
 		return util.StringWrap(util.StringEscape(value))
-	case valueType.FieldType == "float32":
-		return value
 	case globals.Types.IsEnumKind(valueType.FieldType): // 枚举
 		t := globals.Types.ResolveEnum(valueType.FieldType, value)
 		if t != nil {
@@ -54,7 +52,7 @@ func init() {
 			case "short":
 				convertedType = "Short"
 			case "long":
-				convertedType = "Integer"
+				convertedType = "Long"
 			case "float":
 				convertedType = "Float"
 			case "double":
@@ -80,8 +78,6 @@ func init() {
 		} else {
 			return wrapSingleValue(globals, tf, "")
 		}
-
-		return convertedType
 	}
 
 }

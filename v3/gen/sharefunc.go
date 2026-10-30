@@ -16,7 +16,8 @@ type TableIndices struct {
 func KeyValueTypeNames(globals *model.Globals) (ret []string) {
 	seen := make(map[string]bool)
 	for _, pragma := range globals.IndexList {
-		if pragma.Kind == model.TableKind_KeyValue && !seen[pragma.TableType] {
+		// Tables skipped by nogentab have neither a type nor data to access.
+		if pragma.Kind == model.TableKind_KeyValue && !seen[pragma.TableType] && globals.Datas.GetDataTable(pragma.TableType) != nil {
 			ret = append(ret, pragma.TableType)
 			seen[pragma.TableType] = true
 		}

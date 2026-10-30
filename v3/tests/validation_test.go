@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -468,5 +469,237 @@ func TestGeneratedNameCollisions(t *testing.T) {
 		if _, err := generate(emu.G); err == nil || !strings.Contains(err.Error(), "conflict") {
 			t.Fatalf("generated index collided with table name: %v", err)
 		}
+	}
+}
+
+func TestKVWithoutValueColumn(t *testing.T) {
+	emu := NewTableEmulator(t)
+	idx := emu.CreateCSVFile("Index")
+	helper.WriteIndexTableHeader(idx)
+	helper.WriteRowValues(idx, "键值表", "Config", "KV")
+	kv := emu.CreateCSVFile("KV")
+	helper.WriteRowValues(kv, "字段名", "字段类型")
+	helper.WriteRowValues(kv, "Count", "int")
+	emu.VerifyData(`{ "@Tool": "github.com/Coder-is/TabForge", "@Version": "testver", "Config": [ { "Count": 0 } ] }`)
+}
+
+func TestArrayColumnCountIsPerType(t *testing.T) {
+	emu := NewTableEmulator(t)
+	idx := emu.CreateCSVFile("Index")
+	helper.WriteIndexTableHeader(idx)
+	helper.WriteRowValues(idx, "类型表", "", "Type")
+	helper.WriteRowValues(idx, "数据表", "A", "DA")
+	helper.WriteRowValues(idx, "数据表", "B", "DB")
+	types := emu.CreateCSVFile("Type")
+	helper.WriteTypeTableHeader(types)
+	// Same field name and empty alias in two unrelated types.
+	helper.WriteRowValues(types, "表头", "A", "", "Items", "int32", "|")
+	helper.WriteRowValues(types, "表头", "B", "", "Items", "int32", "|")
+	da := emu.CreateCSVFile("DA")
+	helper.WriteRowValues(da, "Items", "Items")
+	helper.WriteRowValues(da, "1", "2")
+	db := emu.CreateCSVFile("DB")
+	helper.WriteRowValues(db, "Items")
+	helper.WriteRowValues(db, "1|2|3")
+	if err := compiler.Compile(emu.G); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInvalidEnumDefinitionValue(t *testing.T) {
+	for _, value := range []string{"abc", "010", "+1", "2147483648"} {
+		emu := NewTableEmulator(t)
+		idx := emu.CreateCSVFile("Index")
+		helper.WriteIndexTableHeader(idx)
+		helper.WriteRowValues(idx, "类型表", "", "Type")
+		types := emu.CreateCSVFile("Type")
+		helper.WriteTypeTableHeader(types)
+		helper.WriteRowValues(types, "枚举", "State", "", "None", "int32", "", "0")
+		helper.WriteRowValues(types, "枚举", "State", "", "Bad", "int32", "", value)
+		requireTableError(t, compiler.Compile(emu.G), "InvalidEnumValue")
+	}
+}
+
+func TestProtoEnumFirstValueZero(t *testing.T) {
+	emu := NewTableEmulator(t)
+	idx := emu.CreateCSVFile("Index")
+	helper.WriteIndexTableHeader(idx)
+	helper.WriteRowValues(idx, "类型表", "", "Type")
+	types := emu.CreateCSVFile("Type")
+	helper.WriteTypeTableHeader(types)
+	helper.WriteRowValues(types, "枚举", "State", "", "One", "int32", "", "1")
+	if err := compiler.Compile(emu.G); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pbsrc.Generate(emu.G); err == nil || !strings.Contains(err.Error(), "must be 0") {
+		t.Fatalf("invalid proto3 enum wasn't rejected: %v", err)
+	}
+}
+
+func TestKeyValueAccessors(t *testing.T) {
+	compile := func(actions []model.TagAction) *TableEmulator {
+		emu := NewTableEmulator(t)
+		emu.G.TagActions = actions
+		idx := emu.CreateCSVFile("Index")
+		helper.WriteRowValues(idx, "模式", "表类型", "表文件名", "标记")
+		helper.WriteRowValues(idx, "键值表", "ConfA", "KVA")
+		helper.WriteRowValues(idx, "键值表", "ConfB", "KVB", "skip")
+		for _, name := range []string{"KVA", "KVB"} {
+			kv := emu.CreateCSVFile(name)
+			helper.WriteRowValues(kv, "字段名", "字段类型", "值")
+			helper.WriteRowValues(kv, "Value", "int", "1")
+		}
+		if err := compiler.Compile(emu.G); err != nil {
+			t.Fatal(err)
+		}
+		return emu
+	}
+
+	// Every accessor after the first must still be preceded by a comment marker.
+	data, err := javasrc.Generate(compile(nil).G)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\t// table: ConfB\n") || strings.Contains(string(data), "\t table: ConfB") {
+		t.Fatalf("broken Java KV accessor comment:\n%s", data)
+	}
+
+	// Skipped KV tables have no type or data, so no accessor may reference them.
+	emu := compile([]model.TagAction{{Verb: model.ActionNoGenTable, Tags: []string{"skip"}}})
+	for name, generate := range map[string]gen.GenSingleFile{"go": gosrc.Generate, "csharp": cssrc.Generate, "java": javasrc.Generate} {
+		data, err := generate(emu.G)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "GetKeyValue_ConfA") || strings.Contains(string(data), "ConfB") {
+			t.Fatalf("%s accessor mismatch for skipped KV table:\n%s", name, data)
+		}
+	}
+}
+
+func TestGeneratedPrimitiveTypes(t *testing.T) {
+	emu := NewTableEmulator(t)
+	emu.G.GenBinary = true
+	idx := emu.CreateCSVFile("Index")
+	helper.WriteIndexTableHeader(idx)
+	helper.WriteRowValues(idx, "类型表", "", "Type")
+	helper.WriteRowValues(idx, "数据表", "Probe", "Data")
+	types := emu.CreateCSVFile("Type")
+	helper.WriteTypeTableHeader(types)
+	helper.WriteRowValues(types, "表头", "Probe", "", "Key", "int64", "", "", "是")
+	var header, row []string
+	for i, ft := range model.FieldTypes {
+		for _, splitter := range []string{"", "|"} {
+			name := fmt.Sprintf("F%d_%d", i, len(splitter))
+			helper.WriteRowValues(types, "表头", "Probe", "", name, ft.InputFieldName, splitter)
+			header, row = append(header, name), append(row, "")
+		}
+	}
+	data := emu.CreateCSVFile("Data")
+	helper.WriteRowValues(data, append([]string{"Key"}, header...)...)
+	helper.WriteRowValues(data, append([]string{"1"}, row...)...)
+	if err := compiler.Compile(emu.G); err != nil {
+		t.Fatal(err)
+	}
+
+	// Java: boxed index keys must match the field type, and defaults must be expressions.
+	java, err := javasrc.Generate(emu.G)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(java), "Map<Long, Probe> ProbeByKey") || strings.Contains(string(java), "= ;") {
+		t.Fatalf("invalid Java declarations:\n%s", java)
+	}
+
+	// C#: every generated reader call needs a matching TableReader overload.
+	cs, err := cssrc.Generate(emu.G)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := ioutil.ReadFile(filepath.Join("..", "api", "csharp", "TableReader.cs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := map[string]string{}
+	for _, m := range regexp.MustCompile(`public (\S+) (\w+) = `).FindAllStringSubmatch(string(cs), -1) {
+		fields[m[2]] = m[1]
+	}
+	for _, m := range regexp.MustCompile(`reader\.Read(\w+)\( ref (\w+) \)`).FindAllStringSubmatch(string(cs), -1) {
+		overload := fmt.Sprintf("public void Read%s(ref %s v)", m[1], fields[m[2]])
+		if !strings.Contains(string(reader), overload) {
+			t.Errorf("TableReader.cs lacks %s for field %s", overload, m[2])
+		}
+	}
+	for _, m := range regexp.MustCompile(`case 0x([0-9a-f]+):`).FindAllStringSubmatch(string(cs), -1) {
+		var tag int
+		fmt.Sscanf(m[1], "%x", &tag)
+		kind := tag >> 16
+		if !strings.Contains(string(reader), fmt.Sprintf("case %d:", kind)) {
+			t.Errorf("TableReader.SkipFiled cannot skip tag type %d", kind)
+		}
+	}
+}
+
+func TestLuaNumberLiterals(t *testing.T) {
+	emu := NewTableEmulator(t)
+	idx := emu.CreateCSVFile("Index")
+	helper.WriteIndexTableHeader(idx)
+	helper.WriteRowValues(idx, "类型表", "", "Type")
+	helper.WriteRowValues(idx, "数据表", "Probe", "Data")
+	types := emu.CreateCSVFile("Type")
+	helper.WriteTypeTableHeader(types)
+	helper.WriteRowValues(types, "表头", "Probe", "", "I", "int32")
+	helper.WriteRowValues(types, "表头", "Probe", "", "F", "double", "|")
+	data := emu.CreateCSVFile("Data")
+	helper.WriteRowValues(data, "I", "F")
+	helper.WriteRowValues(data, "+5", "+1.5|NaN|-Inf|Inf|-2")
+	if err := compiler.Compile(emu.G); err != nil {
+		t.Fatal(err)
+	}
+	lua, err := luasrc.Generate(emu.G)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(lua), "I = 5, F = {1.5,(0/0),-math.huge,math.huge,-2}") {
+		t.Fatalf("invalid Lua number literals:\n%s", lua)
+	}
+}
+
+func TestKVFieldTags(t *testing.T) {
+	emu := NewTableEmulator(t)
+	emu.G.TagActions = []model.TagAction{{Verb: model.ActionNoGenFieldJson, Tags: []string{"hide"}}}
+	idx := emu.CreateCSVFile("Index")
+	helper.WriteIndexTableHeader(idx)
+	helper.WriteRowValues(idx, "键值表", "Config", "KV")
+	kv := emu.CreateCSVFile("KV")
+	helper.WriteRowValues(kv, "字段名", "字段类型", "值", "标记")
+	helper.WriteRowValues(kv, "Hidden", "int", "1", "x|hide")
+	helper.WriteRowValues(kv, "Shown", "int", "2", "")
+	emu.VerifyData(`{ "@Tool": "github.com/Coder-is/TabForge", "@Version": "testver", "Config": [ { "Shown": 2 } ] }`)
+	if tags := emu.G.Types.FieldByName("Config", "Hidden").Tags; !reflect.DeepEqual(tags, []string{"x", "hide"}) {
+		t.Fatalf("KV tags were not preserved: %q", tags)
+	}
+}
+
+func TestInvalidIndexAndTypeTableValues(t *testing.T) {
+	// A mistyped index mode must not silently drop the table.
+	emu := NewTableEmulator(t)
+	idx := emu.CreateCSVFile("Index")
+	helper.WriteIndexTableHeader(idx)
+	helper.WriteRowValues(idx, "数据", "A", "DA")
+	requireTableError(t, compiler.Compile(emu.G), "UnknownTableKind")
+
+	// Unparsable type-table values are reported, not raised as raw panics.
+	emu = NewTableEmulator(t)
+	idx = emu.CreateCSVFile("Index")
+	helper.WriteIndexTableHeader(idx)
+	helper.WriteRowValues(idx, "类型表", "", "Type")
+	types := emu.CreateCSVFile("Type")
+	helper.WriteTypeTableHeader(types)
+	helper.WriteRowValues(types, "表头", "A", "", "ID", "int32", "", "", "maybe")
+	err := compiler.Compile(emu.G)
+	requireTableError(t, err, "DataMissMatchTypeDefine")
+	if !strings.Contains(err.Error(), "@Type|(H2)") {
+		t.Fatalf("missing error location: %v", err)
 	}
 }

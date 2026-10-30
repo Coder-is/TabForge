@@ -144,6 +144,11 @@ func TestExistingProtoExport(t *testing.T) {
 	if err := protojson.Unmarshal(jsonData, fromJSON); err != nil || !proto.Equal(root.Interface(), fromJSON) {
 		t.Fatalf("ProtoJSON did not round trip: %v", err)
 	}
+	// Output must not carry protojson's per-build whitespace randomization.
+	var canonical bytes.Buffer
+	if err := json.Indent(&canonical, jsonData, "", "  "); err != nil || !bytes.Equal(canonical.Bytes(), jsonData) {
+		t.Fatalf("ProtoJSON is not canonically indented: %v\n%s", err, jsonData)
+	}
 	output := filepath.Join(dir, "new", "by-table")
 	if err := Output(globals, output); err != nil {
 		t.Fatal(err)

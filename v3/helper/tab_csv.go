@@ -3,13 +3,13 @@ package helper
 import (
 	"bytes"
 	"encoding/csv"
-	"golang.org/x/net/html/charset"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
 
 type CSVFile struct {
@@ -89,6 +89,9 @@ func (self *CSVFile) Load(fileName string) error {
 
 	self.Name = strings.TrimSuffix(fileName, filepath.Ext(fileName))
 
+	// Excel/Notepad write a UTF-8 BOM, which must not become part of the first header.
+	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
+
 	self.records, err = csv.NewReader(bytes.NewReader(data)).ReadAll()
 
 	if err != nil {
@@ -96,8 +99,8 @@ func (self *CSVFile) Load(fileName string) error {
 	}
 
 	// 自动探测非utf-8编码, 转换
-	_, codecName, _ := charset.DetermineEncoding(data, "")
-	if codecName != "utf-8" {
+	// Check the whole file: a 1KB sniff treats ASCII-only prefixes as non-UTF-8.
+	if !utf8.Valid(data) {
 		self.Transform(ConvGBKToUTF8)
 	}
 

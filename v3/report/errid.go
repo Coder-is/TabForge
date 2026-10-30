@@ -15,6 +15,7 @@ var (
 		"EnumValueEmpty":                 {CHS: "枚举值空"},
 		"DuplicateEnumValue":             {CHS: "枚举值重复"},
 		"UnknownEnumValue":               {CHS: "未知的枚举值"},
+		"InvalidEnumValue":               {CHS: "非法的枚举值"},
 		"InvalidTypeTable":               {CHS: "非法的类型表"},
 		"HeaderTypeNotFound":             {CHS: "表头类型找不到"},
 		"DuplicateValueInMakingIndex":    {CHS: "创建索引时发现重复值"},
@@ -26,5 +27,6 @@ var (
 		"AmbiguousTypeFieldName":         {CHS: "字段名或标识名有歧义"},
 		"InvalidIndexType":               {CHS: "不支持的索引类型"},
 		"UnknownTypeKind":                {CHS: "非法的类型种类"},
+		"UnknownTableKind":               {CHS: "非法的表模式"},
 	}
 )

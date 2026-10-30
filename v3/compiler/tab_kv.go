@@ -4,7 +4,6 @@ import (
 	"github.com/Coder-is/TabForge/v3/checker"
 	"github.com/Coder-is/TabForge/v3/model"
 	"github.com/Coder-is/TabForge/v3/report"
-	"strings"
 )
 
 func transposeKVtoData(symbols *model.TypeTable, kvtab *model.DataTable) (ret *model.DataTable) {
@@ -24,8 +23,14 @@ func transposeKVtoData(symbols *model.TypeTable, kvtab *model.DataTable) (ret *m
 	// 遍历KV表的每一行
 	for row := 1; row < len(kvtab.Rows); row++ {
 
-		fieldName := kvtab.GetValueByName(row, "字段名")
-		fieldType := kvtab.GetValueByName(row, "字段类型")
+		// Merged rows only hold cells up to the last source column, so absent
+		// required columns read as empty cells instead of nil.
+		cellByName := func(name string) *model.Cell {
+			return kvtab.MustGetCell(row, kvtab.HeaderByName(name).Cell.Col)
+		}
+
+		fieldName := cellByName("字段名")
+		fieldType := cellByName("字段类型")
 		name := kvtab.GetValueByName(row, "标识名")
 
 		arraySplitter := kvtab.GetValueByName(row, "数组切割")
@@ -51,9 +56,9 @@ func transposeKVtoData(symbols *model.TypeTable, kvtab *model.DataTable) (ret *m
 		}
 
 		// 将KV表的Tags转换过去
-		if tags != nil && tags.Value != "" {
-			tagsType := kvtab.HeaderByName("标记")
-			tf.Tags = strings.Split(tags.Value, tagsType.TypeInfo.ArraySplitter)
+		// 标记 is an array column, so merging already split it into ValueList.
+		if tags != nil && len(tags.ValueList) > 0 {
+			tf.Tags = tags.ValueList
 		}
 
 		checker.CheckFieldDefinition(symbols, &tf, kvtab, row, "DuplicateKVField")
@@ -68,7 +73,7 @@ func transposeKVtoData(symbols *model.TypeTable, kvtab *model.DataTable) (ret *m
 		header.Cell.Value = fieldName.Value
 		header.TypeInfo = &tf
 
-		inputValueCell := kvtab.GetValueByName(row, "值")
+		inputValueCell := cellByName("值")
 
 		outputValueCell := ret.AddCell(1)
 		outputValueCell.CopyFrom(inputValueCell)

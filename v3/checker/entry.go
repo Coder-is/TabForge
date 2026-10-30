@@ -27,7 +27,7 @@ func PreCheck(dataList *model.DataTableList) {
 
 			fieldKey := ArrayFieldDefine{
 				FieldName:  header.TypeInfo.FieldName,
-				ObjectName: header.TypeInfo.Name,
+				ObjectName: header.TypeInfo.ObjectType,
 			}
 
 			if header.TypeInfo.IsArray() {

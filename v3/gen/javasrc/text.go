@@ -45,7 +45,7 @@ public class {{.CombineStructName}} {	{{range $sn, $objName := $.Types.EnumNames
 	// Indices {{range $ii, $idx := GetIndices $}}
 	public Map<{{JavaType $idx.FieldInfo true}}, {{$idx.Table.HeaderType}}> {{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}} = new HashMap<{{JavaType $idx.FieldInfo true}}, {{$idx.Table.HeaderType}}>(); // table: {{$idx.Table.HeaderType}} {{end}}
 	{{if HasKeyValueTypes $}}
-	//{{range $ti, $name := GetKeyValueTypeNames $}} table: {{$name}}
+	{{range $ti, $name := GetKeyValueTypeNames $}}// table: {{$name}}
 	public {{$name}} GetKeyValue_{{$name}}() {
 		return {{$name}}.get(0);
 	}

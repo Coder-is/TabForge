@@ -9,7 +9,6 @@ require (
 	github.com/davyxu/golog v0.1.0
 	github.com/golang/protobuf v1.5.4
 	github.com/tealeg/xlsx v1.0.5
-	golang.org/x/net v0.59.0
 	golang.org/x/text v0.42.0
 	google.golang.org/protobuf v1.36.12
 )

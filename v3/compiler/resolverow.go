@@ -49,7 +49,8 @@ func ParseRow(ret interface{}, tab *model.DataTable, row int, symbols *model.Typ
 		fieldValue := vobj.Field(index)
 
 		if err := StringToValue(valueCell.Value, fieldValue.Addr().Interface(), header.TypeInfo, symbols); err != nil {
-			panic(err)
+			// Report bad index/type table values instead of crashing the compiler.
+			report.ReportError("DataMissMatchTypeDefine", header.Cell.Value, valueCell)
 		}
 	}
 
