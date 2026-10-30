@@ -69,7 +69,15 @@ func close() -> void:
 		if not OS.is_process_running(process.pid): _cleanup_locks(process.pid)
 		process.stdio.close(); process.stderr.close(); process.clear()
 
+# Locks hold {"pid","host","started"} JSON; older tools wrote a bare PID.
+static func _lock_owner(text: String) -> int:
+	var json := JSON.new()
+	if json.parse(text) != OK: return -1
+	var owner = json.data
+	if owner is Dictionary: owner = owner.get("pid")
+	return int(owner) if owner is float or owner is int else -1
+
 func _cleanup_locks(pid: int) -> void:
 	for path in [source_root.path_join(".tabforge-export.lock"), report_root.path_join(".tabforge-client.lock")]:
-		if FileAccess.file_exists(path) and FileAccess.get_file_as_string(path).strip_edges() == str(pid):
+		if FileAccess.file_exists(path) and _lock_owner(FileAccess.get_file_as_string(path)) == pid:
 			DirAccess.remove_absolute(path)

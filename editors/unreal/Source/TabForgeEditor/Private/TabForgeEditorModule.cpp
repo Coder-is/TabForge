@@ -40,10 +40,23 @@ class FTabForgeEditorModule : public IModuleInterface {
         auto Plugin = IPluginManager::Get().FindPlugin(TEXT("TabForge"));
         return Plugin.IsValid() ? FPaths::ConvertRelativePathToFull(FPaths::Combine(Plugin->GetBaseDir(),TEXT("bin"),Platform,Name)) : TEXT("");
     }
+    // Locks hold {"pid","host","started"} JSON; older tools wrote a bare PID.
+    static int32 LockOwner(const FString& Text) {
+        FString Digits = Text.TrimStartAndEnd();
+        const int32 Key = Digits.Find(TEXT("\"pid\""));
+        if (Key != INDEX_NONE) {
+            int32 At = Key + 5;
+            while (At < Digits.Len() && (FChar::IsWhitespace(Digits[At]) || Digits[At] == TEXT(':'))) ++At;
+            int32 End = At;
+            while (End < Digits.Len() && FChar::IsDigit(Digits[End])) ++End;
+            Digits = Digits.Mid(At, End - At);
+        }
+        return !Digits.IsEmpty() && Digits.IsNumeric() && !Digits.Contains(TEXT(".")) ? FCString::Atoi(*Digits) : -1;
+    }
     void CleanupLocks() {
         for (const FString& Lock : {FPaths::Combine(Source,TEXT(".tabforge-export.lock")), FPaths::Combine(FPaths::ProjectDir(),TEXT(".tabforge-client.lock"))}) {
             FString Owner;
-            if (FFileHelper::LoadFileToString(Owner,*Lock) && Owner.TrimStartAndEnd() == FString::FromInt(static_cast<int32>(Pid))) IFileManager::Get().Delete(*Lock);
+            if (FFileHelper::LoadFileToString(Owner,*Lock) && LockOwner(Owner) == static_cast<int32>(Pid)) IFileManager::Get().Delete(*Lock);
         }
     }
     void Finish(bool Show) {

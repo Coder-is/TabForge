@@ -137,12 +137,23 @@ namespace TabForge.Editor
             }
             b.Append('\\', slashes * 2); b.Append('"'); return b.ToString();
         }
+        // Locks hold {"pid","host","started"} JSON; older tools wrote a bare PID.
+        private static int? LockOwner(string text)
+        {
+            try
+            {
+                var owner = JToken.Parse(text);
+                if (owner.Type == JTokenType.Object) owner = owner["pid"];
+                return owner != null && owner.Type == JTokenType.Integer ? (int)owner : (int?)null;
+            }
+            catch (Exception) { return null; }
+        }
         private void CleanupLocks(int pid)
         {
             var sourceRoot = File.Exists(source) ? Path.GetDirectoryName(source) : source;
             foreach (var file in new[] { Path.Combine(sourceRoot, ".tabforge-export.lock"), Path.Combine(Root, ".tabforge-client.lock") })
             {
-                try { if (File.Exists(file) && File.ReadAllText(file).Trim() == pid.ToString()) File.Delete(file); }
+                try { if (File.Exists(file) && LockOwner(File.ReadAllText(file)) == pid) File.Delete(file); }
                 catch (IOException) { /* Another exporter may own the directory. */ }
                 catch (UnauthorizedAccessException) { /* Report the next lock failure without deleting blindly. */ }
             }
