@@ -27,11 +27,11 @@ tabforge -project=/path/to/SourceProject -editor=cocos -editor_project=/path/to/
 tabforge -project=/path/to/SourceProject -check -report
 ```
 
-导入前检查 descriptor 的 schema hash、数据的根类型与 ProtoJSON。只复制 `protojson` 输出及所需运行时，不把 Go、Java 或普通表 C# 产物放进引擎。纯结构项目可以只导入结构和加载器。第一版导出目录没有 data 清单，仍能导入结构，但要重新导出才能导入对应表数据。
+导入前按 `data_manifest.json` 执行与运行时 `databundle.Open` 相同的检查：descriptor、wire schema 和每个数据文件的 sha256 必须一致，否则报出不匹配的文件并拒绝导入（含 `-check`）；再检查 schema hash、数据的根类型与 ProtoJSON。只复制 `protojson` 输出及所需运行时，不把 Go、Java 或普通表 C# 产物放进引擎。纯结构项目可以只导入结构和加载器。第一版导出目录没有 data 清单，仍能导入结构，但要重新导出才能导入对应表数据。
 
 导入目录由 `.tabforge-client.json` 标记。已有未标记目录会拒绝覆盖；不要在该目录放手写代码。导入失败保留旧资产，重复导入保留仍存在的 Unity/Cocos `.meta` 和 Godot `.uid`，删除过期资产及其元数据。不要在引擎导入器扫描期间自行读取暂存目录。
 
-取消后，插件会在子进程退出时只清理该 PID 所拥有的导出/导入锁。强制终止若恰好发生在目录发布期间，仍可能留下 `.tabforge-backup`；先检查并恢复该备份，工具不会直接覆盖它。
+导出/导入锁记录持有者的 PID、主机名和开始时间。取消或强制终止留下的锁，在同一主机上确认该 PID 已退出后由下次运行自动回收；存活进程或其他主机的锁仍会拒绝运行并提示持有者。强制终止若恰好发生在目录发布期间，可能留下 `.tabforge-backup`：下次导入会在目标目录缺失时恢复它，在目标目录带 `.tabforge-client.json` 标记时删除这个过期备份；目标目录未标记时拒绝处理，需人工核对。
 
 ## Unity 读取
 

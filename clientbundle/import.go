@@ -11,16 +11,27 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Coder-is/TabForge/databundle"
+	"github.com/Coder-is/TabForge/internal/filelock"
+	"github.com/Coder-is/TabForge/internal/publish"
 	"github.com/Coder-is/TabForge/project"
 	"github.com/Coder-is/TabForge/protocol"
 	"github.com/Coder-is/TabForge/sdk"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
+
+// markerName identifies a directory that TabForge owns and may replace.
+const markerName = ".tabforge-client.json"
 
 type Result struct {
 	Kind       string   `json:"kind"`
 	SchemaHash string   `json:"schemaHash"`
 	Output     string   `json:"output"`
 	Files      []string `json:"files"`
+	// Warnings are non-fatal problems, such as a superseded backup that could
+	// not be deleted after publishing; the next import retries the cleanup.
+	Warnings []string `json:"-"`
 }
 
 // Import prepares and validates the whole bundle, then replaces only the
@@ -69,18 +80,11 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 		return nil, fmt.Errorf("import source and engine output must not overlap")
 	}
 	lockPath := filepath.Join(engineRoot, ".tabforge-client.lock")
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	lock, err := filelock.Acquire(lockPath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot lock engine import: %w", err)
 	}
-	defer func() {
-		// Windows cannot remove a lock file while its handle is still open.
-		lock.Close()
-		os.Remove(lockPath)
-	}()
-	if _, err := fmt.Fprintln(lock, os.Getpid()); err != nil {
-		return nil, err
-	}
+	defer lock.Release()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -112,22 +116,67 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 	if !declared["schema/schema.pb"] || !declared["schema/types.ts"] {
 		return nil, fmt.Errorf("bundle is missing generated schema files")
 	}
-	schemaPath, err := safePath(source, "schema/schema.pb")
+	// Apply the runtime loader's checks (checksums, descriptor and wire schema)
+	// so the engine never receives a bundle that databundle.Open would reject.
+	// First-version exports have neither the checksum manifest nor data entries;
+	// they still import structure only.
+	var checksums map[string]databundle.Entry
+	if declared[databundle.ManifestName] {
+		if _, err := databundle.Open(source, manifest.SchemaHash); err != nil {
+			return nil, fmt.Errorf("verify %s: %w", databundle.ManifestName, err)
+		}
+		if checksums, err = readChecksums(source); err != nil {
+			return nil, err
+		}
+	} else if len(manifest.Data) > 0 {
+		return nil, fmt.Errorf("bundle has data but no %s; export it again to import table data", databundle.ManifestName)
+	}
+	// Bytes are checked again where they are read, so a file replaced after the
+	// bundle check cannot slip into the engine tree.
+	verified := func(name string) ([]byte, error) {
+		entry, ok := checksums[name]
+		if !ok && checksums != nil {
+			return nil, fmt.Errorf("%s is not covered by %s", name, databundle.ManifestName)
+		}
+		path, err := safePath(source, name)
+		if err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if ok && databundle.Digest(data) != entry.SHA256 {
+			return nil, fmt.Errorf("checksum mismatch in %s: %s", databundle.ManifestName, name)
+		}
+		return data, nil
+	}
+	descriptor, err := verified("schema/schema.pb")
 	if err != nil {
 		return nil, err
 	}
-	schema, err := protocol.LoadSchema(schemaPath)
+	set := new(descriptorpb.FileDescriptorSet)
+	if err := proto.Unmarshal(descriptor, set); err != nil {
+		return nil, fmt.Errorf("decode schema: %w", err)
+	}
+	schema, err := protocol.NewSchema(set)
 	if err != nil {
 		return nil, err
 	}
 	if schema.Fingerprint() != manifest.SchemaHash {
 		return nil, fmt.Errorf("schema hash does not match export.json")
 	}
+	if !check {
+		// Repair an import interrupted during publishing before inspecting out.
+		if err := publish.Recover(out, markerName); err != nil {
+			return nil, err
+		}
+	}
 	if stat, err := os.Lstat(out); err == nil {
 		if !stat.IsDir() {
 			return nil, fmt.Errorf("generated asset destination is not a directory")
 		}
-		marker, err := os.ReadFile(filepath.Join(out, ".tabforge-client.json"))
+		marker, err := os.ReadFile(filepath.Join(out, markerName))
 		if err != nil {
 			return nil, fmt.Errorf("refusing to replace an unmarked asset directory: %s", out)
 		}
@@ -180,23 +229,22 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 			return nil, fmt.Errorf("invalid or repeated client data path: %s", entry.Path)
 		}
 		seenData[lower] = true
+		// Keep original paths so clients can refer to multiple data roots.
+		if strings.HasPrefix(lower, "schema/") || strings.HasPrefix(lower, "runtime/") || lower == "wire_schema.json" || (kind == "unreal" && lower == "bundle.json") {
+			return nil, fmt.Errorf("data path conflicts with client runtime: %s", entry.Path)
+		}
 		if !declared[entry.Path] {
 			return nil, fmt.Errorf("data file not declared: %s", entry.Path)
 		}
-		path, err := safePath(source, entry.Path)
-		if err != nil {
-			return nil, err
+		if sum := checksums[entry.Path]; sum.Encoding != "protojson" || sum.Message != entry.Message {
+			return nil, fmt.Errorf("data file %s does not match its %s entry", entry.Path, databundle.ManifestName)
 		}
-		data, err := os.ReadFile(path)
+		data, err := verified(entry.Path)
 		if err != nil {
 			return nil, err
 		}
 		if _, err := schema.DecodeJSON(entry.Message, data); err != nil {
 			return nil, fmt.Errorf("%s: %w", entry.Path, err)
-		}
-		// Keep original paths so clients can refer to multiple data roots.
-		if strings.HasPrefix(lower, "schema/") || strings.HasPrefix(lower, "runtime/") || lower == "wire_schema.json" || (kind == "unreal" && lower == "bundle.json") {
-			return nil, fmt.Errorf("data path conflicts with client runtime: %s", entry.Path)
 		}
 		if err := write(filepath.ToSlash(filepath.Join(resource, entry.Path)), data); err != nil {
 			return nil, err
@@ -298,15 +346,19 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 	if err != nil {
 		return nil, err
 	}
-	if err := write(".tabforge-client.json", append(marker, '\n')); err != nil {
+	if err := write(markerName, append(marker, '\n')); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if !check {
-		if err := publish(stage, out); err != nil {
+		warning, err := publish.Dir(stage, out, markerName)
+		if err != nil {
 			return nil, err
+		}
+		if warning != nil {
+			r.Warnings = append(r.Warnings, warning.Error())
 		}
 	}
 	return r, nil
@@ -371,32 +423,28 @@ func preserveMetadata(out, stage string) error {
 		return os.WriteFile(target, data, 0644)
 	})
 }
-func publish(stage, out string) error {
-	backup := out + ".tabforge-backup"
-	if _, err := os.Lstat(backup); err == nil {
-		return fmt.Errorf("previous import backup exists: %s", backup)
-	} else if !os.IsNotExist(err) {
-		return err
+
+// readChecksums indexes data_manifest.json by path. databundle.Open has already
+// validated its structure, paths and digests.
+func readChecksums(source string) (map[string]databundle.Entry, error) {
+	path, err := safePath(source, databundle.ManifestName)
+	if err != nil {
+		return nil, err
 	}
-	exists := false
-	if _, err := os.Stat(out); err == nil {
-		exists = true
-		if err := os.Rename(out, backup); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return err
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
 	}
-	if err := os.Rename(stage, out); err != nil {
-		if exists {
-			if rollback := os.Rename(backup, out); rollback != nil {
-				return fmt.Errorf("import failed: %v; rollback failed: %v; recover %s", err, rollback, backup)
-			}
-		}
-		return err
+	var m databundle.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("%s: %w", databundle.ManifestName, err)
 	}
-	if exists {
-		return os.RemoveAll(backup)
+	checksums := map[string]databundle.Entry{
+		m.Descriptor.Path: {File: m.Descriptor},
+		m.WireSchema.Path: {File: m.WireSchema},
 	}
-	return nil
+	for _, entry := range m.Data {
+		checksums[entry.Path] = entry
+	}
+	return checksums, nil
 }

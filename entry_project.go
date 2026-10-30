@@ -102,6 +102,7 @@ func projectEntry() (runErr error) {
 			return err
 		}
 		report.EditorOutput = result.Output
+		printWarnings(result.Warnings)
 		fmt.Printf("协议包%s成功：%s（%d 个文件）\n", map[bool]string{true: "校验", false: "导入"}[*paramCheck], result.Output, len(result.Files))
 		return nil
 	}
@@ -177,13 +178,22 @@ func projectEntry() (runErr error) {
 		return err
 	}
 	report.Result, report.Output = result, result.Output
+	printWarnings(result.Warnings)
 	if *paramEditor != "" && !*paramCheck {
 		imported, err := clientbundle.Import(ctx, result.Output, *paramEditorProject, *paramEditor, false)
 		if err != nil {
 			return fmt.Errorf("project exported; editor import failed: %w", err)
 		}
 		report.EditorOutput = imported.Output
+		printWarnings(imported.Warnings)
 	}
 	fmt.Printf("%s成功：%s（%d 个文件）\n", map[bool]string{true: "校验", false: "导出"}[*paramCheck], result.Output, len(result.Files))
 	return nil
+}
+
+// printWarnings reports problems that did not stop a successful run.
+func printWarnings(warnings []string) {
+	for _, warning := range warnings {
+		fmt.Fprintf(os.Stderr, "警告：%s\n", warning)
+	}
 }

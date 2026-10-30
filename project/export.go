@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/Coder-is/TabForge/databundle"
+	"github.com/Coder-is/TabForge/internal/filelock"
+	"github.com/Coder-is/TabForge/internal/publish"
 	"github.com/Coder-is/TabForge/protocol"
 	"github.com/Coder-is/TabForge/v3/compiler"
 	"github.com/Coder-is/TabForge/v3/gen"
@@ -33,6 +35,9 @@ type Result struct {
 	Files      []string   `json:"files"`
 	Output     string     `json:"-"`
 	Data       []DataFile `json:"data,omitempty"`
+	// Warnings are non-fatal problems, such as a superseded backup that could
+	// not be deleted after publishing; the next export retries the cleanup.
+	Warnings []string `json:"-"`
 }
 
 // DataFile associates an exported ProtoJSON document with its root message.
@@ -58,13 +63,11 @@ func (p *Project) generate(ctx context.Context, publishOutput bool) (*Result, er
 		return nil, err
 	}
 	lockPath := filepath.Join(p.Root, ".tabforge-export.lock")
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	lock, err := filelock.Acquire(lockPath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot lock project (another export may be running): %w", err)
 	}
-	defer os.Remove(lockPath)
-	defer lock.Close()
-	fmt.Fprintln(lock, os.Getpid())
+	defer lock.Release()
 	out, _ := relativePath(p.Root, p.Config.Output)
 	if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
 		return nil, err
@@ -197,43 +200,15 @@ func (p *Project) generate(ctx context.Context, publishOutput bool) (*Result, er
 		return nil, err
 	}
 	if publishOutput {
-		if err := publish(stage, out); err != nil {
+		warning, err := publish.Dir(stage, out, "export.json")
+		if err != nil {
 			return nil, err
+		}
+		if warning != nil {
+			result.Warnings = append(result.Warnings, warning.Error())
 		}
 	}
 	return result, nil
-}
-
-func publish(stage, out string) error {
-	backup := out + ".tabforge-backup"
-	if _, err := os.Lstat(backup); err == nil {
-		return fmt.Errorf("previous backup exists at %s; recover it before exporting", backup)
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	exists := false
-	if _, err := os.Lstat(out); err == nil {
-		exists = true
-		if err := os.Rename(out, backup); err != nil {
-			return fmt.Errorf("back up previous export: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.Rename(stage, out); err != nil {
-		if exists {
-			if rollback := os.Rename(backup, out); rollback != nil {
-				return fmt.Errorf("publish failed: %v; rollback failed: %v; previous export is at %s", err, rollback, backup)
-			}
-		}
-		return err
-	}
-	if exists {
-		if err := os.RemoveAll(backup); err != nil {
-			return fmt.Errorf("output published, but backup cleanup failed at %s: %w", backup, err)
-		}
-	}
-	return nil
 }
 
 type rootedGetter struct {

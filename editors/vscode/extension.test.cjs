@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { findProject, toolPath, runExport, isSourceFile } = require('./runner.js');
+const { findProject, toolPath, runExport, isSourceFile, lockOwner } = require('./runner.js');
 const { diagnosticEntries } = require('./diagnostics.js');
 
 test('finds enclosing projects and detects platform binaries without PATH', t => {
@@ -100,4 +100,11 @@ test('export on save watches every workbook extension the compiler discovers', a
   changed(vscode.Uri.file(path.join(root, 'Tables', 'Items.xlsm')));
   await new Promise(resolve => setTimeout(resolve, 700));
   assert.equal(started, 1, 'a saved .xlsm workbook schedules an automatic export');
+});
+
+test('lock owners are read from JSON records and legacy bare PIDs', () => {
+  assert.equal(lockOwner('{"pid":42,"host":"h","started":"2026-01-01T00:00:00Z"}\n'), 42);
+  assert.equal(lockOwner('42\n'), 42);
+  assert.equal(lockOwner(''), undefined);
+  assert.equal(lockOwner('garbage'), undefined);
 });

@@ -47,11 +47,15 @@ function run(tool, root, args, onOutput = () => {}) {
   });
   return { child, completion };
 }
+// Locks hold {"pid","host","started"} JSON; older tools wrote a bare PID.
+function lockOwner(text) {
+  try { const owner = JSON.parse(text); return typeof owner === 'number' ? owner : owner?.pid; } catch { return undefined; }
+}
 // Call only after the child has exited; never remove another process's lock.
 function cleanupOwnedLocks(pid, files) {
   if (!pid) return;
   for (const file of files) {
-    try { if (fs.readFileSync(file,'utf8').trim() === String(pid)) fs.unlinkSync(file); } catch { /* No owned lock remains. */ }
+    try { if (lockOwner(fs.readFileSync(file,'utf8')) === pid) fs.unlinkSync(file); } catch { /* No owned lock remains. */ }
   }
 }
-module.exports = { sourceProject, executable, argumentsFor, run, cleanupOwnedLocks };
+module.exports = { sourceProject, executable, argumentsFor, run, cleanupOwnedLocks, lockOwner };

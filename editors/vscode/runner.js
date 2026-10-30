@@ -20,6 +20,11 @@ function toolPath(root, extensionPath, override = '', platform = process.platfor
     return choices.find(candidate => candidate && path.isAbsolute(candidate) && fs.existsSync(candidate));
 }
 
+// Locks hold {"pid","host","started"} JSON; older tools wrote a bare PID.
+function lockOwner(text) {
+    try { const owner = JSON.parse(text); return typeof owner === 'number' ? owner : owner?.pid; } catch { return undefined; }
+}
+
 function runExport(tool, config, onOutput, options = {}) {
     const args = ['-project=' + config];
     if (options.report) args.push('-report');
@@ -33,7 +38,7 @@ function runExport(tool, config, onOutput, options = {}) {
         child.once('close', (code, signal) => {
             try {
                 const lock = path.join(path.dirname(config), '.tabforge-export.lock');
-                if (child.pid && fs.readFileSync(lock, 'utf8').trim() === String(child.pid)) fs.unlinkSync(lock);
+                if (child.pid && lockOwner(fs.readFileSync(lock, 'utf8')) === child.pid) fs.unlinkSync(lock);
             } catch { /* The child usually removes its own lock. */ }
             code === 0 ? resolve() : reject(new Error(`Export exited with ${code ?? signal}`));
         });
@@ -65,4 +70,4 @@ function isSourceFile(root, file, config) {
     return sources.some(inside);
 }
 
-module.exports = { findProject, toolPath, runExport, isSourceFile };
+module.exports = { findProject, toolPath, runExport, isSourceFile, lockOwner };

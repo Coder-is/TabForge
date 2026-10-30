@@ -3,7 +3,9 @@ package clientbundle
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -232,9 +234,73 @@ func TestImportRejectsDataAliasingRuntimeFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, kind := range []string{"unity", "cocos"} {
-			if _, err := Import(context.Background(), source, engine(t, kind), kind, true); err == nil {
+			// The alias checks must fire before the checksum check would.
+			if _, err := Import(context.Background(), source, engine(t, kind), kind, true); err == nil || strings.Contains(err.Error(), "data_manifest") {
 				t.Errorf("%s: data path %q accepted", kind, alias)
 			}
+		}
+	}
+}
+
+// databundle.Open rejects data whose bytes differ from data_manifest.json, so
+// the engine import must too, even when the swapped file is valid ProtoJSON.
+func TestImportVerifiesDataManifestChecksums(t *testing.T) {
+	source := fixture(t)
+	other, err := os.ReadFile(filepath.Join(source, "data", "tables-map.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "data", "tables.json"), other, 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []bool{true, false} {
+		root := engine(t, "cocos")
+		_, err := Import(context.Background(), source, root, "cocos", check)
+		if err == nil || !strings.Contains(err.Error(), "checksum mismatch") || !strings.Contains(err.Error(), "data/tables.json") {
+			t.Fatalf("check=%v: swapped data accepted or unclear error: %v", check, err)
+		}
+		if _, err := os.Stat(filepath.Join(root, "assets", "resources", "tabforge")); !os.IsNotExist(err) {
+			t.Fatalf("check=%v: assets written", check)
+		}
+	}
+}
+
+// A crashed import must neither block later imports nor lose the last good assets.
+func TestImportRecoversInterruptedPublishAndStaleLock(t *testing.T) {
+	source := fixture(t)
+	root := engine(t, "godot")
+	r, err := Import(context.Background(), source, root, "godot", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.Output, "schema.gd.uid"), []byte("uid://kept"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(r.Output, r.Output+".tabforge-backup"); err != nil {
+		t.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	host, _ := os.Hostname()
+	lock := filepath.Join(root, ".tabforge-client.lock")
+	if err := os.WriteFile(lock, fmt.Appendf(nil, `{"pid":%d,"host":%q,"started":"2026-01-01T00:00:00Z"}`, cmd.Process.Pid, host), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Import(context.Background(), source, root, "godot", false); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(r.Output, "schema.gd.uid")); err != nil || string(data) != "uid://kept" {
+		t.Fatalf("restored metadata lost: %v", err)
+	}
+	for _, name := range []string{r.Output + ".tabforge-backup", lock} {
+		if _, err := os.Lstat(name); !os.IsNotExist(err) {
+			t.Fatalf("%s left behind: %v", name, err)
 		}
 	}
 }

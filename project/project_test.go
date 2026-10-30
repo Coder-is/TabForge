@@ -3,7 +3,9 @@ package project
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -201,30 +203,81 @@ func TestPureSchemaProjectAndDiscovery(t *testing.T) {
 	}
 }
 
-func TestPublishRollsBackAndKeepsStaleBackup(t *testing.T) {
-	dir := t.TempDir()
-	out := filepath.Join(dir, "Generated")
-	if err := os.Mkdir(out, 0755); err != nil {
+// A crash during publishing or a failed backup cleanup must not block later
+// exports, and the last good output must survive.
+func TestExportRecoversInterruptedPublishAndStaleLock(t *testing.T) {
+	root := copyFixture(t)
+	p, err := Load(root)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(out, "old"), []byte("previous"), 0644); err != nil {
+	r, err := p.Export(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := publish(filepath.Join(dir, "nonexistent-stage"), out); err == nil {
-		t.Fatal("missing stage accepted")
-	}
-	if data, err := os.ReadFile(filepath.Join(out, "old")); err != nil || string(data) != "previous" {
-		t.Fatalf("rollback lost output: %v", err)
-	}
-	if err := os.Mkdir(out+".tabforge-backup", 0755); err != nil {
+	previous := snapshot(t, r.Output)
+	backup := r.Output + ".tabforge-backup"
+	// Backup cleanup failed after the new output was installed.
+	if err := os.MkdirAll(filepath.Join(backup, "data"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := publish(filepath.Join(dir, "nonexistent-stage"), out); err == nil {
-		t.Fatal("stale backup silently replaced")
-	}
-	if _, err := os.Stat(filepath.Join(out, "old")); err != nil {
+	if err := os.WriteFile(filepath.Join(backup, "data", "stale.json"), []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := p.Export(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(backup); !os.IsNotExist(err) {
+		t.Fatalf("superseded backup kept: %v", err)
+	}
+	// Crash between moving the old output aside and installing the new one.
+	if err := os.Rename(r.Output, backup); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(r.Output); !os.IsNotExist(err) {
+		t.Fatal("check changed the published output")
+	}
+	// A crashed exporter on this host also left its lock behind.
+	dead := deadPID(t)
+	host, _ := os.Hostname()
+	lock := filepath.Join(root, ".tabforge-export.lock")
+	if err := os.WriteFile(lock, fmt.Appendf(nil, `{"pid":%d,"host":%q,"started":"2026-01-01T00:00:00Z"}`, dead, host), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Export(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(previous, snapshot(t, r.Output)) {
+		t.Fatal("recovered export differs from the last good output")
+	}
+	for _, name := range []string{backup, lock} {
+		if _, err := os.Lstat(name); !os.IsNotExist(err) {
+			t.Fatalf("%s left behind: %v", name, err)
+		}
+	}
+	// A lock held by this live process is refused with its owner.
+	if err := os.WriteFile(lock, fmt.Appendf(nil, `{"pid":%d,"host":%q,"started":"2026-01-01T00:00:00Z"}`, os.Getpid(), host), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Export(context.Background()); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("pid %d", os.Getpid())) {
+		t.Fatalf("live lock: %v", err)
+	}
+}
+
+func deadPID(t *testing.T) int {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return cmd.Process.Pid
 }
 
 // Windows resolves "Protocols." and the 8.3 name "PROTOC~1" to Protocols; an

@@ -47,6 +47,11 @@ test('cleanup removes only the exited child lock and preserves peer locks', t =>
   fs.writeFileSync(owned,'123\n');fs.writeFileSync(peer,'456\n');
   cleanupOwnedLocks(123,[owned,peer]);
   assert.equal(fs.existsSync(owned),false);assert.equal(fs.readFileSync(peer,'utf8'),'456\n');
+  // Current tools write JSON owner records.
+  const owner=JSON.stringify({pid:123,host:'h',started:'2026-01-01T00:00:00Z'});const other=JSON.stringify({pid:1234,host:'h'});
+  fs.writeFileSync(owned,owner);fs.writeFileSync(peer,other);
+  cleanupOwnedLocks(123,[owned,peer]);
+  assert.equal(fs.existsSync(owned),false);assert.equal(fs.readFileSync(peer,'utf8'),other);
 });
 
 test('forced cancellation releases the child project lock before the next run', async t => {
