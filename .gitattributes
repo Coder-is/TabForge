@@ -1,3 +1,10 @@
+# Keep working copies byte-identical across hosts. Embedded runtimes, -init
+# templates, generated bundles and packages copy these files verbatim, so a
+# Windows core.autocrlf checkout must not inject CRLF (e.g. "bash\r" shebangs,
+# "\r" in schema.pb comments, or differing data.ts copies).
+* text=auto eol=lf
+*.bat text eol=crlf
+
 # Generated bundle manifests bind exact file bytes. Preserve them when a
 # Windows checkout enables core.autocrlf, including JSON and binary payloads.
 examples/complete/Generated/** -text

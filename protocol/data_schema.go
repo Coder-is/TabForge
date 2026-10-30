@@ -200,7 +200,7 @@ func (s *Schema) Generate(dir string, goCode bool) error {
 		}
 	}
 	for _, name := range []string{"data.ts", "schema.ts", "json.ts"} {
-		data, err := typescript.DataFiles.ReadFile(name)
+		data, err := typescript.ReadDataFile(name)
 		if err != nil {
 			return err
 		}

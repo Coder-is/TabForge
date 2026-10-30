@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-Version=3.1.4
+# Stamp binaries with the single release version source.
+Version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' release.json)
+if [[ -z ${Version} ]]; then
+  echo "release.json: missing version" >&2
+  exit 1
+fi
 
 BuildSourcePackage="github.com/Coder-is/TabForge/build"
 BinaryPackage="github.com/Coder-is/TabForge"
@@ -11,6 +16,7 @@ BuildBinary()
   TargetDir=bin/"${1}"
   mkdir -p "${TargetDir}"
   export GOOS=${1}
+  export GOARCH=amd64 # the archive name below promises x86_64
   BuildTime=$(date -R)
   GitCommit=$(git rev-parse HEAD)
   VersionString="-X \"${BuildSourcePackage}.BuildTime=${BuildTime}\" -X \"${BuildSourcePackage}.Version=${Version}\" -X \"${BuildSourcePackage}.GitCommit=${GitCommit}\""

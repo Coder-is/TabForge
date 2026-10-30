@@ -1,6 +1,7 @@
 package project
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -48,6 +49,8 @@ func Init(dir string, template fs.FS) error {
 		mode := os.FileMode(0644)
 		if filepath.Ext(name) == ".command" {
 			mode = 0755
+			// A binary built from a Windows autocrlf checkout embeds "bash\r" shebangs.
+			data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 		}
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 		if err != nil {

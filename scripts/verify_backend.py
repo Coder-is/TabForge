@@ -74,6 +74,7 @@ def main():
         node_output = run(["node", work / "client.mjs", bundle])
         assert "18446744073709551615" in node_output
         cases = root / "examples/backend/cases.json"
+        case_count = len(json.loads(cases.read_text(encoding="utf-8")))
         (work / "check.mjs").write_text("""
 import { readFile } from 'node:fs/promises';
 import { DataBundle, DataStore } from '@tabforge/protocol-runtime/node';
@@ -137,7 +138,7 @@ func main(){b,e:=databundle.Open(os.Args[1],"");if e!=nil{panic(e)};var m pb.Tab
 
     report = {"format": "tabforge.backend.validation.v1", "version": version,
               "consumers": {"goSourceZip": "passed", "npmTgz": "passed", "pythonWheel": "passed", "javaJar": "passed"},
-              "sharedWireCases": 30, "javaSmoke": java_smoke.strip(), "registriesPublished": False}
+              "sharedWireCases": case_count, "javaSmoke": java_smoke.strip(), "registriesPublished": False}
     (out / "validation.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
 

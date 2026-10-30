@@ -98,7 +98,7 @@ node --test editors/cocos/runner.test.cjs editors/vscode/extension.test.cjs
 DOTNET_BIN=/path/to/dotnet GODOT_BIN=/path/to/godot go test -race ./clientbundle
 ```
 
-构建为四个平台各生成便携项目 ZIP、VSIX 和三个引擎插件 ZIP。插件 API 依据 [Unity MenuItem](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/MenuItem.html)、[Creator 扩展](https://docs.cocos.com/creator/3.8/manual/en/editor/extension/first.html)、[Godot EditorPlugin](https://docs.godotengine.org/en/4.5/classes/class_editorplugin.html)。
+构建为四个平台各生成便携项目 ZIP、VSIX 和四个引擎插件 ZIP（Unity、Cocos、Godot、Unreal）。插件 API 依据 [Unity MenuItem](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/MenuItem.html)、[Creator 扩展](https://docs.cocos.com/creator/3.8/manual/en/editor/extension/first.html)、[Godot EditorPlugin](https://docs.godotengine.org/en/4.5/classes/class_editorplugin.html)。
 
 本机已通过三个引擎导入回归、独立 C# 编译和数据读取、真实 Godot 进程调用/数据读取/EditorPlugin headless 注册。Unity 与 Creator 编辑器当前未安装，窗口交互、UPM/扩展管理器安装和 Creator 资源刷新需后续原生验收；headless 通过不代表有窗口交互已验收。Windows/Intel 包为交叉编译，原生执行未验证。
 

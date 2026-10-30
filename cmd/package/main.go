@@ -122,6 +122,8 @@ func copyTree(source, dest string, allow func(string) bool) error {
 		mode := os.FileMode(0644)
 		if strings.HasSuffix(rel, ".command") {
 			mode = 0755
+			// A Windows autocrlf checkout would otherwise ship "bash\r" shebangs.
+			data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 		}
 		return os.WriteFile(filepath.Join(dest, rel), data, mode)
 	})
@@ -377,11 +379,13 @@ func addDirectory(writer *zip.Writer, root, name string) error {
 		if err != nil {
 			return err
 		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
+		// Windows reports 0666 for every file; choose modes from names so the
+		// macOS tool and launchers stay executable and archives match across hosts.
+		mode := os.FileMode(0644)
+		if base := entry.Name(); base == "tabforge" || base == "tabforge.exe" || strings.HasSuffix(base, ".command") {
+			mode = 0755
 		}
-		return addFile(writer, filepath.ToSlash(rel), data, info.Mode())
+		return addFile(writer, filepath.ToSlash(rel), data, mode)
 	})
 }
 
