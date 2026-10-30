@@ -37,7 +37,7 @@ class Program {
   Check(typed.items[0].reward.count == "18446744073709551615" && typed.items[0].unlock_level == 0 && typed.items[1].unlock_level == null);
   Check(typed.items[0].created_at != null && typed.items[0].bonuses != null && typed.items[0].metadata != null);
   loader.Decode<M_tabforge__demo__structures__Tree>("{\"position\":{\"x\":1,\"y\":2},\"state\":\"ACTIVE\"}");
-  foreach(var invalid in new[]{"{\"unknown\":1}", "{\"items\":[{\"ownerId\":123}]}", "{\"items\":[{\"textEffect\":\"a\",\"powerEffect\":1}]}"}) {
+  foreach(var invalid in new[]{"{\"unknown\":1}", "{\"items\":[{\"ownerId\":1.5}]}", "{\"items\":[{\"textEffect\":\"a\",\"powerEffect\":1}]}"}) {
    var rejected=false;try{loader.Decode<M_tabforge__demo__config__Tables>(invalid);}catch(DataException){rejected=true;}Check(rejected);
   }
   Console.WriteLine("C# imported data passed");

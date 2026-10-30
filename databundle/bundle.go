@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -25,6 +26,55 @@ import (
 
 const ManifestName = "data_manifest.json"
 const Format = "tabforge.data.v1"
+
+// Every TabForge data loader (Go, Node.js, Java, Python, Unity, Godot, Unreal)
+// applies this budget to each JSON document of a bundle, so a bundle loads in
+// all of them or in none. Depth counts container nesting with the root value at
+// depth 0; nodes count every JSON value (scalars and containers, not keys).
+// Network messages keep a 100,000-value budget; they are also capped at 1 MiB.
+const (
+	MaxJSONDepth = 64
+	MaxJSONNodes = 10_000_000
+)
+
+// CheckBudget reports whether one JSON document exceeds the data bundle budget.
+func CheckBudget(data []byte) error {
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	const key, member, element = 0, 1, 2 // what an open container expects next
+	var stack []byte
+	nodes := 0
+	for {
+		token, err := d.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if delim, ok := token.(json.Delim); ok && (delim == '}' || delim == ']') {
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		top := len(stack) - 1
+		if top >= 0 && stack[top] == key {
+			stack[top] = member
+			continue
+		}
+		if top >= 0 && stack[top] == member {
+			stack[top] = key
+		}
+		if nodes++; len(stack) > MaxJSONDepth || nodes > MaxJSONNodes {
+			return fmt.Errorf("JSON exceeds data budget (depth %d, %d values)", MaxJSONDepth, MaxJSONNodes)
+		}
+		switch token {
+		case json.Delim('{'):
+			stack = append(stack, key)
+		case json.Delim('['):
+			stack = append(stack, element)
+		}
+	}
+}
 
 type File struct {
 	Path   string `json:"path"`
@@ -96,6 +146,9 @@ func OpenFS(fsys fs.FS, dir, expectedHash string) (*Bundle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s (regenerate with TabForge v3): %w", ManifestName, err)
 	}
+	if err := CheckBudget(raw); err != nil {
+		return nil, err
+	}
 	if err := protocol.ValidateJSON(raw); err != nil {
 		return nil, err
 	}
@@ -143,6 +196,9 @@ func OpenFS(fsys fs.FS, dir, expectedHash string) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := CheckBudget(wire); err != nil {
+		return nil, err
+	}
 	if err := protocol.ValidateJSON(wire); err != nil {
 		return nil, err
 	}
@@ -166,7 +222,7 @@ func OpenFS(fsys fs.FS, dir, expectedHash string) (*Bundle, error) {
 		var msg proto.Message
 		switch entry.Encoding {
 		case "protojson":
-			msg, err = s.DecodeJSON(entry.Message, data)
+			msg, err = decodeJSON(s, entry.Message, data)
 		case "protobuf":
 			msg, err = s.DecodeBinary(entry.Message, data)
 		default:
@@ -193,7 +249,14 @@ func (b *Bundle) Entries() []Entry   { return append([]Entry(nil), b.manifest.Da
 // DecodeJSON validates any message from the loaded schema, including types that
 // are not referenced by a table or RPC.
 func (b *Bundle) DecodeJSON(message string, data []byte) (proto.Message, error) {
-	return b.schema.DecodeJSON(message, data)
+	return decodeJSON(b.schema, message, data)
+}
+
+func decodeJSON(s *protocol.Schema, message string, data []byte) (proto.Message, error) {
+	if err := CheckBudget(data); err != nil {
+		return nil, err
+	}
+	return s.DecodeJSON(message, data)
 }
 
 func (b *Bundle) DecodeBinary(message string, data []byte) (proto.Message, error) {

@@ -16,10 +16,11 @@
 namespace {
 std::string Bytes(const FString& Text) { FTCHARToUTF8 UTF8(*Text); return std::string(UTF8.Get(), UTF8.Length()); }
 FString Text(const std::string& UTF8) { FUTF8ToTCHAR Converted(UTF8.data(), static_cast<int32>(UTF8.size())); return FString(Converted.Length(), Converted.Get()); }
+// Strict parse with the network budget; builds the tree itself, so members
+// differing only by case are rejected instead of silently merged.
 TSharedPtr<FJsonValue> Parse(const std::string& Input) {
-    if (!tabforge::JsonSyntax(Input).valid()) return nullptr;
-    auto Reader = TJsonReaderFactory<>::Create(Text(Input)); TSharedPtr<FJsonValue> Value;
-    return FJsonSerializer::Deserialize(Reader, Value) ? Value : nullptr;
+    TabForgeWire::FJsonDocument Document;
+    return TabForgeWire::Parse(Input, Document) ? Document.Root : nullptr;
 }
 FString Serialize(const TSharedPtr<FJsonValue>& Value) {
     FString JSON; auto Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&JSON);

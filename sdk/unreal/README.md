@@ -24,7 +24,7 @@ auto Request = Client->Stream(TEXT("chatStream"), MakeShared<FJsonValueObject>(D
 
 OnComplete 表示协议完成或终止；`failed` 等业务终止事件仍通过 OnEvent/OnComplete 交付，业务自行检查 payload。OnError 用于传输/协议错误。Client 也应在 game thread 释放。
 
-HTTP 接收使用 `SetResponseBodyReceiveStream(FArchive)`，Serialize 在 HTTP 线程只放入有限队列，游戏线程增量分帧/校验/回调，不依赖完整响应缓存。默认普通正文与单帧最大 1 MiB 字节，队列最大 1 MiB / 128 块，同时最多 16 请求。消费过慢显式报 backpressure；底层不支持接收流时返回 unsupported_transport。UTF-8、JSON 重复键/语法、字段类型、64 位数字字符串、oneof、schema、request ID 和顺序均检查。全程 deadline、CancelAll 和终止事件会停止 HTTP。
+HTTP 接收使用 `SetResponseBodyReceiveStream(FArchive)`，Serialize 在 HTTP 线程只放入有限队列，游戏线程增量分帧/校验/回调，不依赖完整响应缓存。默认普通正文与单帧最大 1 MiB 字节，队列最大 1 MiB / 128 块，同时最多 16 请求。消费过慢显式报 backpressure；底层不支持接收流时返回 unsupported_transport。UTF-8、JSON 重复键/语法、字段类型、oneof、schema、request ID 和顺序均检查；字段取值规则与 Go protojson 一致（如整数接受 `1.0`、`1e2` 和数字字符串，`null` 视为未设置），64 位整数建议以十进制字符串发送。JSON 深度预算为 64（根值为 0 层，按容器嵌套计），节点预算按 JSON 值计数：网络消息 100,000，数据包（TabForgeData）10,000,000，各运行时一致。FJsonObject 键不区分大小写，因此仅大小写不同的重复成员会被拒绝。全程 deadline、CancelAll 和终止事件会停止 HTTP。
 
 本机没有 Unreal 编辑器，已验证独立 C++17 SSE/严格 JSON 核心并通过地址与未定义行为 sanitizer；**插件引擎编译和 HTTP 后端尚未实测**。HTTPS、平台重定向行为、移动打包及其他引擎版本需要验收，生产路由应直接返回协议响应，避免依赖 HTTP 重定向。自动重试、重连、回放不在此版本范围内。
 

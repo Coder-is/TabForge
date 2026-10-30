@@ -7,7 +7,12 @@ import java.nio.file.*;
 import java.security.*;
 import java.util.*;
 
-/** Immutable, validated ProtoJSON snapshot of a Generated directory. */
+/**
+ * Immutable, validated ProtoJSON snapshot of a Generated directory. Every JSON file is bounded by
+ * the data bundle budget (depth 64, 10,000,000 values) shared by all TabForge loaders, and values
+ * are returned as canonical ProtoJSON: 64-bit integers as decimal strings, other integers and
+ * floats as numbers, padded standard Base64, null members removed.
+ */
 public final class DataBundle {
   public record Entry(String path, String sha256, String message, String encoding) {}
 
@@ -62,9 +67,7 @@ public final class DataBundle {
       if (!wire.getAsJsonObject("messages").has(entry.message()))
         throw new IOException("Unknown message: " + entry.message());
       if (entry.encoding().equals("protojson")) {
-        JsonElement value = StrictJson.parse(bytes);
-        validator.validate(entry.message(), value);
-        values.put(entry.path(), value);
+        values.put(entry.path(), validator.validate(entry.message(), StrictJson.parse(bytes)));
       } else if (!entry.encoding().equals("protobuf"))
         throw new IOException("Unsupported encoding: " + entry.encoding());
       entries.add(entry);
@@ -99,9 +102,7 @@ public final class DataBundle {
   }
 
   public JsonElement decode(String message, String text) throws IOException {
-    JsonElement value = StrictJson.parse(text.getBytes(StandardCharsets.UTF_8));
-    validator.validate(message, value);
-    return value;
+    return validator.validate(message, StrictJson.parse(text.getBytes(StandardCharsets.UTF_8)));
   }
 
   private static boolean hash(String value) {

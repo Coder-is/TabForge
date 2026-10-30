@@ -2,6 +2,7 @@
 #include "TabForgeClient.h"
 #include "TabForgeSse.h"
 #include "TabForgeJsonSyntax.h"
+#include "TabForgeWire.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformMisc.h"
@@ -20,6 +21,41 @@ bool FTabForgeParserTest::RunTest(const FString&) {
         TestTrue(TEXT("Finish"), Parser.finish()); TestEqual(TEXT("One frame"), Count, 1);
     }
     TestFalse(TEXT("Duplicate keys rejected"), tabforge::JsonSyntax("{\"x\":1,\"\\u0078\":2}").valid());
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTabForgeWireTest, "TabForge.Protocol.Wire", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FTabForgeWireTest::RunTest(const FString&) {
+    // Mirrors examples/backend/cases.json: Go protojson input rules.
+    TabForgeWire::FJsonDocument SchemaDocument;
+    const std::string SchemaText = R"({"messages":{"M":{"fields":{"i":{"kind":"int32"},"u":{"kind":"uint32"},"l":{"kind":"int64"},"q":{"kind":"uint64"},"e":{"kind":"enum","type":"E"},"b":{"kind":"bytes"},"d":{"kind":"double"},"n":{"kind":"int32","list":true},"m":{"kind":"int32","mapKey":"int32"},"s":{"kind":"message","type":"google.protobuf.Struct"},"x":{"kind":"string"},"y":{"kind":"int32"},"next":{"kind":"message","type":"M"}},"oneofs":[["x","y"]]},"google.protobuf.Struct":{"fields":{}}},"enums":{"E":["ZERO","ONE"]}})";
+    if (!TestTrue(TEXT("Schema parses"), TabForgeWire::Parse(SchemaText, SchemaDocument))) return false;
+    const auto Schema = SchemaDocument.Root->AsObject();
+    auto Check = [&](const std::string& Json, bool Expected) {
+        TabForgeWire::FJsonDocument Document;
+        const bool Parsed = TabForgeWire::Parse(Json, Document, TabForgeWire::JsonMaxDepth, TabForgeWire::DataMaxNodes);
+        TabForgeWire::Validator Validator(Schema, TabForgeWire::JsonMaxDepth, TabForgeWire::DataMaxNodes, true);
+        const bool Valid = Parsed && Validator.Validate(TEXT("M"), Document.Root, &Document.Numbers);
+        TestEqual(FString(UTF8_TO_TCHAR(Json.c_str())), Valid, Expected);
+        return Valid ? TabForgeWire::Object(Validator.Result) : TSharedPtr<FJsonObject>();
+    };
+    for (const char* Json : { R"({"i":1.0})", R"({"i":1e2})", R"({"i":100e-2})", R"({"i":-0})", R"({"i":"1e2"})", R"({"u":4294967295.0})", R"({"q":18446744073709551615})", R"({"q":"1.8446744073709551615e19"})", R"({"l":9007199254740993})", R"({"e":1.0})", R"({"e":"ONE"})", R"({"b":"AA-_"})", R"({"b":"AAF="})", R"({"m":{"+1":1,"02":2}})", R"({"d":"1.5"})", R"({"d":"NaN"})", R"({"x":null,"y":1})", R"({"s":{"a":null}})", R"({"n":null})" })
+        Check(Json, true);
+    for (const char* Json : { R"({"i":1.5})", R"({"i":1e-2})", R"({"i":2147483648})", R"({"i":" 1"})", R"({"i":"01"})", R"({"i":1.0000000000000001})", R"({"i":0.000000000000000000001e21})", R"({"u":-1})", R"({"q":18446744073709551616})", R"({"e":"1"})", R"({"e":"one"})", R"({"b":"AA+_"})", R"({"b":"AA="})", R"({"m":{"1":1,"01":2}})", R"({"m":{"1e0":1}})", R"({"d":" 1"})", R"({"n":[null]})", R"({"x":"a","y":1})", R"({"I":1})", R"({"i":1,"I":2})" })
+        Check(Json, false);
+    const auto Normalized = Check(R"({"i":"1e2","q":18446744073709551615,"l":-9.223372036854775808e18,"e":1.0,"b":"AAF","n":[1.0,"2"],"m":{"+1":3},"x":null})", true);
+    if (Normalized.IsValid()) {
+        TestEqual(TEXT("int32 number"), Normalized->GetNumberField(TEXT("i")), 100.0);
+        TestEqual(TEXT("uint64 exact string"), Normalized->GetStringField(TEXT("q")), FString(TEXT("18446744073709551615")));
+        TestEqual(TEXT("int64 exact string"), Normalized->GetStringField(TEXT("l")), FString(TEXT("-9223372036854775808")));
+        TestEqual(TEXT("canonical bytes"), Normalized->GetStringField(TEXT("b")), FString(TEXT("AAE=")));
+        TestTrue(TEXT("canonical map key"), Normalized->GetObjectField(TEXT("m"))->HasField(TEXT("1")));
+        TestFalse(TEXT("null member removed"), Normalized->HasField(TEXT("x")));
+    }
+    // Depth equals JSON depth: a value at depth 64 is accepted, 65 rejected.
+    auto Nest = [](int32 Levels) { std::string Json = "{\"i\":1}"; for (int32 I = 0; I < Levels; ++I) Json = "{\"next\":" + Json + "}"; return Json; };
+    Check(Nest(63), true);
+    Check(Nest(64), false);
     return true;
 }
 

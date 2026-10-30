@@ -37,7 +37,11 @@ func _ready() -> void:
 
 request 方法避免与 Godot Object.call 冲突。Request 是 RefCounted 句柄，包含 done、result、error、request_id 和 cancel。completed 表示普通响应已收到，或流已收到声明的结束事件；业务 failed 事件仍通过 event_received 发出，需要应用处理。failed 信号表示传输或验证失败。所有结果延迟到下一轮处理，调用者可以先连接信号；移除客户端节点会取消请求。
 
-请求和响应都按 ProtoJSON 规则验证：64 位整数保持字符串，不要转为 Godot int；枚举使用协议名称或 int32；bytes 为 Base64；数组、map、required、oneof 和 well-known types 有对应检查。信号在场景处理线程发出，回调应尽快返回。
+请求和响应都按 Go protojson 的输入规则验证：整数字段接受 JSON 数字或数字字符串，只要其十进制值精确为整数且在范围内（1.0、1e2、"7" 可以，1.5 不行）；64 位整数建议仍用字符串，避免 Godot float 丢精度；枚举使用协议名称或 int32 数字；bytes 接受标准/URL Base64，可省略填充；null 字段视为未设置（google.protobuf.Value 除外）；数组、map、required、oneof 和 well-known types 有对应检查。JSON 由 wire_validator.gd 内的严格解析器读取：拒绝重复键（包括转义后相同的键，如 "x" 与 "\u0078"）、扩展语法、孤立代理项与尾随内容，深度上限 64，网络消息最多 100000 个 JSON 值。信号在场景处理线程发出，回调应尽快返回。
+
+## 数据文件
+
+data_schema.gd 与 wire_validator.gd 是导入到游戏工程的数据加载器（不依赖网络客户端）。read_file/decode_bytes 先做严格 UTF-8 校验（拒绝过长编码、代理项、截断序列和 BOM），再解析 JSON。数据文件使用所有 TabForge 运行时一致的数据包预算：深度 64、最多 10000000 个 JSON 值（每个标量和容器各算 1 个，键不计），因此 20000 行的配置表在 Go、Node、Java、Python、Unity、Unreal 与 Godot 中同样能加载。返回值规范化为标准 ProtoJSON：32 位整数和枚举数字为 int，64 位整数为十进制 String，其它数字为 float，bytes 为带填充的标准 Base64，null 字段被移除，整数 map 键为规范十进制。
 
 ## 网络与限制
 

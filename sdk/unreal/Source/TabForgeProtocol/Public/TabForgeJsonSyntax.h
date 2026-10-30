@@ -3,10 +3,35 @@
 #include <unordered_set>
 
 namespace tabforge {
+// JSON budgets shared by every TabForge runtime. Depth counts container nesting
+// (the root value is depth 0); nodes count every JSON value, not object keys.
+// Network messages are also capped at 1 MiB; data bundle files are not.
+constexpr std::size_t json_max_depth = 64;
+constexpr std::size_t protocol_max_nodes = 100000;
+constexpr std::size_t data_max_nodes = 10000000;
+
+// Receives the document in order while it is checked. Numbers arrive as their
+// exact source text; strings and keys are unescaped UTF-8. Return false to stop.
+class JsonVisitor {
+public:
+    virtual ~JsonVisitor() = default;
+    virtual bool begin_object() = 0;
+    virtual bool key(const std::string& name) = 0;
+    virtual bool end_object() = 0;
+    virtual bool begin_array() = 0;
+    virtual bool end_array() = 0;
+    virtual bool string_value(const std::string& value) = 0;
+    virtual bool number_value(const std::string& text) = 0;
+    virtual bool bool_value(bool value) = 0;
+    virtual bool null_value() = 0;
+};
+
 // Reject duplicate keys, excessive nesting and non-JSON extensions before an
 // engine JSON library materializes values or silently overwrites fields.
 class JsonSyntax {
     const std::string& text_;
+    std::size_t max_depth_, max_nodes_;
+    JsonVisitor* visitor_;
     std::size_t pos_ = 0, nodes_ = 0;
     void space() { while (pos_ < text_.size() && (text_[pos_] == ' ' || text_[pos_] == '\t' || text_[pos_] == '\r' || text_[pos_] == '\n')) ++pos_; }
     bool take(char ch) { space(); if (pos_ >= text_.size() || text_[pos_] != ch) return false; ++pos_; return true; }
@@ -51,25 +76,40 @@ class JsonSyntax {
     }
     bool digits() { const auto start = pos_; while (pos_ < text_.size() && text_[pos_] >= '0' && text_[pos_] <= '9') ++pos_; return pos_ != start; }
     bool value(std::size_t depth) {
-        space(); if (depth > 64 || ++nodes_ > 100000 || pos_ == text_.size()) return false;
-        if (text_[pos_] == '"') { std::string out; return string(out); }
+        space(); if (depth > max_depth_ || ++nodes_ > max_nodes_ || pos_ == text_.size()) return false;
+        if (text_[pos_] == '"') { std::string out; return string(out) && (!visitor_ || visitor_->string_value(out)); }
         if (take('{')) {
+            if (visitor_ && !visitor_->begin_object()) return false;
             std::unordered_set<std::string> keys;
-            if (take('}')) return true;
-            do { std::string key; if (!string(key) || !keys.insert(key).second || !take(':') || !value(depth + 1)) return false; if (take('}')) return true; } while (take(','));
+            if (take('}')) return !visitor_ || visitor_->end_object();
+            do {
+                std::string key; if (!string(key) || !keys.insert(key).second || (visitor_ && !visitor_->key(key)) || !take(':') || !value(depth + 1)) return false;
+                if (take('}')) return !visitor_ || visitor_->end_object();
+            } while (take(','));
             return false;
         }
-        if (take('[')) { if (take(']')) return true; do { if (!value(depth + 1)) return false; if (take(']')) return true; } while (take(',')); return false; }
-        for (const char* word : { "true", "false", "null" }) { const std::string literal(word); if (text_.compare(pos_, literal.size(), literal) == 0) { pos_ += literal.size(); return true; } }
+        if (take('[')) {
+            if (visitor_ && !visitor_->begin_array()) return false;
+            if (take(']')) return !visitor_ || visitor_->end_array();
+            do { if (!value(depth + 1)) return false; if (take(']')) return !visitor_ || visitor_->end_array(); } while (take(','));
+            return false;
+        }
+        if (text_.compare(pos_, 4, "true") == 0) { pos_ += 4; return !visitor_ || visitor_->bool_value(true); }
+        if (text_.compare(pos_, 5, "false") == 0) { pos_ += 5; return !visitor_ || visitor_->bool_value(false); }
+        if (text_.compare(pos_, 4, "null") == 0) { pos_ += 4; return !visitor_ || visitor_->null_value(); }
+        const auto start = pos_;
         if (text_[pos_] == '-') ++pos_;
         if (pos_ == text_.size()) return false;
         if (text_[pos_] == '0') ++pos_; else { if (text_[pos_] < '1' || text_[pos_] > '9' || !digits()) return false; }
         if (pos_ < text_.size() && text_[pos_] == '.') { ++pos_; if (!digits()) return false; }
         if (pos_ < text_.size() && (text_[pos_] == 'e' || text_[pos_] == 'E')) { ++pos_; if (pos_ < text_.size() && (text_[pos_] == '+' || text_[pos_] == '-')) ++pos_; if (!digits()) return false; }
-        return true;
+        return !visitor_ || visitor_->number_value(text_.substr(start, pos_ - start));
     }
 public:
-    explicit JsonSyntax(const std::string& text) : text_(text) {}
+    // Defaults are the network budget; data bundle loaders pass data_max_nodes.
+    explicit JsonSyntax(const std::string& text, std::size_t max_depth = json_max_depth, std::size_t max_nodes = protocol_max_nodes, JsonVisitor* visitor = nullptr)
+        : text_(text), max_depth_(max_depth), max_nodes_(max_nodes), visitor_(visitor) {}
     bool valid() { if (!valid_utf8(text_) || !value(0)) return false; space(); return pos_ == text_.size(); }
+    std::size_t nodes() const { return nodes_; }
 };
 }

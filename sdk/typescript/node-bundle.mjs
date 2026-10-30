@@ -2,7 +2,7 @@ import { readFile, lstat } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { createHash } from "node:crypto";
 import { DataSchema } from "./data.ts";
-import { parseJSON } from "./json.ts";
+import { DATA_LIMITS, parseJSON } from "./json.ts";
 
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -36,10 +36,10 @@ export class DataBundle {
             if (digest(data) !== entry.sha256) throw new Error(`Checksum mismatch: ${entry.path}`);
             return data;
         };
-        const manifest = parseJSON(utf8(await read("data_manifest.json")));
+        const manifest = parseJSON(utf8(await read("data_manifest.json")), DATA_LIMITS);
         if (!record(manifest) || manifest.format !== "tabforge.data.v1" || !hash(manifest.schemaHash) || !Array.isArray(manifest.data) || (expectedHash && expectedHash !== manifest.schemaHash)) throw new Error("Invalid manifest or schema hash mismatch");
         await checked(manifest.descriptor);
-        const wire = parseJSON(utf8(await checked(manifest.wireSchema)));
+        const wire = parseJSON(utf8(await checked(manifest.wireSchema)), DATA_LIMITS);
         if (!record(wire) || !record(wire.messages) || !record(wire.enums)) throw new Error("Invalid wire schema");
         const loader = new DataSchema(wire), values = new Map(), entries = [];
         for (const entry of manifest.data) {

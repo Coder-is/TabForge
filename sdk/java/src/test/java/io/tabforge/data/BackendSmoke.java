@@ -62,6 +62,31 @@ public final class BackendSmoke {
       else
         rejects(() -> bundle.decode(c.get("message").getAsString(), c.get("json").getAsString()));
     }
+    // Accepted spellings come back as canonical ProtoJSON (Go protojson input rules).
+    JsonObject canonical =
+        bundle
+            .decode(
+                "tabforge.demo.config.Item",
+                "{\"id\":\"1e2\",\"ownerId\":18446744073709551615,\"signedTotal\":-9.223372036854775808e18,"
+                    + "\"rarity\":1.0,\"levels\":[1.0,\"2\"],\"iconHash\":\"AAF\",\"priority\":\"7\","
+                    + "\"price\":\"1.5\",\"name\":null,\"extra\":{\"a\":1e0},\"stats\":{\"x\":3e0}}")
+            .getAsJsonObject();
+    require(canonical.get("id").getAsJsonPrimitive().isNumber() && canonical.get("id").getAsLong() == 100, "int32 1e2");
+    require(canonical.get("ownerId").getAsJsonPrimitive().isString()
+        && canonical.get("ownerId").getAsString().equals("18446744073709551615"), "uint64 number");
+    require(canonical.get("signedTotal").getAsString().equals("-9223372036854775808"), "int64 exponent");
+    require(canonical.get("rarity").getAsLong() == 1, "enum number");
+    require(canonical.getAsJsonArray("levels").toString().equals("[1,2]"), "int32 list");
+    require(canonical.get("iconHash").getAsString().equals("AAE="), "canonical Base64");
+    require(canonical.get("priority").getAsLong() == 7, "Int32Value string");
+    require(canonical.get("price").getAsDouble() == 1.5, "double string");
+    require(!canonical.has("name"), "null is absent");
+    require(canonical.getAsJsonObject("extra").get("a").getAsDouble() == 1.0, "Struct number");
+    require(canonical.getAsJsonObject("stats").get("x").getAsLong() == 3, "map value");
+    JsonObject mapped =
+        bundle.decode("tabforge.demo.config.Tables", "{\"byId\":{\"+1\":{},\"02\":{}}}").getAsJsonObject();
+    require(mapped.getAsJsonObject("byId").keySet().equals(new java.util.LinkedHashSet<>(java.util.List.of("1", "2"))), "map keys");
+    rejects(() -> bundle.decode("tabforge.demo.config.Tables", "{\"byId\":{\"1\":{},\"01\":{}}}"));
     ExecutorService pool = Executors.newFixedThreadPool(4);
     try {
       for (int i = 0; i < 16; i++)

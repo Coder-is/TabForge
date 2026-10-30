@@ -25,7 +25,7 @@ handle.Failed += error => UnityEngine.Debug.LogError(error.Code);
 
 Completed 表示协议流已结束；`failed` 这类业务终止事件仍通过 EventReceived/Completed 交付，需要业务自行检查 payload。Failed 回调用于传输/协议错误。
 
-64 位整数按十进制字符串验证，严格 UTF-8/JSON 解析拒绝非法编码、扩展语法、重复键、未知字段、oneof 冲突及事件序号错误。JSON 深度/节点预算分别为 64/100000。请求元数据是受信任的生成包，应与后端一起发布。
+字段规则与 Go protojson 一致：整数可为 JSON 数字或数字字符串（`1.0`、`1e2` 视为整数，64 位整数也可为数字），null 字段视为未设置，bytes 接受标准/URL Base64 及省略填充。严格 UTF-8/JSON 解析拒绝非法编码、扩展语法、重复键（含转义后相同的键）、未知字段、oneof 冲突及事件序号错误。JSON 深度按容器嵌套计（根为 0），节点按全部 JSON 值计：网络消息为 64/100000（另有 1 MiB 正文上限），数据文件（`DataSchema`）为 64/10000000，与 Go/Node/Java/Python/Godot/Unreal 的数据加载器一致；`DataSchema.Decode` 返回规范 ProtoJSON（64 位整数为十进制字符串、Base64 补齐、去掉 null 字段）。请求元数据是受信任的生成包，应与后端一起发布。
 
 **WebGL 的 SSE 暂不支持**，需要 JS fetch 桥；普通请求仍走 UnityWebRequest。IL2CPP、Android/iOS、代理和 HTTPS 证书须在目标构建验证。本机没有 Unity 编辑器，当前通过的是 .NET 8 下 C# 核心及 Go HTTP/SSE 联调，不是 UnityWebRequest 实测。
 
@@ -34,7 +34,7 @@ Completed 表示协议流已结束；`failed` 这类业务终止事件仍通过 
 | 文件 | 职责 |
 | --- | --- |
 | [ProtocolCore.cs](Runtime/ProtocolCore.cs) | 协议元数据、错误、JSON 入口、流事件与会话校验 |
-| [JsonSyntax.cs](Runtime/JsonSyntax.cs) | 严格 JSON 语法检查 |
+| [JsonSyntax.cs](Runtime/JsonSyntax.cs) | 严格 JSON 语法检查与预算，数据加载时保留数字原文 |
 | [SseParser.cs](Runtime/SseParser.cs) | SSE 增量分帧 |
 | [WireValidator.cs](Runtime/WireValidator.cs) | 字段与 Protobuf 内建类型校验 |
 | [TabForgeClient.cs](Runtime/TabForgeClient.cs) | UnityWebRequest、请求生命周期与主线程回调 |

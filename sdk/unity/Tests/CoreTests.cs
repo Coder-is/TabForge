@@ -44,7 +44,9 @@ internal static class CoreTests
         Rejected(() => numbers.Validate("Numbers", JObject.Parse("{\"e\":2147483648}")), "invalid_message");
         Rejected(() => numbers.Validate("Numbers", new JObject { ["d"] = new JValue(System.Numerics.BigInteger.Pow(10, 500)) }), "invalid_message");
         validator.Validate("tabforge.example.ChatRequest", JObject.Parse("{\"conversationId\":\"18446744073709551615\"}"));
-        Rejected(() => validator.Validate("tabforge.example.ChatRequest", JObject.Parse("{\"conversationId\":18446744073709551615}")), "invalid_message");
+        // Go protojson accepts 64-bit integers as JSON numbers too.
+        validator.Validate("tabforge.example.ChatRequest", JObject.Parse("{\"conversationId\":18446744073709551615}"));
+        Rejected(() => validator.Validate("tabforge.example.ChatRequest", JObject.Parse("{\"conversationId\":18446744073709551616}")), "invalid_message");
         Rejected(() => validator.Validate("tabforge.example.ChatRequest", JObject.Parse("{\"conversationId\":\"18446744073709551616\"}")), "invalid_message");
         Rejected(() => validator.Validate("tabforge.example.ChatRequest", JObject.Parse("{\"unknown\":1}")), "invalid_message");
         Rejected(() => validator.Validate("google.protobuf.Timestamp", new JValue("2025-02-30T00:00:00Z")), "invalid_message");
@@ -56,8 +58,9 @@ internal static class CoreTests
         Rejected(() => new ProtocolSession(contract, op, id).Finish(), "incomplete_stream");
         Rejected(() => new ProtocolSession(contract, op, "id\n"), "bad_request");
         Rejected(() => new ProtocolSession(contract, op, id).Unary("{\"protocolVersion\":[]}", 200), "invalid_frame");
-        foreach (var pair in new[] { new[] { "Timestamp", "2024-02-29T12:34:56Z\n" }, new[] { "FieldMask", "userId\n" }, new[] { "BytesValue", "YWJj\n" } }) Rejected(() => validator.Validate("google.protobuf." + pair[0], new JValue(pair[1])), "invalid_message");
+        foreach (var pair in new[] { new[] { "Timestamp", "2024-02-29T12:34:56Z\n" }, new[] { "FieldMask", "userId\n" }, new[] { "BytesValue", "YWJ\n" } }) Rejected(() => validator.Validate("google.protobuf." + pair[0], new JValue(pair[1])), "invalid_message");
         Check(ProtocolSession.NextSequence("18446744073709551615") == "18446744073709551616", "Sequence precision lost");
+        DataTests.Run(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(runtime)), "..", "..", "..")));
         Console.WriteLine("C# protocol core units passed");
         if (args.Length > 1) await Integration(contract, args[1]);
         return 0;

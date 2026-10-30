@@ -11,5 +11,5 @@ public:
     FString SchemaHash() const { return Hash; }
 private:
     FString Hash;
-    TMap<FString, FString> Documents;
+    TMap<FString, TSharedPtr<FJsonObject>> Documents; // validated canonical ProtoJSON
 };

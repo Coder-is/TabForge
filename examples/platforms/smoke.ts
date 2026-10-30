@@ -21,7 +21,7 @@ export async function runSmoke(transport: Transport): Promise<SmokeResult[]> {
   };
   await run("unary Unicode + uint64", async () => { const data = await client.call("chatComplete", request, options); check(data.text === "你好😀" && data.usage?.outputTokens === "18446744073709551615", "Unary data differs"); });
   await run("SSE Unicode + terminal sequence", async () => { const events = []; for await (const event of client.stream("chatStream", request, options)) events.push(event); check(events.length === 2 && events[0].payload.delta?.text === "你好😀" && events[1].name === "completed" && events[1].sequence === "2", "SSE data differs"); });
-  await run("request type validation", async () => { await rejects(() => transport.call(operations.chatComplete, { conversationId: 1 }, options), "invalid_message"); });
+  await run("request type validation", async () => { await rejects(() => transport.call(operations.chatComplete, { conversationId: 1.5 }, options), "invalid_message"); });
   await run("incremental event before EOF + cancellation", async () => {
     const source = new CancellationSource(); let received = false;
     await rejects(async () => { for await (const event of transport.stream({ ...operations.chatStream, timeoutMS: 5000 }, { ...request, prompt: "cancel" }, { ...options, signal: source.signal })) { check(event.name === "text.delta", "Expected first delta"); received = true; source.cancel(); } }, "cancelled");

@@ -58,9 +58,7 @@ class DataBundle:
             if entry.get("message") not in wire["messages"]:
                 raise ValueError("Unknown message: " + str(entry.get("message")))
             if entry.get("encoding") == "protojson":
-                value = parse_json(data.decode("utf-8"))
-                validator.validate(entry["message"], value)
-                values[entry["path"]] = value
+                values[entry["path"]] = validator.validate(entry["message"], parse_json(data.decode("utf-8")))
             elif entry.get("encoding") != "protobuf":
                 raise ValueError("Unsupported encoding: " + str(entry.get("encoding")))
         result = cls()
@@ -85,9 +83,7 @@ class DataBundle:
         return copy.deepcopy(self._values[name])
 
     def decode(self, message, text):
-        value = parse_json(text)
-        self._validator.validate(message, value)
-        return value
+        return self._validator.validate(message, parse_json(text))
 
 
 class DataStore:

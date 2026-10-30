@@ -12,6 +12,7 @@
     <Compile Include="../Runtime/WireValidator.cs" Link="WireValidator.cs" />
     <Compile Include="../Runtime/DataSchema.cs" Link="DataSchema.cs" />
     <Compile Include="CoreTests.cs" />
+    <Compile Include="DataTests.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
   </ItemGroup>
 </Project>

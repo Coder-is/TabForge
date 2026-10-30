@@ -119,7 +119,7 @@ test("callback unary bounds bytes and validates schema before sending", async ()
     callbacks.chunk(encodeUTF8(reply({ text: "hello" }))); callbacks.complete();
     return { abort() {} };
   }, { ...settings, maxResponseBytes: 30 });
-  await assert.rejects(transport.call(operations.chatComplete, { conversationId: 1 }, options), { code: "invalid_message" });
+  await assert.rejects(transport.call(operations.chatComplete, { conversationId: 1.5 }, options), { code: "invalid_message" });
   assert.equal(sent, 0);
   await assert.rejects(transport.call(operations.chatComplete, {}, options), { code: "response_too_large" });
 });

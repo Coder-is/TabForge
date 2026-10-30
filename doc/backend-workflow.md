@@ -120,7 +120,7 @@ go run . -project=examples/complete
 | Python | `tabforge-data` / `tabforge_data` | dict / list / 基础类型 | Python 3.9+；无运行时依赖 |
 | Java | `io.tabforge:tabforge-data:0.3.0` | Gson JsonElement / JsonObject | Java 17+；Gson 2.13.2 |
 
-Node、Java、Python 对清单中的二进制文件做完整性检查，但读取时要求选择 `.json` 数据。它们校验工具生成的规范 ProtoJSON；64 位整数始终是字符串。Go 使用官方 protobuf 解码，支持官方 ProtoJSON 输入形式及二进制。Java / Python 当前没有生成业务消息类或二进制编解码；动态结构来自同一 wire schema。
+Node、Java、Python 对清单中的二进制文件做完整性检查，但读取时要求选择 `.json` 数据。Go 使用官方 protobuf 解码并支持二进制；其他各端（含 Unity、Godot、Unreal 数据加载器）按 Go protojson 的输入规则接受与拒绝同样的 ProtoJSON，并把读取结果规范化：64 位整数始终是十进制字符串。Java / Python 当前没有生成业务消息类或二进制编解码；动态结构来自同一 wire schema。
 
 ### 4.1 Go
 
@@ -334,21 +334,28 @@ Node、Python 的 hash 参数和 Java `open(path)` 可省略；Go 的参数不�
 
 | 结构 | 读取时的行为 |
 | --- | --- |
-| int64 / uint64 等 64 位整数 | JSON 三端为十进制字符串；Go 生成消息使用对应整数类型 |
+| int64 / uint64 等 64 位整数 | 输入可为整数值的 JSON 数字或数字字符串；JSON 三端读取结果为十进制字符串；Go 生成消息使用对应整数类型 |
+| int32 / uint32 等 32 位整数 | 输入可为 `1`、`1.0`、`1e2`、`"1"`、`"1e2"` 等精确整数（按十进制精确判断，`1.5`、`1e-2` 拒绝）；读取结果为 JSON 数字 |
 | optional | 显式零值与未设置区分；JSON 用字段是否存在判断，Go 使用 presence |
 | oneof | 同时填写多个成员会被拒绝，即使其中一个是零值 |
 | repeated | JSON 中是数组；省略的默认字段可能不存在 |
-| map | JSON 中是对象，整数 key 也是字符串；Go 使用消息对应的 map 类型 |
-| enum | 已声明名称或 int32 数值；不存在的名称会被拒绝 |
-| bytes | JSON 中是带填充的 Base64；Go 消息中是字节切片 |
+| map | JSON 中是对象，整数 key 也是字符串，可带 `+` / 前导零（同 Go `strconv.ParseInt`），读取结果为规范十进制且不得重复；Go 使用消息对应的 map 类型 |
+| enum | 已声明名称或 int32 数值（数值不能写成字符串）；不存在的名称会被拒绝 |
+| bytes | 输入可为标准或 URL 安全 Base64，填充可省略；读取结果为带填充的标准 Base64；Go 消息中是字节切片 |
+| null | 等同于未填写该字段（不计入 oneof / 必填），读取结果中删除；`google.protobuf.Value` / `NullValue` 字段的 null 是取值；数组 / map 中的 null 会被拒绝 |
+| float / double | JSON 数字、`"NaN"`、`"Infinity"`、`"-Infinity"` 或数字字符串（读取结果为数字） |
 | Timestamp / Duration / FieldMask | 保留规范 ProtoJSON 的字符串表示 |
 | Struct / Value / Any | 按内建类型规则校验；Any 的类型必须来自已加载结构 |
+
+已知差异：Go 还接受 proto 原字段名（如 `owner_id`）以及带时区偏移、任意 1～9 位小数的 Timestamp / Duration；其他端只接受 JSON 字段名和规范 UTC / 3、6、9 位小数格式。TabForge 导出的数据始终使用后者。
 
 仅生成结构时可以从配置删除 tables，清单的 data 为 `[]`。此时 `read` 没有可读取条目，但 `decode` 仍可用于校验任意已生成类型，例如 `tabforge.demo.structures.Tree`。
 
 ## 6. 加载、校验与重新加载
 
-所有入口成功返回前，都会校验清单与登记文件的校验值，并校验全部 ProtoJSON。未知字段、oneof 冲突、错误类型、数值溢出、重复 JSON 键、错误路径、重复路径和文件缺失会使加载失败。Go 还独立重算描述的 schemaHash，并检查 wire schema 与描述一致。其他三端使用清单给出的 schemaHash 与文件校验值，不解析二进制描述。
+所有入口成功返回前，都会校验清单与登记文件的校验值，并校验全部 ProtoJSON。未知字段、oneof 冲突、错误类型、数值溢出、重复 JSON 键（含转义后相同的键）、错误路径、重复路径和文件缺失会使加载失败。
+
+数据包中的每个 JSON 文件（清单、wire schema、数据）在所有加载端使用同一预算：嵌套深度不超过 64（根值深度为 0，每进入一层对象 / 数组加 1），JSON 值总数不超过 10,000,000（标量与对象 / 数组各计 1 个，键不计）。超出预算的包在所有端都加载失败，未超出的在所有端都能加载；Go 通过 `databundle.CheckBudget`、`MaxJSONDepth`、`MaxJSONNodes` 公开该预算，Node 为 `DATA_LIMITS`。网络协议消息仍使用 64 层 / 100,000 个值的预算，并受 1 MiB 消息上限约束。2 万行 × 9 个值的表约 18 万个值，可正常加载。Go 还独立重算描述的 schemaHash，并检查 wire schema 与描述一致。其他三端使用清单给出的 schemaHash 与文件校验值，不解析二进制描述。
 
 每端可传 expectedHash 固定期望的结构身份；默认空字符串允许加载新的结构。校验值用于发现传输损坏或混合产物，不代替分发渠道的身份验证。
 
@@ -460,7 +467,7 @@ python scripts/verify_backend.py --out=outputs/releases/v3
 
 Java 不在 PATH 时传 `--java-home=/path/to/jdk`。脚本安装真实 tgz / wheel、以 JAR 编译独立 Java 消费端、通过源码 ZIP 接入独立 Go 模块，并在中文 / 空格目录下验证读取，写入 validation.json。该命令要求维护者构建环境，不能作为业务服务启动命令。
 
-四端的可运行示例见 [后端示例](../examples/backend/README.md)。Node、Python、Java 共用 30 个规范结构用例；Go 验证动态 / 强类型、旧描述拒绝、embed 文件系统、并发读取和失败保持快照。CI 增加实际分发包消费验证。Windows 的三语言入口和 Go 竞态测试由 CI 覆盖，本机验证环境为 macOS ARM64；CI 配置本身不代表远端运行已完成。
+四端的可运行示例见 [后端示例](../examples/backend/README.md)。Go、Node、Python、Java 共用 `examples/backend/cases.json` 中的规范结构用例，结果以 Go protojson 为准（`databundle` 测试逐条核对）；Go 与 Node 另以 2 万行大表验证数据预算；Go 验证动态 / 强类型、旧描述拒绝、embed 文件系统、并发读取和失败保持快照。CI 增加实际分发包消费验证。Windows 的三语言入口和 Go 竞态测试由 CI 覆盖，本机验证环境为 macOS ARM64；CI 配置本身不代表远端运行已完成。
 
 2026-10-04 本地验证：完整 Go 竞态回归通过，包含 C# / Godot 读取链路；TS 严格检查与 30 项测试通过。Go 源码 ZIP、npm tgz、Python wheel、Java JAR 都在独立消费工程中安装并读取成功。20 个便携 / 编辑器归档及全部 25 个交付文件的校验值通过；解包后的三种编辑器内置 Mac ARM64 工具在空 PATH、中文与空格路径下完成生成、导入、校验及失败保持旧资产。记录在 `outputs/releases/v3/validation.json` 与 `client-validation.json`。
 

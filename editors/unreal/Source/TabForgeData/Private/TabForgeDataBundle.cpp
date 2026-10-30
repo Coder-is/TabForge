@@ -4,8 +4,6 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 IMPLEMENT_MODULE(FDefaultModuleImpl, TabForgeData)
 
@@ -16,35 +14,29 @@ bool SafePath(const FString& Path) {
     for (const FString& Part : Parts) if (Part.IsEmpty() || Part == TEXT(".") || Part == TEXT("..")) return false;
     return true;
 }
-bool Parse(const FString& Json, TSharedPtr<FJsonObject>& Object, FString& Error) {
-    FTCHARToUTF8 Utf8(*Json);
-    const std::string Text(Utf8.Get(), Utf8.Length());
-    if (!tabforge::JsonSyntax(Text).valid() || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Object) || !Object.IsValid()) {
-        Error = TEXT("Invalid, duplicate-key or oversized JSON object"); return false;
-    }
-    return true;
-}
-bool Load(const FString& Path, FString& Json, TSharedPtr<FJsonObject>& Object, FString& Error) {
+// Every document of a bundle uses the data budget shared by all TabForge data
+// loaders (depth 64, 10,000,000 JSON values), so a bundle loads everywhere or nowhere.
+bool Load(const FString& Path, TabForgeWire::FJsonDocument& Document, FString& Error) {
     TArray<uint8> Bytes;
     if (!FFileHelper::LoadFileToArray(Bytes, *Path)) { Error = TEXT("Cannot read ") + Path; return false; }
-    if (Bytes.IsEmpty()) { Error = TEXT("Empty JSON file: ") + Path; return false; }
     const std::string Raw(reinterpret_cast<const char*>(Bytes.GetData()), Bytes.Num());
-    if (!tabforge::JsonSyntax(Raw).valid()) { Error = TEXT("Invalid UTF-8 or JSON: ") + Path; return false; }
-    FUTF8ToTCHAR Text(Raw.data(), static_cast<int32>(Raw.size()));
-    Json = FString(Text.Length(), Text.Get());
-    return Parse(Json, Object, Error);
+    if (!TabForgeWire::Parse(Raw, Document, TabForgeWire::JsonMaxDepth, TabForgeWire::DataMaxNodes)) { Error = TEXT("Invalid UTF-8, duplicate-key or oversized JSON: ") + Path; return false; }
+    if (Document.Root->Type != EJson::Object) { Error = TEXT("Expected a JSON object: ") + Path; return false; }
+    return true;
 }
 }
 
 TSharedPtr<FTabForgeDataBundle> FTabForgeDataBundle::Open(const FString& Directory, FString& Error, const FString& ExpectedSchemaHash) {
     Error.Empty();
-    FString Json; TSharedPtr<FJsonObject> Manifest, Schema;
-    if (!Load(FPaths::Combine(Directory,TEXT("bundle.json")),Json,Manifest,Error)) return nullptr;
+    TabForgeWire::FJsonDocument ManifestDocument, SchemaDocument;
+    if (!Load(FPaths::Combine(Directory,TEXT("bundle.json")),ManifestDocument,Error)) return nullptr;
+    const TSharedPtr<FJsonObject> Manifest = ManifestDocument.Root->AsObject();
     FString Format, Hash;
-    if (!Manifest->TryGetStringField(TEXT("format"),Format) || Format != TEXT("tabforge.unreal.data.v1") || !Manifest->TryGetStringField(TEXT("schemaHash"),Hash) || Hash.IsEmpty() || (!ExpectedSchemaHash.IsEmpty() && Hash != ExpectedSchemaHash)) {
+    if (!Manifest->TryGetStringField(TEXT("format"),Format) || Format != TEXT("tabforge.unreal.data.v1") || !Manifest->TryGetStringField(TEXT("schemaHash"),Hash) || Hash.IsEmpty() || (!ExpectedSchemaHash.IsEmpty() && !Hash.Equals(ExpectedSchemaHash, ESearchCase::CaseSensitive))) {
         Error = TEXT("Data bundle format/schema identity mismatch"); return nullptr;
     }
-    if (!Load(FPaths::Combine(Directory,TEXT("wire_schema.json")),Json,Schema,Error)) return nullptr;
+    if (!Load(FPaths::Combine(Directory,TEXT("wire_schema.json")),SchemaDocument,Error)) return nullptr;
+    const TSharedPtr<FJsonObject> Schema = SchemaDocument.Root->AsObject();
     const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
     if (!Manifest->TryGetArrayField(TEXT("data"),Entries)) { Error = TEXT("Missing data entries"); return nullptr; }
     auto Bundle = MakeShared<FTabForgeDataBundle>(); Bundle->Hash = Hash;
@@ -55,19 +47,23 @@ TSharedPtr<FTabForgeDataBundle> FTabForgeDataBundle::Open(const FString& Directo
         if (!Entry->TryGetStringField(TEXT("path"),Path) || !Entry->TryGetStringField(TEXT("message"),Message) || !SafePath(Path) || !Path.EndsWith(TEXT(".json"),ESearchCase::CaseSensitive) || Seen.Contains(Path.ToLower())) {
             Error = TEXT("Unsafe or duplicate data entry"); return nullptr;
         }
-        Seen.Add(Path.ToLower()); TSharedPtr<FJsonObject> Data;
-        if (!Load(FPaths::Combine(Directory,Path),Json,Data,Error)) return nullptr;
-        TabForgeWire::Validator Validator(Schema);
-        if (!Validator.Validate(Message,MakeShared<FJsonValueObject>(Data))) { Error = Path + TEXT(": ") + Validator.Error; return nullptr; }
-        Bundle->Documents.Add(Path,Json);
+        Seen.Add(Path.ToLower());
+        TabForgeWire::FJsonDocument Data;
+        if (!Load(FPaths::Combine(Directory,Path),Data,Error)) return nullptr;
+        // Raw number text reaches the validator; stored data is canonical ProtoJSON
+        // (64-bit integers as decimal strings, padded Base64, null members removed).
+        TabForgeWire::Validator Validator(Schema, TabForgeWire::JsonMaxDepth, TabForgeWire::DataMaxNodes, true);
+        if (!Validator.Validate(Message, Data.Root, &Data.Numbers)) { Error = Path + TEXT(": ") + Validator.Error; return nullptr; }
+        const TSharedPtr<FJsonObject> Canonical = TabForgeWire::Object(Validator.Result);
+        if (!Canonical.IsValid()) { Error = Path + TEXT(": expected a message object"); return nullptr; }
+        Bundle->Documents.Add(Path, Canonical);
     }
     return Bundle;
 }
 
 TSharedPtr<FJsonObject> FTabForgeDataBundle::Read(const FString& RelativePath, FString& Error) const {
-    Error.Empty(); TSharedPtr<FJsonObject> Object;
-    const FString* Json = Documents.Find(RelativePath);
-    if (!Json) { Error = TEXT("Data file is not registered: ") + RelativePath; return nullptr; }
-    if (!Parse(*Json,Object,Error)) return nullptr;
-    return Object; // Fresh object; callers cannot mutate another reader's data.
+    Error.Empty();
+    const TSharedPtr<FJsonObject>* Document = Documents.Find(RelativePath);
+    if (!Document) { Error = TEXT("Data file is not registered: ") + RelativePath; return nullptr; }
+    return TabForgeWire::Object(TabForgeWire::Clone(MakeShared<FJsonValueObject>(*Document))); // fresh copy per reader
 }

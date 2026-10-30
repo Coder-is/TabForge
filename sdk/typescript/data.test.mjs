@@ -21,7 +21,7 @@ test("portable data loader validates all example structures and preserves uint64
 
 test("data loader rejects invalid structures before returning typed data", () => {
   const loader = new DataSchema(wireSchema);
-  for (const json of ['{', '{"items":[{"ownerId":18446744073709551615}]}', '{"items":[{"textEffect":"x","powerEffect":0}]}', '{"unknown":1}', '{"items":[{"rarity":"INVALID"}]}']) {
+  for (const json of ['{', '{"items":[{"textEffect":"x","powerEffect":0}]}', '{"unknown":1}', '{"items":[{"rarity":"INVALID"}]}']) {
     assert.throws(() => loader.decode('tabforge.demo.config.Tables', json));
   }
   assert.throws(() => loader.decode('Missing', '{}'));

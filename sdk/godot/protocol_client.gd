@@ -2,7 +2,6 @@ extends Node
 
 const Parser = preload("sse_parser.gd")
 const Wire = preload("wire_validator.gd")
-const UTF8 = preload("utf8.gd")
 
 class Request extends RefCounted:
 	signal event_received(event: Dictionary)
@@ -165,12 +164,12 @@ func _receive(handle: Request, chunk: PackedByteArray) -> void:
 		if handle.done:
 			return
 
+# Strict JSON (duplicate members rejected) with the 100,000-value message budget.
 func _parse(bytes: PackedByteArray) -> Dictionary:
-	var decoded: Dictionary = UTF8.decode(bytes)
-	if decoded.has("error"): return {"error": "invalid_utf8"}
-	var json := JSON.new()
-	if json.parse(decoded.text) != OK or not json.data is Dictionary: return {"error": "invalid_json"}
-	return {"body": json.data}
+	var parsed: Dictionary = Wire.parse_json_bytes(bytes, Wire.PROTOCOL_MAX_NODES)
+	if parsed.has("error"): return {"error": parsed.error}
+	if not parsed.value is Dictionary: return {"error": "invalid_json"}
+	return {"body": parsed.value}
 
 func _envelope(handle: Request, body: Dictionary) -> bool:
 	if body.get("protocolVersion") != _contract.version: _fail(handle, "version_mismatch", "Response version differs"); return false

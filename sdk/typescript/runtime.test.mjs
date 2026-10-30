@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SSEParser, StreamValidator, FetchTransport, ProtocolClient, parseUnary } from "./runtime.ts";
+import { SSEParser, StreamValidator, FetchTransport, ProtocolClient, parseUnary, parseJSON } from "./runtime.ts";
 import { CallbackTransport } from "./callback_transport.ts";
 
 const operation = { path: "/chat", transport: "http_sse", auth: "none", timeoutMS: 1000,
@@ -147,4 +147,10 @@ test("unary fetch failures use ProtocolError and reject non-JSON responses", asy
   await assert.rejects(failed.call(unary, {}), error => error.code === "transport_error" && error.message === "offline");
   const html = new FetchTransport("http://demo", "1", async () => new Response("<html>proxy failure</html>", { headers: { "Content-Type": "text/html" } }));
   await assert.rejects(html.call(unary, {}), error => error.code === "unsupported_media_type");
+});
+
+test("protocol responses reject duplicate members like the other runtimes", () => {
+    assert.throws(() => parseJSON('{"text":"a","text":"b"}'), error => error.code === "invalid_json");
+    assert.throws(() => parseJSON('{"x":1,"\u0078":2}'), error => error.code === "invalid_json");
+    assert.deepEqual(parseJSON('{"text":"a"}'), { text: "a" });
 });

@@ -1,6 +1,7 @@
 /** TabForge v1 ProtoJSON transport. No dependency on a model provider or engine. */
 import { SchemaValidator } from "./schema.ts";
 import type { WireSchema } from "./schema.ts";
+import { PROTOCOL_LIMITS, parseJSON as parseStrictJSON } from "./json.ts";
 export type { WireSchema } from "./schema.ts";
 export interface Operation {
     path: string;
@@ -163,9 +164,11 @@ function object(value: unknown): Record<string, unknown> {
         throw new ProtocolError("invalid_frame", "Expected an object");
     return value as Record<string, unknown>;
 }
+// Strict like every other TabForge runtime: duplicate members and oversized
+// nesting are rejected instead of letting the last duplicate silently win.
 export function parseJSON(data: string): unknown {
     try {
-        return JSON.parse(data);
+        return parseStrictJSON(data, PROTOCOL_LIMITS);
     }
     catch {
         throw new ProtocolError("invalid_json", "Invalid JSON response");

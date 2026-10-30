@@ -54,27 +54,11 @@ namespace TabForge.Protocol
     {
         public static JToken Parse(string text)
         {
-            try
-            {
-                if (!new JsonSyntax(text).Valid())
-                    throw new ProtocolException("invalid_json", "Invalid JSON syntax");
-                using (var reader = new JsonTextReader(new StringReader(text))
-                {
-                    DateParseHandling = DateParseHandling.None,
-                    MaxDepth = 64
-                }
-
-                )
-                    return JToken.Load(reader, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
-            }
-            catch (ProtocolException)
-            {
-                throw;
-            }
-            catch (Exception exception)when (exception is JsonException || exception is ArgumentException)
-            {
-                throw new ProtocolException("invalid_json", "Invalid JSON response");
-            }
+            // Network budget: depth 64, 100,000 JSON values (bodies are also capped at 1 MiB).
+            var token = text == null ? null : new JsonSyntax(text).Parse(false);
+            if (token == null)
+                throw new ProtocolException("invalid_json", "Invalid JSON syntax");
+            return token;
         }
 
         public static string RequiredString(JObject body, string name)

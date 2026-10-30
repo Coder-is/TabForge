@@ -25,7 +25,7 @@ const FString Owner = Items[0]->AsObject()->GetStringField(TEXT("ownerId"));
 UE_LOG(LogTemp, Log, TEXT("ownerId=%s"), *Owner);
 ```
 
-Open 校验全部登记的 ProtoJSON、字段类型、oneof 和大整数；第三个参数可固定预期 schemaHash。Read 返回新 JSON 对象，修改读取结果不会污染其他读取者。重新加载时先创建新 Bundle，成功后替换业务持有的共享指针，失败继续保留旧指针。64 位整数使用字符串，避免 double 精度丢失。
+Open 校验全部登记的 ProtoJSON、字段类型、oneof 和大整数；第三个参数可固定预期 schemaHash。Read 返回新 JSON 对象，修改读取结果不会污染其他读取者。重新加载时先创建新 Bundle，成功后替换业务持有的共享指针，失败继续保留旧指针。输入规则与 Go protojson 一致：整数可写作 `1.0`、`1e2` 或数字字符串，64 位整数可写作 JSON 数字（按原文精确判定，不经 double），`null` 视为未设置。Read 返回规范 ProtoJSON：64 位整数为十进制字符串，bytes 为带填充的标准 Base64，整数 map 键为规范十进制。每个 JSON 文件的预算为深度 64、10,000,000 个 JSON 值，与其他运行时的数据包加载器相同。
 
 取消只在子进程结束后清理该 PID 的锁；若终止发生在发布切换窗口，已有工具的备份恢复规则仍适用。网络 HTTP/SSE 使用独立的 `sdk/unreal` 插件，数据插件不依赖它。
 
