@@ -25,17 +25,21 @@ type TableSheet interface {
 	// 最大列
 	MaxColumn() int
 
+	// 最大行(含表头), 之后的行均为空
+	MaxRow() int
+
 	// 写入一行数据
 	WriteRow(valueList ...string)
 
-	// 检测本行是否全空(结束)
+	// 检测本行前maxCol列是否全空, maxCol为-1时检查所有列
 	IsRowEmpty(row, maxCol int) bool
 }
 
 func ReadSheetRow(sheet TableSheet, row int) (ret []string) {
 
-	ret = make([]string, sheet.MaxColumn())
-	for col := 0; col < sheet.MaxColumn(); col++ {
+	maxCol := sheet.MaxColumn()
+	ret = make([]string, maxCol)
+	for col := 0; col < maxCol; col++ {
 
 		value := sheet.GetValue(row, col, nil)
 

@@ -34,13 +34,18 @@ func ParseRow(ret interface{}, tab *model.DataTable, row int, symbols *model.Typ
 
 	for _, header := range tab.Headers {
 
+		if header.TypeInfo == nil {
+			continue
+		}
+
 		valueCell := tab.GetValueByName(row, header.Cell.Value)
 
 		if valueCell == nil {
 			continue
 		}
 
-		index := matchField(tobj, header.Cell.Value)
+		// 列头可写标识名(中文)或字段名(英文), 统一按标识名匹配结构体的tb_name
+		index := matchField(tobj, header.TypeInfo.Name)
 
 		if index == -1 {
 			report.ReportError("HeaderNotMatchFieldName", header.Cell)

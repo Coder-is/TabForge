@@ -7,19 +7,21 @@ import (
 	"strings"
 )
 
-func LoadHeader(sheet helper.TableSheet, tab *model.DataTable, resolveTableType string, typeTab *model.TypeTable) (maxCol int) {
-	// 读取表头
+// 读取列头, 返回需要扫描的列数和列头为空的列
+func LoadHeader(sheet helper.TableSheet, tab *model.DataTable, resolveTableType string, typeTab *model.TypeTable) (maxCol int, emptyCols []int) {
 
-	for col := 0; ; col++ {
+	maxCol = sheet.MaxColumn()
+
+	for col := 0; col < maxCol; col++ {
 
 		headerValue := sheet.GetValue(0, col, nil)
 
-		// 空列，终止
+		// 空列头不终止读取, 但该列不能有数据, 由调用方检查
 		if headerValue == "" {
-			break
+			emptyCols = append(emptyCols, col)
+			continue
 		}
 
-		maxCol = col
 		// 列头带#时，本列忽略
 		if strings.HasPrefix(headerValue, "#") {
 			continue
@@ -60,10 +62,11 @@ func checkHeaderTypes(tab *model.DataTable, symbols *model.TypeTable) {
 
 }
 
-func headerValueExists(offset int, name string, headers []*model.HeaderField) bool {
+// 列头可使用标识名或字段名, 两种写法指向同一字段时也视为重复
+func headerFieldExists(offset int, tf *model.TypeDefine, headers []*model.HeaderField) bool {
 
 	for i := offset; i < len(headers); i++ {
-		if headers[i].Cell.Value == name {
+		if headers[i].TypeInfo == tf {
 			return true
 		}
 	}
@@ -74,7 +77,7 @@ func headerValueExists(offset int, name string, headers []*model.HeaderField) bo
 func resolveHeaderFields(tab *model.DataTable, tableObjectType string, typeTab *model.TypeTable) {
 
 	tab.OriginalHeaderType = tableObjectType
-	for index, header := range tab.Headers {
+	for _, header := range tab.Headers {
 
 		if header.Cell.Value == "" {
 			continue
@@ -85,12 +88,14 @@ func resolveHeaderFields(tab *model.DataTable, tableObjectType string, typeTab *
 			report.ReportError("HeaderFieldNotDefined", header.Cell, tableObjectType)
 		}
 
-		if headerValueExists(index+1, header.Cell.Value, tab.Headers) && !tf.IsArray() {
-			report.ReportError("DuplicateHeaderField", header.Cell)
-		}
-
 		// 解析好的类型
 		header.TypeInfo = tf
+	}
+
+	for index, header := range tab.Headers {
+		if header.TypeInfo != nil && !header.TypeInfo.IsArray() && headerFieldExists(index+1, header.TypeInfo, tab.Headers) {
+			report.ReportError("DuplicateHeaderField", header.Cell)
+		}
 	}
 
 }

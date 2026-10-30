@@ -28,5 +28,6 @@ var (
 		"InvalidIndexType":               {CHS: "不支持的索引类型"},
 		"UnknownTypeKind":                {CHS: "非法的类型种类"},
 		"UnknownTableKind":               {CHS: "非法的表模式"},
+		"DataUnderEmptyHeader":           {CHS: "列头为空的列中有数据, 备注列请使用#开头的列头"},
 	}
 )

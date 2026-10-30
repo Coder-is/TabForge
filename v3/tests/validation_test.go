@@ -437,6 +437,8 @@ func TestGeneratedNameCollisions(t *testing.T) {
 		{"root enum", [][]string{{"枚举", "Table", "", "None", "int32", "", "0"}}, gosrc.Generate},
 		{"Go enum helper", [][]string{{"枚举", "State", "", "None", "int32", "", "0"}, {"表头", "StateEnumValues", "ID", "ID", "int32"}}, gosrc.Generate},
 		{"Java enum member", [][]string{{"枚举", "State", "", "State", "int32", "", "0"}}, javasrc.Generate},
+		// A nested type named java would obscure java.math.BigInteger used for uint64.
+		{"Java package shadow", [][]string{{"表头", "java", "ID", "ID", "uint64"}}, javasrc.Generate},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			emu := NewTableEmulator(t)

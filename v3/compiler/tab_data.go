@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/Coder-is/TabForge/v3/helper"
 	"github.com/Coder-is/TabForge/v3/model"
+	"github.com/Coder-is/TabForge/v3/report"
 	"strings"
 )
 
@@ -47,17 +48,27 @@ func LoadDataTable(filegetter helper.FileGetter, fileName, headerType, resolveHe
 
 		ret = append(ret, tab)
 
-		maxCol := LoadHeader(sheet, tab, resolveHeaderType, typeTab)
+		maxCol, emptyCols := LoadHeader(sheet, tab, resolveHeaderType, typeTab)
 
 		// 遍历所有数据行
-		for row := 0; ; row++ {
+		for row := 0; row < sheet.MaxRow(); row++ {
 
-			if sheet.IsRowEmpty(row, maxCol+1) {
-				break
+			// 完整空行跳过, 继续读取后续行
+			if sheet.IsRowEmpty(row, maxCol) {
+				continue
 			}
 
-			// 读取每一行
-			readOneRow(sheet, tab, row)
+			// 读取每一行, 注释行不检查
+			if !readOneRow(sheet, tab, row) {
+				continue
+			}
+
+			// 列头为空的列不能有数据, 避免数据被静默丢弃
+			for _, col := range emptyCols {
+				if value := sheet.GetValue(row, col, nil); value != "" {
+					report.ReportError("DataUnderEmptyHeader", &model.Cell{Value: value, Row: row, Col: col, Table: tab})
+				}
+			}
 		}
 
 	}

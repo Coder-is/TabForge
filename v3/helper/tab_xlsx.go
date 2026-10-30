@@ -84,20 +84,48 @@ func (self *XlsxSheet) Name() string {
 }
 
 func (self *XlsxSheet) MaxColumn() int {
-	return self.Sheet.MaxCol
+	ret := self.Sheet.MaxCol
+	for _, row := range self.Sheet.Rows {
+		if row != nil && len(row.Cells) > ret {
+			ret = len(row.Cells)
+		}
+	}
+	return ret
+}
+
+func (self *XlsxSheet) MaxRow() int {
+	return len(self.Sheet.Rows)
+}
+
+// 读取已有单元格; 不能用Sheet.Cell, 它会为越界的行列创建单元格
+func (self *XlsxSheet) cell(row, col int) *xlsx.Cell {
+	if row < 0 || row >= len(self.Sheet.Rows) || col < 0 {
+		return nil
+	}
+
+	r := self.Sheet.Rows[row]
+	if r == nil || col >= len(r.Cells) {
+		return nil
+	}
+
+	return r.Cells[col]
 }
 
 func (self *XlsxSheet) IsRowEmpty(row, maxCol int) bool {
 
-	if maxCol == -1 {
-		maxCol = self.Sheet.MaxCol
+	if row < 0 || row >= len(self.Sheet.Rows) || self.Sheet.Rows[row] == nil {
+		return true
+	}
+
+	// 只检查实际存在的单元格, 带格式的空白行列不会带来额外开销
+	cells := self.Sheet.Rows[row].Cells
+	if maxCol == -1 || maxCol > len(cells) {
+		maxCol = len(cells)
 	}
 
 	for col := 0; col < maxCol; col++ {
 
-		data := self.GetValue(row, col, nil)
-
-		if data != "" {
+		if cells[col] != nil && strings.TrimSpace(cells[col].Value) != "" {
 			return false
 		}
 	}
@@ -106,7 +134,10 @@ func (self *XlsxSheet) IsRowEmpty(row, maxCol int) bool {
 }
 
 func (self *XlsxSheet) GetValue(row, col int, opt *ValueOption) (ret string) {
-	c := self.Sheet.Cell(row, col)
+	c := self.cell(row, col)
+	if c == nil {
+		return ""
+	}
 
 	// 浮点数单元格按原样输出
 	if opt != nil && opt.ValueAsFloat {

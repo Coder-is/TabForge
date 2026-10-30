@@ -46,13 +46,13 @@ func ConvertToCSV(inputFile TableFile) (outputFile TableFile) {
 
 	inSheet := inputFile.Sheets()[0]
 
-	// 遍历所有数据行
-	for row := 0; ; row++ {
+	// 遍历所有数据行, 中间的空行保留, 末尾空行省略
+	lastRow := inSheet.MaxRow() - 1
+	for lastRow >= 0 && inSheet.IsRowEmpty(lastRow, -1) {
+		lastRow--
+	}
 
-		if inSheet.IsRowEmpty(row, -1) {
-			break
-		}
-
+	for row := 0; row <= lastRow; row++ {
 		rows := ReadSheetRow(inSheet, row)
 
 		outSheet.WriteRow(rows...)

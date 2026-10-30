@@ -25,13 +25,16 @@ func (self *CSVFile) Sheets() (ret []TableSheet) {
 	return []TableSheet{self.sheet}
 }
 
-func (self *CSVFile) MaxCol() int {
+func (self *CSVFile) MaxCol() (ret int) {
 
-	if len(self.records) > 0 {
-		return len(self.records[0])
+	// 内存表的行长度可能不同, 取最长的行
+	for _, record := range self.records {
+		if len(record) > ret {
+			ret = len(record)
+		}
 	}
 
-	return 0
+	return
 }
 
 func ConvGBKToUTF8(data []byte) ([]byte, error) {
@@ -129,17 +132,24 @@ func (self *CSVSheet) MaxColumn() int {
 	return self.file.MaxCol()
 }
 
+func (self *CSVSheet) MaxRow() int {
+	return len(self.file.records)
+}
+
 func (self *CSVSheet) IsRowEmpty(row, maxCol int) bool {
 
-	if maxCol == -1 {
-		maxCol = self.file.MaxCol()
+	if row >= len(self.file.records) {
+		return true
+	}
+
+	rowData := self.file.records[row]
+	if maxCol == -1 || maxCol > len(rowData) {
+		maxCol = len(rowData)
 	}
 
 	for col := 0; col < maxCol; col++ {
 
-		data := self.GetValue(row, col, nil)
-
-		if data != "" {
+		if rowData[col] != "" {
 			return false
 		}
 	}

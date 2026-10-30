@@ -33,11 +33,19 @@ func wrapSingleValue(globals *model.Globals, valueType *model.TypeDefine, value 
 	}
 
 	if value == "" {
-		return model.FetchDefaultValue(valueType.FieldType)
+		value = model.FetchDefaultValue(valueType.FieldType)
+	}
+
+	// uint64 exceeds long; BigInteger keeps the full unsigned range in JSON loading and index keys.
+	// A constructor keeps the qualified name in a type context, so a field named "java" cannot obscure it.
+	if model.LanguagePrimitive(valueType.FieldType, "java") == bigIntegerType {
+		return "new " + bigIntegerType + "(" + util.StringWrap(value) + ")"
 	}
 
 	return value
 }
+
+const bigIntegerType = "java.math.BigInteger"
 
 func init() {
 	UsefulFunc["JavaType"] = func(tf *model.TypeDefine, requireRef bool) string {
