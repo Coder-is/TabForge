@@ -123,7 +123,7 @@ func _scalar(field: Dictionary, value: Variant, path: String, depth: int) -> voi
 		return
 	if kind in ["float", "double"]:
 		if value is String and value in ["NaN", "Infinity", "-Infinity"]: return
-		if not (value is int or value is float) or not is_finite(float(value)) or (kind == "float" and abs(float(value)) > 3.4028234663852886e38): _fail(path, kind)
+		if not (value is int or value is float) or not is_finite(float(value)) or (kind == "float" and abs(float(value)) >= 3.4028235677973366e38): _fail(path, kind)
 		return
 	if kind == "bool":
 		if not value is bool: _fail(path, "boolean")

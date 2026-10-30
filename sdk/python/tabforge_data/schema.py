@@ -88,7 +88,7 @@ class SchemaValidator:
             elif kind in ("double", "float"):
                 if value in ("NaN", "Infinity", "-Infinity"):
                     return
-                if type(value) not in (int, float) or not math.isfinite(value) or (kind == "float" and abs(value) > 3.4028234663852886e38):
+                if type(value) not in (int, float) or not math.isfinite(value) or (kind == "float" and abs(value) >= 3.4028235677973366e38):
                     fail(path, kind)
             elif kind == "bool":
                 if type(value) is not bool:

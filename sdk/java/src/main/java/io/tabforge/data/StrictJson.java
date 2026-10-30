@@ -47,7 +47,10 @@ final class StrictJson {
       case STRING:
         return new JsonPrimitive(reader.nextString());
       case NUMBER:
-        return new JsonPrimitive(new BigDecimal(reader.nextString()));
+        String number = reader.nextString();
+        // Same bound as Gson's own number parsing; BigDecimal parsing is superlinear.
+        if (number.length() > 10000) throw new IOException("JSON number is too long");
+        return new JsonPrimitive(new BigDecimal(number));
       case BOOLEAN:
         return new JsonPrimitive(reader.nextBoolean());
       case NULL:

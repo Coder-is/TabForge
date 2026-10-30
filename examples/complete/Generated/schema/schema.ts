@@ -141,13 +141,18 @@ export class SchemaValidator {
         }
         if (name === "Any") {
             const fields = this.record(value, path);
+            // protojson writes an unset Any as {} and Empty as {"@type": ..., "value": {}}.
+            if (Object.keys(fields).length === 0)
+                return true;
             if (typeof fields["@type"] !== "string")
                 this.fail(path, "Any @type");
             const nestedType = (fields["@type"] as string).split("/").slice(-1)[0];
             if (nestedType === type || !hasOwn(this.schema.messages, nestedType))
                 this.fail(path, "known Any type");
             const nested = Object.fromEntries(Object.entries(fields).filter(([key]) => key !== "@type"));
-            if (nestedType.startsWith(prefix) && nestedType !== prefix + "Empty") {
+            if (nestedType === prefix + "Empty" && Object.keys(nested).length === 0)
+                return true; // Go tolerates an omitted Empty value on input.
+            if (nestedType.startsWith(prefix)) {
                 if (Object.keys(nested).length !== 1 || !("value" in nested))
                     this.fail(path, "Any value");
                 this.message(nestedType, nested.value, path + ".value", depth + 1);
@@ -185,7 +190,8 @@ export class SchemaValidator {
             return;
         }
         if (kind === "double" || kind === "float") {
-            if ((typeof value === "number" && Number.isFinite(value) && (kind !== "float" || Math.abs(value) <= 3.4028234663852886e38)) || ["NaN", "Infinity", "-Infinity"].includes(value as string))
+            // Go emits float32 max as 3.4028235e+38; accept values that round to a finite float32.
+            if ((typeof value === "number" && Number.isFinite(value) && (kind !== "float" || Number.isFinite(Math.fround(value)))) || ["NaN", "Infinity", "-Infinity"].includes(value as string))
                 return;
             this.fail(path, kind);
         }

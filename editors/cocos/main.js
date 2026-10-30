@@ -11,8 +11,9 @@ async function execute(action, bundle) {
   const tool = executable(root, __dirname);
   if (!tool) throw new Error('找不到 TabForge 工具，请安装对应系统的插件包。');
   status = {running:true, log:'正在' + action + '\n'};
-  job = run(tool, root, argumentsFor(root, action, bundle), text => { append(text.trimEnd()); console.log('[TabForge] ' + text.trimEnd()); });
   try {
+    // run() can throw synchronously (for example, a locked stale report); still reset status.
+    job = run(tool, root, argumentsFor(root, action, bundle), text => { append(text.trimEnd()); console.log('[TabForge] ' + text.trimEnd()); });
     const report = await job.completion;
     if (report.editorOutput && action !== 'check' && !unloading) {
       try { await Editor.Message.request('asset-db', 'refresh-asset', 'db://assets/resources/tabforge'); }

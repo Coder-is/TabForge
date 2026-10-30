@@ -52,3 +52,16 @@ test("well-known types preserve canonical values and reject invalid dates/durati
   assert.throws(() => validator.validate("google.protobuf.FieldMask", "user_id"));
   for (const [type, value] of [["Timestamp", "2024-02-29T12:34:56Z\n"], ["Duration", "1s\n"], ["FieldMask", "userId\n"], ["BytesValue", "YWJj\n"]]) assert.throws(() => validator.validate("google.protobuf." + type, value));
 });
+
+test("float and Any accept the exact shapes Go protojson emits", () => {
+  const validator = new SchemaValidator({ messages: { "google.protobuf.Empty": { fields: {} }, M: { fields: { id: { kind: "int32" } } } }, enums: {} });
+  // strconv.FormatFloat(math.MaxFloat32, 'g', -1, 32) is shortest float32 text, which exceeds MaxFloat32 as a double.
+  for (const value of [3.4028235e38, -3.4028235e38, 1.5]) validator.validate("google.protobuf.FloatValue", value);
+  for (const value of [3.5e38, -1e39]) assert.throws(() => validator.validate("google.protobuf.FloatValue", value));
+  validator.validate("google.protobuf.Any", {});
+  validator.validate("google.protobuf.Any", { "@type": "type.googleapis.com/google.protobuf.Empty", value: {} });
+  validator.validate("google.protobuf.Any", { "@type": "type.googleapis.com/google.protobuf.Empty" });
+  validator.validate("google.protobuf.Any", { "@type": "type.googleapis.com/M", id: 1 });
+  assert.throws(() => validator.validate("google.protobuf.Any", { "@type": "type.googleapis.com/google.protobuf.Empty", value: { x: 1 } }));
+  assert.throws(() => validator.validate("google.protobuf.Any", { value: {} }));
+});

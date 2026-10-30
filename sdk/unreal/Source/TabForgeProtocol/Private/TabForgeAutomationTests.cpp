@@ -15,8 +15,8 @@ bool FTabForgeParserTest::RunTest(const FString&) {
     for (std::size_t Split = 0; Split <= Input.size(); ++Split) {
         tabforge::SseParser Parser; int Count = 0;
         auto Receive = [&](const tabforge::SseFrame& Frame) { ++Count; return Frame.id == "1" && Frame.event == "text.delta" && tabforge::JsonSyntax(Frame.data).valid(); };
-        TestTrue(TEXT("First fragment"), Parser.feed(Input.data(), Split, Receive));
-        TestTrue(TEXT("Second fragment"), Parser.feed(Input.data() + Split, Input.size() - Split, Receive));
+        TestTrue(TEXT("First fragment"), Parser.feed(reinterpret_cast<const std::uint8_t*>(Input.data()), Split, Receive));
+        TestTrue(TEXT("Second fragment"), Parser.feed(reinterpret_cast<const std::uint8_t*>(Input.data()) + Split, Input.size() - Split, Receive));
         TestTrue(TEXT("Finish"), Parser.finish()); TestEqual(TEXT("One frame"), Count, 1);
     }
     TestFalse(TEXT("Duplicate keys rejected"), tabforge::JsonSyntax("{\"x\":1,\"\\u0078\":2}").valid());

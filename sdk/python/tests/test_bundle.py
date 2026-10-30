@@ -44,6 +44,10 @@ class BundleTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "declared field"):
                 DataBundle.open(root)
+            missing = {key: value for key, value in manifest.items() if key != "descriptor"}
+            manifest_path.write_text(json.dumps(missing), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                DataBundle.open(root)
             manifest["data"][0]["path"] = "../escape"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaises(ValueError):

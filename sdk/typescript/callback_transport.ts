@@ -225,8 +225,12 @@ class Session {
         if (this.stopped)
             return;
         this.failure = failure;
-        this.queue = [];
-        this.queuedBytes = 0;
+        // Like FetchTransport, deliver events validated before a remote/protocol
+        // failure; only caller cancellation discards undelivered events.
+        if (failure.code === "cancelled") {
+            this.queue = [];
+            this.queuedBytes = 0;
+        }
         this.close();
     }
     async unary(): Promise<unknown> {
@@ -238,13 +242,13 @@ class Session {
     }
     async next(): Promise<IteratorResult<StreamEvent<unknown>>> {
         while (true) {
-            if (this.failure)
-                throw this.failure;
             const item = this.queue.shift();
             if (item) {
                 this.queuedBytes -= item.bytes;
                 return { done: false, value: item.event };
             }
+            if (this.failure)
+                throw this.failure;
             if (this.stopped)
                 return { done: true, value: undefined };
             await new Promise<void>(resolve => { this.wake = resolve; });

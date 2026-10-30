@@ -85,7 +85,7 @@ function activate(context) {
     }));
 
     // This also catches Excel saves performed outside the text editor.
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{proto,csv,xlsx,json}');
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{proto,csv,xlsx,xlsm,xls,json}');
     const changed = uri => {
         if (uri.scheme !== 'file' || stopping) return;
         const config = findProject(path.dirname(uri.fsPath));

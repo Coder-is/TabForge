@@ -264,7 +264,7 @@ namespace TabForge.Protocol
                     "-Infinity"
                 }.Contains((string)value))
                     return;
-                if (!Number(value, out var floating) || (kind == "float" && Math.Abs(floating) > 3.4028234663852886e38))
+                if (!Number(value, out var floating) || (kind == "float" && Math.Abs(floating) >= 3.4028235677973366e38))
                     Fail(path, kind);
                 return;
             }

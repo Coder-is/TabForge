@@ -49,7 +49,7 @@ class Validator {
         }
         if (Kind == TEXT("float") || Kind == TEXT("double")) {
             if (Value->Type == EJson::String) return (Value->AsString() == TEXT("NaN") || Value->AsString() == TEXT("Infinity") || Value->AsString() == TEXT("-Infinity")) || Fail(Path, TEXT("float special value"));
-            return (Value->Type == EJson::Number && FMath::IsFinite(Value->AsNumber()) && (Kind != TEXT("float") || FMath::Abs(Value->AsNumber()) <= 3.4028234663852886e38)) || Fail(Path, TEXT("float/double"));
+            return (Value->Type == EJson::Number && FMath::IsFinite(Value->AsNumber()) && (Kind != TEXT("float") || FMath::Abs(Value->AsNumber()) < 3.4028235677973366e38)) || Fail(Path, TEXT("float/double"));
         }
         if (Kind == TEXT("bool")) return Value->Type == EJson::Boolean || Fail(Path, TEXT("boolean"));
         if (Kind == TEXT("string") || Kind == TEXT("bytes")) return (Value->Type == EJson::String && (Kind != TEXT("bytes") || Matches(TEXT("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"), Value->AsString()))) || Fail(Path, TEXT("string/Base64"));

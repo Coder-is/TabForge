@@ -168,3 +168,14 @@ test("callback transports reject invalid origins/IDs and cap bytes received befo
   assert.equal(sent, 0);
   await assert.rejects(transport.call(operations.chatComplete, {}, options), { code: "response_too_large" });
 });
+
+test("callback streams deliver events received before a remote error frame, like fetch", async () => {
+  const failure = `id: 2\nevent: protocol.error\ndata: ${JSON.stringify({ protocolVersion, schemaHash, requestId: "platform", sequence: "2", error: { code: "internal", message: "boom", retryable: false } })}\n\n`;
+  const transport = new CallbackTransport("http://example", protocolVersion, (_request, callbacks) => {
+    queueMicrotask(() => { callbacks.headers(200, { "content-type": "text/event-stream" }); callbacks.chunk(encodeUTF8(event(1, "text.delta", { delta: { text: "x" } }) + failure)); });
+    return { abort() {} };
+  }, settings);
+  const events = [];
+  await assert.rejects(async () => { for await (const frame of transport.stream(operations.chatStream, {}, options)) events.push(frame.name); }, { code: "internal" });
+  assert.deepEqual(events, ["text.delta"]);
+});

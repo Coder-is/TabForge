@@ -47,8 +47,8 @@ class DataBundle:
         manifest = parse_json(read("data_manifest.json").decode("utf-8"))
         if not isinstance(manifest, dict) or manifest.get("format") != "tabforge.data.v1" or not _hash(manifest.get("schemaHash")) or not isinstance(manifest.get("data"), list) or (expected_hash and expected_hash != manifest["schemaHash"]):
             raise ValueError("Invalid manifest or schema hash mismatch")
-        checked(manifest["descriptor"])
-        wire = parse_json(checked(manifest["wireSchema"]).decode("utf-8"))
+        checked(manifest.get("descriptor"))
+        wire = parse_json(checked(manifest.get("wireSchema")).decode("utf-8"))
         if not isinstance(wire, dict) or not isinstance(wire.get("messages"), dict) or not isinstance(wire.get("enums"), dict):
             raise ValueError("Invalid wire schema")
         validator = SchemaValidator(wire)

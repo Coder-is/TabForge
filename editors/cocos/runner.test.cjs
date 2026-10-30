@@ -63,3 +63,17 @@ test('forced cancellation releases the child project lock before the next run', 
   job.child.kill('SIGKILL');await rejected;
   assert.equal(fs.existsSync(lock),false);
 });
+
+test('a synchronous start failure does not leave the panel stuck in the running state', async t => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'tabforge start '));t.after(()=>{fs.rmSync(root,{recursive:true,force:true});delete globalThis.Editor;});
+  fs.writeFileSync(path.join(root,'tabforge.json'),'{}');
+  fs.mkdirSync(path.join(root,'Tools','TabForge'),{recursive:true});
+  fs.writeFileSync(path.join(root,'Tools','TabForge',process.platform==='win32'?'tabforge.exe':'tabforge'),'tool');
+  fs.mkdirSync(path.join(root,'.tabforge-report.json')); // The stale report cannot be removed.
+  globalThis.Editor={Project:{path:root}};
+  const main=require('./main');
+  const original=console.error;console.error=()=>{};t.after(()=>{console.error=original;});
+  assert.equal(await main.methods.check(),undefined);
+  assert.equal(main.methods.queryStatus().running,false);
+  assert.match(main.methods.queryStatus().log,/EISDIR|directory/i);
+});

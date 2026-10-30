@@ -44,6 +44,16 @@ final class SchemaValidator {
           && number.compareTo(bound) < 0;
     }
 
+    // Range-check before any exact conversion: expanding an exponent such as 1e999999999
+    // to a BigInteger would exhaust CPU and memory on untrusted decode input.
+    boolean integer32(JsonElement value, boolean signed) {
+      if (!isNumber(value)) return false;
+      BigDecimal number = value.getAsBigDecimal();
+      return number.compareTo(BigDecimal.valueOf(signed ? Integer.MIN_VALUE : 0)) >= 0
+          && number.compareTo(BigDecimal.valueOf(signed ? Integer.MAX_VALUE : 4294967295L)) <= 0
+          && number.stripTrailingZeros().scale() <= 0;
+    }
+
     JsonObject object(JsonElement value, String path) {
       if (value == null || !value.isJsonObject()) fail(path, "object");
       return value.getAsJsonObject();
@@ -64,13 +74,7 @@ final class SchemaValidator {
         case "enum":
           String type = field.get("type").getAsString();
           if (type.equals("google.protobuf.NullValue") && value.isJsonNull()) return;
-          if (isNumber(value)) {
-            try {
-              BigInteger number = value.getAsBigDecimal().toBigIntegerExact();
-              if (integerString(number.toString(), true, 32)) return;
-            } catch (ArithmeticException ignored) {
-            }
-          }
+          if (integer32(value, true)) return;
           if (isString(value) && schema.getAsJsonObject("enums").has(type))
             for (JsonElement item : schema.getAsJsonObject("enums").getAsJsonArray(type))
               if (item.getAsString().equals(value.getAsString())) return;
@@ -91,14 +95,7 @@ final class SchemaValidator {
         case "sfixed32":
         case "uint32":
         case "fixed32":
-          if (isNumber(value))
-            try {
-              if (integerString(
-                  value.getAsBigDecimal().toBigIntegerExact().toString(),
-                  !kind.equals("uint32") && !kind.equals("fixed32"),
-                  32)) return;
-            } catch (ArithmeticException ignored) {
-            }
+          if (integer32(value, !kind.equals("uint32") && !kind.equals("fixed32"))) return;
           fail(path, kind);
           return;
         case "float":
@@ -107,7 +104,7 @@ final class SchemaValidator {
               && Set.of("NaN", "Infinity", "-Infinity").contains(value.getAsString())) return;
           if (isNumber(value)
               && Double.isFinite(value.getAsDouble())
-              && (!kind.equals("float") || Math.abs(value.getAsDouble()) <= 3.4028234663852886e38))
+              && (!kind.equals("float") || Math.abs(value.getAsDouble()) < 3.4028235677973366e38))
             return;
           fail(path, kind);
           return;

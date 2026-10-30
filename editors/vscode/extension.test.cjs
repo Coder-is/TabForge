@@ -51,3 +51,53 @@ test('structured diagnostics locate Proto sources and describe workbook cells wi
   assert.deepEqual(diagnosticEntries({},config), []);
   assert.deepEqual(diagnosticEntries({format:'tabforge.report.v1',diagnostics:[]},config), []);
 });
+
+test('diagnostic columns convert proto tab stops and CSV byte offsets to editor UTF-16 columns', () => {
+  const config = path.resolve('project/tabforge.json');
+  const proto = path.resolve('project/Protocols/data.proto');
+  const csv = path.resolve('project/Tables/Items.csv');
+  const files = { [proto]: 'syntax = "proto3";\r\n\tmessage Item {\n\t\tint32 id = 1 // 中文\n}\n', [csv]: '\uFEFFid,名称,稀有度\n1,剑😀,EPIC\n' };
+  const entries = diagnosticEntries({format:'tabforge.report.v1', diagnostics:[
+    // protocompile: runes, tabs advance to the next multiple of 8.
+    {code:'proto_compile',message:'x',path:proto,line:2,column:9},
+    {code:'proto_compile',message:'x',path:proto,line:3,column:33},
+    // csv.Reader.FieldPos: UTF-8 byte columns, counting the BOM on line 1.
+    {code:'csv',message:'x',path:csv,line:1,column:14},
+    {code:'csv',message:'x',path:csv,line:2,column:11}
+  ]}, config, file => files[file]);
+  assert.deepEqual(entries.map(entry => entry.column), [1, 18, 6, 6]);
+  assert.equal(diagnosticEntries({format:'tabforge.report.v1', diagnostics:[{code:'x',message:'x',path:csv,line:1,column:5}]}, config, () => { throw new Error('gone'); })[0].column, 4);
+});
+
+test('export on save watches every workbook extension the compiler discovers', async t => {
+  const Module = require('node:module');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tabforge watch '));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'Tables'));
+  fs.writeFileSync(path.join(root, 'tabforge.json'), JSON.stringify({ tables: [{ discover: { dir: 'Tables' } }] }));
+  let pattern, changed, started = 0;
+  const vscode = {
+    window: { createOutputChannel: () => ({ appendLine() {}, append() {}, show() {}, dispose() {} }) },
+    languages: { createDiagnosticCollection: () => ({ delete() {}, set() {}, dispose() {} }) },
+    commands: { registerCommand: () => ({ dispose() {} }) },
+    Uri: { file: fsPath => ({ scheme: 'file', fsPath }) },
+    workspace: {
+      isTrusted: true,
+      getConfiguration: () => ({ get: (name, fallback) => name === 'exportOnSave' ? true : name === 'toolPath' ? (started++, '') : fallback })
+    }
+  };
+  const watcher = { dispose() {}, onDidChange: listener => (changed = listener, { dispose() {} }), onDidCreate: () => ({ dispose() {} }), onDidDelete: () => ({ dispose() {} }) };
+  vscode.workspace.createFileSystemWatcher = glob => { pattern = glob; return watcher; };
+  const load = Module._load;
+  Module._load = function (request, ...rest) { return request === 'vscode' ? vscode : load.call(this, request, ...rest); };
+  t.after(() => { Module._load = load; });
+  delete require.cache[require.resolve('./extension.js')];
+  const extension = require('./extension.js');
+  extension.activate({ subscriptions: [], extensionPath: path.join(root, 'missing-extension') });
+  t.after(() => extension.deactivate());
+  const extensions = pattern.match(/\{(.*)\}/)[1].split(',');
+  for (const ext of ['proto', 'csv', 'xlsx', 'xlsm', 'json']) assert(extensions.includes(ext), ext);
+  changed(vscode.Uri.file(path.join(root, 'Tables', 'Items.xlsm')));
+  await new Promise(resolve => setTimeout(resolve, 700));
+  assert.equal(started, 1, 'a saved .xlsm workbook schedules an automatic export');
+});
