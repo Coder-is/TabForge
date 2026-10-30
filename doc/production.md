@@ -8,7 +8,7 @@
 
 Go 服务端默认要求 X-Protocol-Version 与 X-Protocol-Schema 一致，否则 409。所有响应包络增加 schemaHash；各客户端检查包络与字段规则，拒绝类型错误、溢出、未知字段和 oneof 冲突。Hash 用于发现部署差异，不是鉴权或签名。
 
-升级时要同时部署客户端生成文件和服务端。对于未发送 schema hash 的早期客户端，临时兼容可设 RequireSchemaHash=false，但仍会拒绝显式填写错误 hash 的请求；不能用它替代明确的版本发布策略。新增 runtime.json 等输出文件本身不改变 hash，身份变化由清单与描述内容决定。
+升级时要同时部署客户端生成文件和服务端，或在服务端用 AcceptPrevious 注册上一版协议后滚动升级（见[协议升级](#协议升级)）。对于未发送 schema hash 的早期客户端，临时兼容可设 RequireSchemaHash=false，但仍会拒绝显式填写错误 hash 的请求；不能用它替代明确的版本发布策略。新增 runtime.json 等输出文件本身不改变 hash，身份变化由清单与描述内容决定。
 
 TS 初始化示例（导入路径以 examples/protocol/client.ts 为基准）：
 
@@ -35,7 +35,7 @@ const transport = new FetchTransport(baseURL, protocolVersion, globalThis.fetch,
 
 SSE 默认每 15 秒发送注释心跳，不占事件序号；HeartbeatInterval=0 可关闭。写入/flush 失败会取消处理 context。并发 emit 被串行化；终止事件后拒绝继续发事件。业务处理和供应商 SDK 必须遵守 context，工具不能强制终止一个忽略取消的业务 goroutine。达到写 deadline 或连接已断开时也无法保证送达最后一条错误事件。
 
-Observe 回调提供请求 ID、接口、HTTP 状态、字节数、耗时、传输错误码和结束事件名。它不包含 token 或正文；回调必须快速、非阻塞，并由应用自行接入日志/指标系统。接口注册可以并发，但 options、contract 与 Observe 应在开始服务前配置，运行中保持不变。
+Observe 回调提供请求 ID、接口、被接受的协议版本、HTTP 状态、字节数、耗时、传输错误码和结束事件名。它不包含 token 或正文；回调必须快速、非阻塞，并由应用自行接入日志/指标系统。接口注册可以并发，但 options、contract、Observe 与 AcceptPrevious 应在开始服务前配置，运行中保持不变。
 
 跨域网页使用 WithCORS(handler, explicitOrigins)。它只允许精确的来源白名单及协议请求头，不默认放行 *；CORS 不承担鉴权。bearer 接口仍需应用安装 Authorize 回调。演示清单 auth=none 仅供本地演示。
 
@@ -65,7 +65,36 @@ go run . -protocol=new/contract.json -protocol_against=released/contract.json
 
 检查范围包括接口删除，路由/鉴权/RPC/传输更改，缩短 deadline，字段删除/编号或 JSON 名称/类型/presence/oneof/default 变化，以及枚举和事件不兼容。无破坏变更时退出 0，有破坏变更时列出原因并非零退出。
 
-比较方向是旧客户端接入新服务端。旧客户端会严格拒绝未知响应字段和事件，所以新增响应字段或事件也报告为破坏变化；可选请求字段的增加通常保持旧请求可用。检查器不做自动版本协商，也不证明业务语义相同。相同 schema hash 仍是默认运行条件，升级需要协调客户端版本。
+比较方向是旧客户端接入新服务端。旧客户端会严格拒绝未知响应字段和事件，所以新增响应字段或事件也报告为破坏变化；可选请求字段的增加通常保持旧请求可用。检查器不做自动版本协商，也不证明业务语义相同。不注册旧协议时，相同 schema hash 仍是默认运行条件，升级需要协调客户端版本。
+
+### 滚动升级
+
+新服务端可以同时服务上一版生成包的客户端，避免必须同时切换前后端：
+
+```go
+server := httptransport.New(current)
+old, err := protocol.Load("released/contract.json") // 上一版发布的生成包
+if err != nil {
+	return err
+}
+if err := server.AcceptPrevious(old); err != nil {
+	return err // 不兼容时列出原因，拒绝启动
+}
+// 再注册 HandleUnary / HandleStream，最后开始服务。
+```
+
+AcceptPrevious 与 Observe 等选项一样必须在开始服务前调用。注册时用转码规则检查旧版到当前版（`protocol.TranscodedBreakingChanges`）：旧版每个接口必须仍以相同 ID、路径、传输、鉴权和 RPC 存在，deadline 不能缩短，字段编号/类型/JSON 名称等规则与上面的检查器相同；旧版本号必须不同于当前版和已注册的旧版。与严格检查器的唯一区别是允许新增不属于 oneof 的响应字段，因为它们在返回旧客户端前会被丢弃。新增事件、已有 oneof 的新成员和新增响应枚举值仍拒绝注册：旧描述无法表示它们。当前版可以新增接口，旧版本身份访问这些接口仍得到 409。
+
+请求的 X-Protocol-Version 与 X-Protocol-Schema 匹配某个已注册旧版时，服务端用旧描述严格解析请求，经 Protobuf 二进制转换为当前消息后调用同一个处理函数；普通响应和每个 SSE 事件先按当前描述检查，再经二进制转换回旧消息，按旧描述输出 ProtoJSON 并再次检查，响应/事件帧大小限制同样适用于转换后的输出。包络、响应头和接受身份之后的错误包络都带旧版 protocolVersion 与 schemaHash，旧客户端的身份与字段检查因此通过。两者都不匹配的请求仍按原规则返回 409；RequireSchemaHash 语义不变，未带 hash 时按版本号选择协议。旧版请求会多一次二进制转换和 JSON 检查。
+
+发布步骤：
+
+1. 用 `-protocol_against` 和 AcceptPrevious 的启动检查确认新协议；保留上一版生成包（contract.json 与 schema.pb）。
+2. 部署注册了 AcceptPrevious(旧版) 的新服务端，确认旧客户端仍正常。
+3. 发布新客户端生成包。Observe 的 Result.ProtocolVersion 给出每个请求被接受的协议版本，可据此统计旧版流量。
+4. 旧版流量归零或达到下线时间后，删除 AcceptPrevious 调用并重新部署；此后旧客户端得到 409。
+
+只保留需要过渡的版本；每个旧版都必须单独满足与当前版的兼容检查。转换只保证结构兼容，新字段的业务默认值（旧客户端请求中缺省）仍由处理函数负责。
 
 协议生成包的文件先写临时文件并 sync，再替换目标，避免单个文件被写到一半。整目录不是原子事务；CI 中生成到独立目录，验证完成后把整个目录作为同一发布产物部署，不要一边生成一边让服务端读取。普通 V3 配置导出使用直接文件写入，自动创建父目录，不提供这一临时文件替换保证。
 

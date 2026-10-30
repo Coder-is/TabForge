@@ -16,6 +16,21 @@ type BreakingChange struct {
 // Response field/event additions are breaking for the strict JSON SDK profile.
 // This is a rollout check, not version negotiation or a binary-only comparison.
 func BreakingChanges(oldContract, newContract *Contract) []BreakingChange {
+	return breakingChanges(oldContract, newContract, false)
+}
+
+// TranscodedBreakingChanges checks old clients served by a server that
+// transcodes requests and responses through the old descriptors (httptransport
+// AcceptPrevious). New response fields outside a real oneof are dropped by the
+// binary round-trip into the old type, so they are allowed. New events, new
+// members of an existing oneof and new response enum values stay breaking: the
+// old schema cannot represent them, so old clients would see an empty oneof or
+// an unknown enum number.
+func TranscodedBreakingChanges(oldContract, newContract *Contract) []BreakingChange {
+	return breakingChanges(oldContract, newContract, true)
+}
+
+func breakingChanges(oldContract, newContract *Contract, transcoded bool) []BreakingChange {
 	var changes []BreakingChange
 	add := func(path, reason string) { changes = append(changes, BreakingChange{path, reason}) }
 	seen := map[string]bool{}
@@ -81,7 +96,13 @@ func BreakingChanges(oldContract, newContract *Contract) []BreakingChange {
 		}
 		for i := 0; i < next.Fields().Len(); i++ {
 			f := next.Fields().Get(i)
-			if old.Fields().ByNumber(f.Number()) == nil && (response || f.Cardinality() == protoreflect.Required) {
+			if old.Fields().ByNumber(f.Number()) != nil {
+				continue
+			}
+			if transcoded && response && oneofName(f) == "" {
+				continue
+			}
+			if response || f.Cardinality() == protoreflect.Required {
 				add(string(next.FullName())+"."+string(f.Name()), "new response or required field")
 			}
 		}

@@ -7,8 +7,12 @@ import (
 )
 
 // Result excludes tokens, headers and payloads. Observe must be nonblocking.
+// ProtocolVersion is the accepted contract version (empty if none was
+// accepted); use it to see when a contract registered with AcceptPrevious is
+// no longer used.
 type Result struct {
 	RequestID, Endpoint string
+	ProtocolVersion     string
 	Code, TerminalEvent string
 	Status              int
 	Bytes               int64
@@ -19,6 +23,8 @@ type responseWriter struct {
 	status      int
 	bytes       int64
 	code, event string
+	// Accepted request identity used by error envelopes; empty means current.
+	version, hash string
 }
 
 func (w *responseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

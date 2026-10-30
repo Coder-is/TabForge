@@ -56,7 +56,7 @@
 }
 ```
 
-请求默认必须带 `X-Protocol-Version` 与 `X-Protocol-Schema`，匹配生成包中的版本和 schema hash，否则返回 409。版本使用 major.minor.patch，可附加 prerelease 后缀。`X-Request-ID` 可省略，由服务端生成；填写时仅接受 1–128 位 ASCII 字母、数字、下划线、点和连字符。bearer 接口默认拒绝访问，直到应用提供鉴权回调。请求正文默认最大 1 MiB。
+请求默认必须带 `X-Protocol-Version` 与 `X-Protocol-Schema`，匹配生成包中的版本和 schema hash，否则返回 409；服务端用 AcceptPrevious 注册的兼容旧版也会被接受，响应按旧版描述输出并带旧版身份。版本使用 major.minor.patch，可附加 prerelease 后缀。`X-Request-ID` 可省略，由服务端生成；填写时仅接受 1–128 位 ASCII 字母、数字、下划线、点和连字符。bearer 接口默认拒绝访问，直到应用提供鉴权回调。请求正文默认最大 1 MiB。
 
 流响应使用 `text/event-stream`：
 
@@ -83,7 +83,7 @@ data: {"protocolVersion":"1.0.0","schemaHash":"生成包的hash","requestId":"re
 
 生成的 TypeScript 类型描述**序列化后的 JSON 形态**。字段可因默认值或 presence 规则省略；oneof 禁止同时填写多个成员。Go 输入解析检查未知字段、溢出、oneof 和重复 JSON 成员；各客户端同时使用生成的 wireSchema 检查字段、类型、map、数组和消息结构，并校验包络与事件顺序。它们不直接等于某个 Protobuf 二进制库的 message 对象。
 
-删除 Proto 字段需 reserved 原编号与名称，不能重用旧编号。ProtoJSON 的字段名和枚举名也有兼容性要求。`-protocol_against` 可检查旧客户端到新服务端的破坏变化；默认严格要求版本与 hash 相同，仍需协调部署，不提供自动版本协商。
+删除 Proto 字段需 reserved 原编号与名称，不能重用旧编号。ProtoJSON 的字段名和枚举名也有兼容性要求。`-protocol_against` 可检查旧客户端到新服务端的破坏变化；默认严格要求版本与 hash 相同；服务端可用 AcceptPrevious 显式注册兼容的上一版以滚动升级（见 [生产部署说明](production.md#滚动升级)），但不提供自动版本协商。
 
 ## 大模型普通与流式响应
 

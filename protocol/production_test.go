@@ -52,6 +52,10 @@ func TestFingerprintAndCompatibility(t *testing.T) {
 	if len(BreakingChanges(old, responseChange)) == 0 {
 		t.Fatal("strict client response addition incorrectly accepted")
 	}
+	// A transcoding server drops the addition before old clients see it.
+	if changes := TranscodedBreakingChanges(old, responseChange); len(changes) != 0 {
+		t.Fatalf("transcoded response addition rejected: %v", changes)
+	}
 	copy.File[0].MessageType[0].Field[0].JsonName = proto.String("renamed")
 	renamed, err := Resolve(old.Manifest, copy)
 	if err != nil {

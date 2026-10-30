@@ -17,7 +17,7 @@ import (
 // written after the endpoint deadline has expired.
 const streamErrorGrace = time.Second
 
-func (s *Server) serveStream(ctx context.Context, w http.ResponseWriter, e protocol.ResolvedEndpoint, id string, request proto.Message) {
+func (s *Server) serveStream(ctx context.Context, w http.ResponseWriter, e protocol.ResolvedEndpoint, v view, id string, request proto.Message) {
 	s.mu.RLock()
 	handler := s.stream[e.ID]
 	s.mu.RUnlock()
@@ -40,7 +40,7 @@ func (s *Server) serveStream(ctx context.Context, w http.ResponseWriter, e proto
 	terminal, closed := false, false
 	write := func(name string, frame envelope) error {
 		frame.Sequence = strconv.FormatUint(sequence+1, 10)
-		frame.SchemaHash = s.schemaHash
+		frame.ProtocolVersion, frame.SchemaHash = v.version, v.hash
 		data, err := json.Marshal(frame)
 		if err != nil {
 			return err
@@ -105,11 +105,17 @@ func (s *Server) serveStream(ctx context.Context, w http.ResponseWriter, e proto
 		if err != nil {
 			return err
 		}
-		data, err := s.marshal(e, response)
+		out, data, err := s.render(e, v, response)
 		if err != nil {
 			return err
 		}
-		if err := write(event.Name, envelope{ProtocolVersion: s.Contract.Manifest.Version, RequestID: id, Payload: data}); err != nil {
+		if v.legacy {
+			// Frame with the accepted contract; it must still name the same event.
+			if old, err := v.endpoint.EventFor(out); err != nil || old != event {
+				return fmt.Errorf("%s: event %q is not part of contract %s", e.ID, event.Name, v.version)
+			}
+		}
+		if err := write(event.Name, envelope{RequestID: id, Payload: data}); err != nil {
 			return err
 		}
 		terminal = event.Terminal
@@ -147,11 +153,11 @@ func (s *Server) serveStream(ctx context.Context, w http.ResponseWriter, e proto
 	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < streamErrorGrace {
 		controller.SetWriteDeadline(time.Now().Add(streamErrorGrace))
 	}
-	if err := write("protocol.error", envelope{ProtocolVersion: s.Contract.Manifest.Version, RequestID: id, Error: failure}); err != nil && ctx.Err() == nil {
+	if err := write("protocol.error", envelope{RequestID: id, Error: failure}); err != nil && ctx.Err() == nil {
 		// A custom handler error can itself exceed the frame limit.
 		if tracked, ok := w.(*responseWriter); ok {
 			tracked.code = "internal"
 		}
-		write("protocol.error", envelope{ProtocolVersion: s.Contract.Manifest.Version, RequestID: id, Error: &Error{Code: "internal", Message: "request failed"}})
+		write("protocol.error", envelope{RequestID: id, Error: &Error{Code: "internal", Message: "request failed"}})
 	}
 }

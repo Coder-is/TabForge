@@ -10,6 +10,7 @@ import (
 	"github.com/Coder-is/TabForge/protocol"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
@@ -31,11 +32,11 @@ type envelope struct {
 	Error           *Error          `json:"error,omitempty"`
 }
 
-func (s *Server) marshal(e protocol.ResolvedEndpoint, message proto.Message) ([]byte, error) {
+func (s *Server) marshal(e protocol.ResolvedEndpoint, types *protoregistry.Types, message proto.Message) ([]byte, error) {
 	if message == nil || !message.ProtoReflect().IsValid() || message.ProtoReflect().Descriptor().FullName() != e.Output.FullName() {
 		return nil, fmt.Errorf("expected %s", e.Output.FullName())
 	}
-	data, err := protojson.MarshalOptions{Resolver: s.Contract.Types}.Marshal(message)
+	data, err := protojson.MarshalOptions{Resolver: types}.Marshal(message)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +44,7 @@ func (s *Server) marshal(e protocol.ResolvedEndpoint, message proto.Message) ([]
 		return nil, fmt.Errorf("response exceeds configured limit")
 	}
 	// Reject a handler linked against a different schema with the same full name.
-	if err := (protojson.UnmarshalOptions{Resolver: s.Contract.Types}).Unmarshal(data, dynamicpb.NewMessage(e.Output)); err != nil {
+	if err := (protojson.UnmarshalOptions{Resolver: types}).Unmarshal(data, dynamicpb.NewMessage(e.Output)); err != nil {
 		return nil, err
 	}
 	return data, nil
@@ -69,6 +70,10 @@ func transportError(err error) (int, *Error) {
 
 func (s *Server) fail(w http.ResponseWriter, id string, status int, code, message string, retryable bool) {
 	frame := envelope{ProtocolVersion: s.Contract.Manifest.Version, SchemaHash: s.schemaHash, RequestID: id, Error: &Error{Code: code, Message: message, Retryable: retryable}}
+	if tracked, ok := w.(*responseWriter); ok && tracked.version != "" {
+		// Accepted previous-contract clients verify their own identity.
+		frame.ProtocolVersion, frame.SchemaHash = tracked.version, tracked.hash
+	}
 	encoded, err := json.Marshal(frame)
 	if err != nil || len(encoded) > s.responseLimit() {
 		status, code = 500, "internal"

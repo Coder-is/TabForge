@@ -27,6 +27,7 @@ type StreamHandler func(context.Context, proto.Message, func(proto.Message) erro
 type Authorize func(context.Context, protocol.ResolvedEndpoint, string) error
 
 // Server registrations and options must be configured before serving requests.
+// AcceptPrevious registrations follow the same rule.
 // Auth is deny-by-default for bearer endpoints until Authorize is installed.
 // Handlers must observe context cancellation/deadlines, including provider calls.
 type Server struct {
@@ -39,6 +40,7 @@ type Server struct {
 	Observe           func(Result)
 	mu                sync.RWMutex
 	schemaHash        string
+	previous          []previousContract
 	unary             map[string]UnaryHandler
 	stream            map[string]StreamHandler
 }
@@ -133,13 +135,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, requestID, 405, "method_not_allowed", "use POST", false)
 		return
 	}
-	if r.Header.Get("X-Protocol-Version") != s.Contract.Manifest.Version {
-		s.fail(w, requestID, 409, "version_mismatch", "X-Protocol-Version does not match the contract", false)
+	v, mismatch := s.identify(endpoint, r.Header.Get("X-Protocol-Version"), r.Header.Get("X-Protocol-Schema"))
+	switch mismatch {
+	case "version_mismatch":
+		s.fail(w, requestID, 409, mismatch, "X-Protocol-Version does not match the contract", false)
+		return
+	case "schema_mismatch":
+		s.fail(w, requestID, 409, mismatch, "X-Protocol-Schema does not match the contract", false)
 		return
 	}
-	if hash := r.Header.Get("X-Protocol-Schema"); (s.RequireSchemaHash && hash == "") || (hash != "" && hash != s.schemaHash) {
-		s.fail(w, requestID, 409, "schema_mismatch", "X-Protocol-Schema does not match the contract", false)
-		return
+	result.ProtocolVersion = v.version
+	if v.legacy {
+		w.Header().Set("X-Protocol-Version", v.version)
+		w.Header().Set("X-Protocol-Schema", v.hash)
+		tracked.version, tracked.hash = v.version, v.hash
 	}
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
@@ -188,19 +197,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, requestID, 400, "bad_request", err.Error(), false)
 		return
 	}
-	request := dynamicpb.NewMessage(endpoint.Input)
-	if err := (protojson.UnmarshalOptions{Resolver: s.Contract.Types}).Unmarshal(data, request); err != nil {
+	request := dynamicpb.NewMessage(v.endpoint.Input)
+	if err := (protojson.UnmarshalOptions{Resolver: v.types}).Unmarshal(data, request); err != nil {
 		s.fail(w, requestID, 400, "bad_request", err.Error(), false)
 		return
 	}
+	var input proto.Message = request
+	if v.legacy {
+		if input, err = transcode(request, endpoint.Input); err != nil {
+			s.fail(w, requestID, 400, "bad_request", "request cannot be converted to the current contract", false)
+			return
+		}
+	}
 	if endpoint.Transport == "http_sse" {
-		s.serveStream(ctx, w, endpoint, requestID, request)
+		s.serveStream(ctx, w, endpoint, v, requestID, input)
 		return
 	}
-	s.serveUnary(ctx, w, endpoint, requestID, request)
+	s.serveUnary(ctx, w, endpoint, v, requestID, input)
 }
 
-func (s *Server) serveUnary(ctx context.Context, w http.ResponseWriter, endpoint protocol.ResolvedEndpoint, requestID string, request proto.Message) {
+func (s *Server) serveUnary(ctx context.Context, w http.ResponseWriter, endpoint protocol.ResolvedEndpoint, v view, requestID string, request proto.Message) {
 	s.mu.RLock()
 	handler := s.unary[endpoint.ID]
 	s.mu.RUnlock()
@@ -224,12 +240,12 @@ func (s *Server) serveUnary(ctx context.Context, w http.ResponseWriter, endpoint
 		s.fail(w, requestID, status, failure.Code, failure.Message, failure.Retryable)
 		return
 	}
-	data, err := s.marshal(endpoint, response)
+	_, data, err := s.render(endpoint, v, response)
 	if err != nil {
 		s.fail(w, requestID, 500, "internal", "handler returned an invalid response", false)
 		return
 	}
-	encoded, err := json.Marshal(envelope{ProtocolVersion: s.Contract.Manifest.Version, SchemaHash: s.schemaHash, RequestID: requestID, Data: data})
+	encoded, err := json.Marshal(envelope{ProtocolVersion: v.version, SchemaHash: v.hash, RequestID: requestID, Data: data})
 	if err != nil || len(encoded) > s.responseLimit() {
 		s.fail(w, requestID, 500, "internal", "response exceeds the configured limit", false)
 		return

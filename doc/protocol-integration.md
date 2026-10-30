@@ -112,9 +112,11 @@ go run . -protocol=new/contract.json -protocol_against=released/contract.json -p
 
 有破坏变化时非零退出；成功后统一发布新生成包与服务。检查器会把新增响应字段/事件也视为破坏变化，因为旧客户端严格拒绝未知字段。兼容性检查通过不等于 hash 保持不变，也不会自动协商版本。
 
+需要滚动升级时，在新服务端开始服务前调用 `server.AcceptPrevious(old)` 注册上一版协议（`protocol.Load` 加载保留的旧生成包）。服务端对旧版身份的请求按旧描述解析和输出，转换给同一处理函数，新增的非 oneof 响应字段会被丢弃，旧客户端无需改动；新增事件或响应枚举值仍拒绝注册。旧版流量归零后删除该调用。规则与步骤见 [部署说明](production.md#滚动升级)。
+
 | 错误码 | 优先检查 |
 | --- | --- |
-| `version_mismatch` / `schema_mismatch` | 前后端是否加载同一生成包，有无旧包缓存或混合部署 |
+| `version_mismatch` / `schema_mismatch` | 前后端是否加载同一生成包，有无旧包缓存或混合部署；滚动升级时服务端是否用 AcceptPrevious 注册了该旧版 |
 | `bad_request` | 请求头与正文格式；TS 本地校验还检查 token 换行、requestId 格式和 timeoutMS |
 | `invalid_message` | ProtoJSON 字段、未知成员、oneof、64 位整数字符串、取值范围，以及请求能否序列化为 JSON |
 | `invalid_operation` | 接口 ID 是否存在，普通接口使用 call，流式接口使用 stream |
