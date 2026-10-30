@@ -172,3 +172,58 @@ func TestGodotUnits(t *testing.T) {
 		t.Fatalf("Godot units: %v\n%s", err, output)
 	}
 }
+
+// The connection write deadline equals the endpoint deadline; the timeout frame
+// must still reach a real client instead of an unexpected EOF.
+func TestStreamTimeoutFrameReachesRealClient(t *testing.T) {
+	s := fixture(t)
+	e, _ := s.Contract.Endpoint("chatStream")
+	s.Contract.Endpoints[1].TimeoutMS = 30
+	if err := s.HandleStream(e.ID, func(ctx context.Context, req proto.Message, emit func(proto.Message) error) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(s)
+	defer server.Close()
+	r, _ := http.NewRequest("POST", server.URL+e.Path, strings.NewReader(`{}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Protocol-Version", "1.0.0")
+	r.Header.Set("X-Protocol-Schema", s.schemaHash)
+	response, err := server.Client().Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || !strings.Contains(string(body), "event: protocol.error") || !strings.Contains(string(body), `"code":"timeout"`) {
+		t.Fatalf("timeout frame lost: %v %q", err, body)
+	}
+}
+
+// A client that goes away is not a server failure; record it like streams do.
+func TestUnaryClientCancelIsNotInternalError(t *testing.T) {
+	s := fixture(t)
+	e, _ := s.Contract.Endpoint("chatComplete")
+	observed := make(chan Result, 1)
+	s.Observe = func(r Result) { observed <- r }
+	if err := s.HandleUnary(e.ID, func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r := httptest.NewRequest("POST", e.Path, strings.NewReader(`{}`)).WithContext(ctx)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Protocol-Version", "1.0.0")
+	r.Header.Set("X-Protocol-Schema", s.schemaHash)
+	cancel()
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	result := <-observed
+	if result.Code != "cancelled" || result.Status == 500 || w.Body.Len() != 0 {
+		t.Fatalf("client cancel recorded as %+v, body %q", result, w.Body.String())
+	}
+}

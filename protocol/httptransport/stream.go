@@ -13,6 +13,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// streamErrorGrace bounds how long the final protocol.error frame may still be
+// written after the endpoint deadline has expired.
+const streamErrorGrace = time.Second
+
 func (s *Server) serveStream(ctx context.Context, w http.ResponseWriter, e protocol.ResolvedEndpoint, id string, request proto.Message) {
 	s.mu.RLock()
 	handler := s.stream[e.ID]
@@ -137,6 +141,11 @@ func (s *Server) serveStream(ctx context.Context, w http.ResponseWriter, e proto
 	_, failure := transportError(err)
 	if tracked, ok := w.(*responseWriter); ok {
 		tracked.code = failure.Code
+	}
+	// The connection write deadline equals the request deadline, so a timeout
+	// frame would otherwise always fail. Allow a short bounded window for it.
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < streamErrorGrace {
+		controller.SetWriteDeadline(time.Now().Add(streamErrorGrace))
 	}
 	if err := write("protocol.error", envelope{ProtocolVersion: s.Contract.Manifest.Version, RequestID: id, Error: failure}); err != nil && ctx.Err() == nil {
 		// A custom handler error can itself exceed the frame limit.

@@ -61,7 +61,9 @@ func main() {
 	server := httptransport.HTTPServer(*address, s)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		<-ctx.Done()
 		deadline, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -73,4 +75,6 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+	// ListenAndServe returns as soon as Shutdown starts; wait for in-flight requests.
+	<-drained
 }

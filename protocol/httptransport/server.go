@@ -209,6 +209,13 @@ func (s *Server) serveUnary(ctx context.Context, w http.ResponseWriter, endpoint
 		return
 	}
 	response, err := invokeUnary(ctx, handler, request)
+	if ctx.Err() == context.Canceled {
+		// The client went away; nobody reads a reply, and it is not a server failure.
+		if tracked, ok := w.(*responseWriter); ok {
+			tracked.code = "cancelled"
+		}
+		return
+	}
 	if ctx.Err() != nil {
 		err = ctx.Err()
 	}
