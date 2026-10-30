@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -145,6 +146,9 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 		return nil, err
 	}
 	defer os.RemoveAll(stage)
+	// Engine asset trees are case-insensitive on Windows and macOS; a data file must
+	// never silently replace a runtime file such as wire_schema.json or the marker.
+	written := map[string]bool{}
 	write := func(name string, data []byte) error {
 		path, err := safePath(stage, name)
 		if err != nil {
@@ -153,6 +157,11 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return err
 		}
+		key := strings.ToLower(path)
+		if written[key] {
+			return fmt.Errorf("client asset path collides with another generated file: %s", name)
+		}
+		written[key] = true
 		return os.WriteFile(path, data, 0644)
 	}
 	wire, err := json.MarshalIndent(schema.WireSchema(), "", "  ")
@@ -164,10 +173,13 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 	}
 	seenData := map[string]bool{}
 	for _, entry := range manifest.Data {
-		if !strings.HasSuffix(entry.Path, ".json") || strings.HasPrefix(entry.Path, ".tabforge-") || seenData[strings.ToLower(entry.Path)] {
+		// Non-canonical paths such as "data/../wire_schema.json" would bypass the
+		// runtime-name checks below.
+		lower := strings.ToLower(entry.Path)
+		if path.Clean(entry.Path) != entry.Path || !strings.HasSuffix(entry.Path, ".json") || strings.HasPrefix(lower, ".tabforge-") || seenData[lower] {
 			return nil, fmt.Errorf("invalid or repeated client data path: %s", entry.Path)
 		}
-		seenData[strings.ToLower(entry.Path)] = true
+		seenData[lower] = true
 		if !declared[entry.Path] {
 			return nil, fmt.Errorf("data file not declared: %s", entry.Path)
 		}
@@ -183,7 +195,7 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 			return nil, fmt.Errorf("%s: %w", entry.Path, err)
 		}
 		// Keep original paths so clients can refer to multiple data roots.
-		if strings.HasPrefix(entry.Path, "schema/") || strings.HasPrefix(entry.Path, "Runtime/") || entry.Path == "wire_schema.json" || (kind == "unreal" && entry.Path == "bundle.json") {
+		if strings.HasPrefix(lower, "schema/") || strings.HasPrefix(lower, "runtime/") || lower == "wire_schema.json" || (kind == "unreal" && lower == "bundle.json") {
 			return nil, fmt.Errorf("data path conflicts with client runtime: %s", entry.Path)
 		}
 		if err := write(filepath.ToSlash(filepath.Join(resource, entry.Path)), data); err != nil {
@@ -206,7 +218,7 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 		}
 	case "cocos":
 		for _, name := range []string{"data.ts", "schema.ts", "json.ts"} {
-			data, err := sdk.ClientAssets.ReadFile("typescript/" + name)
+			data, err := sdk.ReadClientAsset("typescript/" + name)
 			if err != nil {
 				return nil, err
 			}
@@ -225,7 +237,7 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 		}
 	case "unity":
 		for _, name := range []string{"DataSchema.cs", "WireValidator.cs", "JsonSyntax.cs"} {
-			data, err := sdk.ClientAssets.ReadFile("unity/Runtime/" + name)
+			data, err := sdk.ReadClientAsset("unity/Runtime/" + name)
 			if err != nil {
 				return nil, err
 			}
@@ -246,7 +258,7 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 		}
 	case "godot":
 		for _, name := range []string{"data_schema.gd", "wire_validator.gd"} {
-			data, err := sdk.ClientAssets.ReadFile("godot/" + name)
+			data, err := sdk.ReadClientAsset("godot/" + name)
 			if err != nil {
 				return nil, err
 			}

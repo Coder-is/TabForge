@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -195,4 +196,29 @@ func dataPaths(m databundle.Manifest) []string {
 		paths = append(paths, entry.Path)
 	}
 	return paths
+}
+
+func TestManifestCaseVariantCannotBypassSymlink(t *testing.T) {
+	dir := fixture(t)
+	data := filepath.Join(dir, "data")
+	if err := os.Rename(data, data+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(data+".old", data); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "DATA")); err != nil {
+		t.Skip("case-sensitive filesystem")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, databundle.ManifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.ReplaceAll(string(raw), `"path": "data/`, `"path": "DATA/`))
+	if err := os.WriteFile(filepath.Join(dir, databundle.ManifestName), raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := databundle.Open(dir, ""); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("case variant read through symlink: %v", err)
+	}
 }

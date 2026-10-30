@@ -77,5 +77,6 @@ sdk/python/*.egg-info/
 __pycache__/
 sdk/java/target/
 # Small binary fixtures referenced by the portable data manifest.
+!examples/complete/Generated/basic/*.pbb
 !examples/complete/Generated/data/*.pbb
 !examples/complete/Generated/data/by-table/*.pbb

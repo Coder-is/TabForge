@@ -76,7 +76,8 @@ func OpenFS(fsys fs.FS, dir, expectedHash string) (*Bundle, error) {
 				return nil, err
 			}
 			for _, entry := range entries {
-				if entry.Name() == part && entry.Type()&fs.ModeSymlink != 0 {
+				// Case-insensitive volumes resolve "DATA" through a symlink named "data".
+				if strings.EqualFold(entry.Name(), part) && entry.Type()&fs.ModeSymlink != 0 {
 					return nil, fmt.Errorf("symlink bundle path %q", name)
 				}
 			}

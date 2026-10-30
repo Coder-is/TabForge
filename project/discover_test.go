@@ -158,3 +158,25 @@ func TestLegacyIndexStillWorks(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDiscoveryTypeSpellingIsNotLoadedAsData(t *testing.T) {
+	root := copyFixture(t)
+	p, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := p.Config.Tables[0].Discover
+	d.Types = []string{"./Type.csv"}
+	d.Rules = append(d.Rules, DiscoverRule{Pattern: "Type.csv", Type: "Item"})
+	list, err := p.discover(d)
+	if err == nil {
+		for _, item := range list {
+			t.Logf("%v %s", item.TableType, item.TableFileName)
+		}
+		t.Fatal("type file was discovered again as data")
+	}
+	d.Types = []string{"Type.csv", "./Type.csv"}
+	if err := d.validate(root); err == nil {
+		t.Fatal("duplicate type spelling accepted")
+	}
+}

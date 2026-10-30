@@ -92,7 +92,7 @@ func (d *DiscoverConfig) validate(root string) error {
 		if !tableExtension(name) {
 			return fmt.Errorf("unsupported type file %s", name)
 		}
-		key := strings.ToLower(name)
+		key := strings.ToLower(path.Clean(name))
 		if seen[key] {
 			return fmt.Errorf("duplicate discovered type file %s", name)
 		}
@@ -141,7 +141,8 @@ func (p *Project) discover(d *DiscoverConfig) ([]*model.IndexDefine, error) {
 		if !stat.Mode().IsRegular() {
 			return nil, fmt.Errorf("type input is not a regular file: %s", file)
 		}
-		types[name] = true
+		// Walked names are clean; "./Type.csv" must not be loaded again as data.
+		types[path.Clean(name)] = true
 		result = append(result, &model.IndexDefine{Kind: model.TableKind_Type, TableType: "TypeDefine", TableFileName: name})
 	}
 	seen := map[string]string{}

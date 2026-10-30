@@ -201,3 +201,40 @@ func TestImportRejectsUnsafeDestinationsAndManifest(t *testing.T) {
 		t.Fatal("escaping manifest accepted")
 	}
 }
+
+// A data file must never replace runtime files: non-canonical paths bypassed
+// the name checks, and case variants alias them on Windows and macOS.
+func TestImportRejectsDataAliasingRuntimeFiles(t *testing.T) {
+	for _, alias := range []string{"data/../wire_schema.json", "Wire_Schema.json", ".TabForge-client.json"} {
+		source := fixture(t)
+		file := filepath.Join(source, "export.json")
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var manifest project.Result
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		payload, err := os.ReadFile(filepath.Join(source, "data", "tables.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(source, filepath.Clean(filepath.FromSlash(alias))), payload, 0644); err != nil {
+			t.Fatal(err)
+		}
+		manifest.Files = append(manifest.Files, alias)
+		manifest.Data = append(manifest.Data, project.DataFile{Path: alias, Message: manifest.Data[0].Message})
+		if data, err = json.Marshal(manifest); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		for _, kind := range []string{"unity", "cocos"} {
+			if _, err := Import(context.Background(), source, engine(t, kind), kind, true); err == nil {
+				t.Errorf("%s: data path %q accepted", kind, alias)
+			}
+		}
+	}
+}

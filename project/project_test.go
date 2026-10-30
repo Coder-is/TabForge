@@ -226,3 +226,35 @@ func TestPublishRollsBackAndKeepsStaleBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Windows resolves "Protocols." and the 8.3 name "PROTOC~1" to Protocols; an
+// export to either spelling previously replaced the Proto sources.
+func TestOutputAliasesCannotReplaceSources(t *testing.T) {
+	root := copyFixture(t)
+	before := snapshot(t, filepath.Join(root, "Protocols"))
+	aliases := []string{"Protocols.", "Protocols ", "Protocols/x."}
+	if _, err := os.Stat(filepath.Join(root, "PROTOC~1")); err == nil {
+		aliases = append(aliases, "PROTOC~1")
+	}
+	for _, output := range aliases {
+		p, err := Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Config.Output, p.Config.Tables, p.Config.Protocol = output, nil, ""
+		if _, err := p.Export(context.Background()); err == nil {
+			t.Errorf("output %q accepted", output)
+		}
+		if !reflect.DeepEqual(before, snapshot(t, filepath.Join(root, "Protocols"))) {
+			t.Fatalf("output %q replaced sources", output)
+		}
+	}
+	p, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Config.Tables[0].Outputs = map[string]string{}
+	if err := p.validate(); err == nil || !strings.Contains(err.Error(), "Tables: no outputs") {
+		t.Fatalf("discover job error lost its directory: %v", err)
+	}
+}

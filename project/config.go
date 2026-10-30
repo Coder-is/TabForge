@@ -101,7 +101,7 @@ func Load(path string) (*Project, error) {
 		return nil, fmt.Errorf("%s: specify schema or tables", path)
 	}
 	if config.Protocol != "" && config.Schema == nil {
-		return nil, fmt.Errorf("protocol requires schema")
+		return nil, fmt.Errorf("%s: protocol requires schema", path)
 	}
 	if config.Schema != nil && config.Schema.Dir == "" {
 		config.Schema.Dir = "Protocols"
@@ -126,6 +126,10 @@ func relativePath(root, name string) (string, error) {
 	path := filepath.Join(root, clean)
 	current := root
 	for _, part := range strings.Split(clean, string(filepath.Separator)) {
+		// Windows drops trailing dots and spaces, so "Tables." would alias "Tables".
+		if strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
+			return "", fmt.Errorf("path segment must not end with a dot or space: %q", name)
+		}
 		current = filepath.Join(current, part)
 		info, err := os.Lstat(current)
 		if err != nil && !os.IsNotExist(err) {
@@ -136,6 +140,22 @@ func relativePath(root, name string) (string, error) {
 		}
 	}
 	return path, nil
+}
+
+// aliases reports whether existing path a is b or one of b's ancestors below
+// root. It catches spellings that string comparison misses, such as Windows
+// 8.3 short names ("PROTOC~1" for "Protocols").
+func aliases(root, a, b string) bool {
+	target, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	for ; len(b) > len(root); b = filepath.Dir(b) {
+		if info, err := os.Stat(b); err == nil && os.SameFile(info, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func overlaps(a, b string) bool {
@@ -203,7 +223,7 @@ func (p *Project) validate() error {
 		}
 		if tab.Mapping != "" {
 			if p.Config.Schema == nil {
-				return fmt.Errorf("%s: mapping requires schema", tab.Index)
+				return fmt.Errorf("%s: mapping requires schema", source)
 			}
 			path, err := relativePath(p.Root, tab.Mapping)
 			if err != nil {
@@ -215,17 +235,17 @@ func (p *Project) validate() error {
 			tab.Root = "Table"
 		}
 		if len(tab.Outputs) == 0 {
-			return fmt.Errorf("%s: no outputs", tab.Index)
+			return fmt.Errorf("%s: no outputs", source)
 		}
 		for kind, name := range tab.Outputs {
 			if !knownOutput(kind) {
-				return fmt.Errorf("%s: unknown output %q", tab.Index, kind)
+				return fmt.Errorf("%s: unknown output %q", source, kind)
 			}
 			if kind == "protojson" && tab.Mapping == "" {
-				return fmt.Errorf("%s: protojson requires mapping", tab.Index)
+				return fmt.Errorf("%s: protojson requires mapping", source)
 			}
 			if kind == "proto" && tab.Mapping != "" {
-				return fmt.Errorf("%s: proto output conflicts with existing Proto mapping", tab.Index)
+				return fmt.Errorf("%s: proto output conflicts with existing Proto mapping", source)
 			}
 			if _, err := relativePath(out, name); err != nil {
 				return err
@@ -239,7 +259,7 @@ func (p *Project) validate() error {
 		}
 	}
 	for _, input := range inputs {
-		if overlaps(out, input) {
+		if overlaps(out, input) || aliases(p.Root, out, input) || aliases(p.Root, input, out) {
 			return fmt.Errorf("output %q overlaps source/tool directory %s", p.Config.Output, input)
 		}
 	}
