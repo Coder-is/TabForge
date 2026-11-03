@@ -1,8 +1,8 @@
 package gosrc
 
 import (
-	"fmt"
 	"github.com/Coder-is/TabForge/v3/model"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -30,7 +30,8 @@ func init() {
 		var kv []string
 
 		if fieldType.Name != "" {
-			kv = append(kv, fmt.Sprintf("tb_name:\"%s\"", fieldType.Name))
+			// Quote转义引号和控制字符, 且不会产生反引号
+			kv = append(kv, "tb_name:"+strconv.Quote(fieldType.Name))
 		}
 
 		if len(kv) > 0 {

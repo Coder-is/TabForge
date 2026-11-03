@@ -46,7 +46,7 @@ func ValidateNames(globals *model.Globals, language string) error {
 	case "csharp":
 		helpers = "tabtoy List Dictionary Int16 Int32 Int64 UInt16 UInt32 UInt64"
 	case "java":
-		helpers = "java List Map ArrayList HashMap String Integer Long Float Double Boolean TableEvent"
+		helpers = "java com List Map ArrayList HashMap String Integer Long Float Double Boolean Object Number TableEvent FastjsonDeserializer"
 	}
 	for _, name := range strings.Fields(helpers) {
 		if err := v.add("types", name, "generated helper"); err != nil {

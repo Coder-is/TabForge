@@ -33,6 +33,25 @@ func readOneRow(sheet helper.TableSheet, tab *model.DataTable, row int) bool {
 	return true
 }
 
+// 行中是否有字段列的非空白数据
+func hasFieldValue(sheet helper.TableSheet, tab *model.DataTable, row int) bool {
+	for _, header := range tab.Headers {
+		if header.TypeInfo != nil && strings.TrimSpace(sheet.GetValue(row, header.Cell.Col, nil)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// 列头为空的列不能有数据, 避免数据被静默丢弃
+func checkEmptyHeaderData(sheet helper.TableSheet, tab *model.DataTable, row int, emptyCols []int) {
+	for _, col := range emptyCols {
+		if value := sheet.GetValue(row, col, nil); value != "" {
+			report.ReportError("DataUnderEmptyHeader", &model.Cell{Value: value, Row: row, Col: col, Table: tab})
+		}
+	}
+}
+
 func LoadDataTable(filegetter helper.FileGetter, fileName, headerType, resolveHeaderType string, typeTab *model.TypeTable) (ret []*model.DataTable, err error) {
 	file, err := filegetter.GetFile(fileName)
 	if err != nil {
@@ -48,13 +67,14 @@ func LoadDataTable(filegetter helper.FileGetter, fileName, headerType, resolveHe
 
 		ret = append(ret, tab)
 
-		maxCol, emptyCols := LoadHeader(sheet, tab, resolveHeaderType, typeTab)
+		_, emptyCols := LoadHeader(sheet, tab, resolveHeaderType, typeTab)
 
 		// 遍历所有数据行
 		for row := 0; row < sheet.MaxRow(); row++ {
 
-			// 完整空行跳过, 继续读取后续行
-			if sheet.IsRowEmpty(row, maxCol) {
+			// 字段列都为空白的行跳过(#备注列不算数据), 继续读取后续行
+			if !hasFieldValue(sheet, tab, row) {
+				checkEmptyHeaderData(sheet, tab, row, emptyCols)
 				continue
 			}
 
@@ -63,12 +83,7 @@ func LoadDataTable(filegetter helper.FileGetter, fileName, headerType, resolveHe
 				continue
 			}
 
-			// 列头为空的列不能有数据, 避免数据被静默丢弃
-			for _, col := range emptyCols {
-				if value := sheet.GetValue(row, col, nil); value != "" {
-					report.ReportError("DataUnderEmptyHeader", &model.Cell{Value: value, Row: row, Col: col, Table: tab})
-				}
-			}
+			checkEmptyHeaderData(sheet, tab, row, emptyCols)
 		}
 
 	}

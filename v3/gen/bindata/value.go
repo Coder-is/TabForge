@@ -9,9 +9,8 @@ import (
 func writeValue(globals *model.Globals, writer *BinaryWriter, field *model.TypeDefine, kind, value string) error {
 	if globals.Types.IsEnumKind(field.FieldType) {
 		kind = "int32"
-		if value != "" {
-			value = globals.Types.ResolveEnumValue(field.FieldType, value)
-		}
+		// 空值取第一个枚举值, 与其他导出器一致
+		value = globals.Types.ResolveEnumValue(field.FieldType, value)
 	}
 	if value == "" && kind != "string" && kind != "bool" {
 		value = "0"

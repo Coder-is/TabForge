@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 public class Table {	
+	 @com.alibaba.fastjson.annotation.JSONType(deserializer = ActorType.FastjsonDeserializer.class)
 	 public enum ActorType { 
 			None(0), //  
 			Pharah(1), // 法鸡 
@@ -38,6 +39,22 @@ public class Table {
 				return Mercy; 
 			  default:
 				return null;
+			}
+		}
+
+		// fastjson默认把整数当作序号解析枚举, JSON中写的是枚举值, 需按值转换
+		public static class FastjsonDeserializer implements com.alibaba.fastjson.parser.deserializer.ObjectDeserializer {
+			@SuppressWarnings("unchecked")
+			public <T> T deserialze(com.alibaba.fastjson.parser.DefaultJSONParser parser, java.lang.reflect.Type type, Object fieldName) {
+				Object v = parser.parse();
+				if (v instanceof Number) {
+					return (T) fromInt(((Number) v).intValue());
+				}
+				return v == null ? null : (T) valueOf(v.toString());
+			}
+
+			public int getFastMatchToken() {
+				return 2; // JSONToken.LITERAL_INT
 			}
 		}
 

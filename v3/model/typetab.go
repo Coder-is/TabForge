@@ -58,6 +58,10 @@ func (self *TypeTable) AddField(tf *TypeDefine, data *DataTable, row int) {
 	self.fields = append(self.fields, td)
 	self.fieldsByObject[tf.ObjectType] = append(self.fieldsByObject[tf.ObjectType], td)
 	for _, name := range []string{tf.Name, tf.FieldName} {
+		// 空标识名不能作为查找键, 否则空的枚举单元格会匹配到它而不是第一个枚举值
+		if name == "" {
+			continue
+		}
 		key := typeFieldKey{tf.ObjectType, name}
 		// Field lookup uses the last matching alias; enum lookup uses the first.
 		self.fieldsByName[key] = tf

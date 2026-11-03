@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"unicode"
 )
 
 type FieldType struct {
@@ -95,4 +96,15 @@ func ParseBool(s string) (bool, error) {
 	}
 
 	return false, errors.New("invalid bool value")
+}
+
+// IsPlainIdentifier 只含字母、数字和下划线且不以数字开头, 类型名会用于输出路径和生成代码
+// 各语言的关键字由导出器检查
+func IsPlainIdentifier(name string) bool {
+	for i, r := range name {
+		if !(r == '_' || unicode.IsLetter(r) || i > 0 && unicode.IsDigit(r)) {
+			return false
+		}
+	}
+	return name != ""
 }

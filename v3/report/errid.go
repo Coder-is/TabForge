@@ -29,5 +29,7 @@ var (
 		"UnknownTypeKind":                {CHS: "非法的类型种类"},
 		"UnknownTableKind":               {CHS: "非法的表模式"},
 		"DataUnderEmptyHeader":           {CHS: "列头为空的列中有数据, 备注列请使用#开头的列头"},
+		"InvalidTypeName":                {CHS: "非法类型名, 只能使用标识符(字母、数字、下划线)"},
+		"InvalidFieldAlias":              {CHS: "非法标识名, 不能包含换行等控制字符、双引号或反引号"},
 	}
 )

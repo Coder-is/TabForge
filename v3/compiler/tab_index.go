@@ -33,6 +33,15 @@ func parseIndexRow(tab *model.DataTable, symbols *model.TypeTable) (pragmaList [
 			pragma.TableType = strings.TrimSuffix(name, filepath.Ext(pragma.TableFileName))
 		}
 
+		// 表类型会拼接到输出路径和生成代码中, 只允许标识符
+		if !model.IsPlainIdentifier(pragma.TableType) {
+			cell := tab.GetValueByName(row, "表类型")
+			if cell == nil || cell.Value == "" {
+				cell = tab.GetValueByName(row, "表文件名")
+			}
+			report.ReportError("InvalidTypeName", pragma.TableType, cell)
+		}
+
 		pragmaList = append(pragmaList, &pragma)
 	}
 

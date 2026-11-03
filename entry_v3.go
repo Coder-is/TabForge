@@ -98,6 +98,12 @@ func genFiles(globals *model.Globals, entries []V3GenEntry) error {
 		tasks.Add(1)
 		go func(i int, entry V3GenEntry) {
 			defer tasks.Done()
+			// 导出器在协程中panic会直接结束进程, 转为该导出器的错误
+			defer func() {
+				if r := recover(); r != nil {
+					errors[i] = fmt.Errorf("%s (%s): panic: %v", entry.name, *entry.param, r)
+				}
+			}()
 			if err := genFile(globals, entry); err != nil {
 				errors[i] = fmt.Errorf("%s (%s): %v", entry.name, *entry.param, err)
 			}

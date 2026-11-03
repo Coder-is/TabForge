@@ -69,9 +69,7 @@ func tableValue2PbValue(globals *model.Globals, cellValue string, valueType *mod
 
 		if globals.Types.IsEnumKind(pbType) {
 
-			if cellValue == "" {
-				return protoreflect.ValueOfEnum(protoreflect.EnumNumber(0))
-			}
+			// 空值与其他导出器一致, 取第一个枚举值
 			enumValue := globals.Types.ResolveEnumValue(pbType, cellValue)
 
 			v, _ := strconv.ParseInt(enumValue, 10, 32)

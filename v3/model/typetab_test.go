@@ -75,3 +75,16 @@ func BenchmarkTypeFieldLookup(b *testing.B) {
 		}
 	})
 }
+
+func TestTypeTableEmptyAliasNotIndexed(t *testing.T) {
+	var table TypeTable
+	table.AddField(&TypeDefine{Kind: TypeUsage_Enum, ObjectType: "Actor", Name: "无", FieldName: "None", Value: "0"}, nil, 0)
+	table.AddField(&TypeDefine{Kind: TypeUsage_Enum, ObjectType: "Actor", FieldName: "Hero", Value: "5"}, nil, 0)
+	if table.GetEnumValue("Actor", "") != nil || table.FieldByName("Actor", "") != nil {
+		t.Fatal("empty alias registered as lookup key")
+	}
+	// 空值取第一个枚举值, 而不是标识名为空的成员
+	if got := table.ResolveEnumValue("Actor", ""); got != "0" {
+		t.Fatalf("empty enum value resolved to %q", got)
+	}
+}

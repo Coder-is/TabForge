@@ -38,3 +38,17 @@ func TestUnsignedBinaryBoundaries(t *testing.T) {
 		})
 	}
 }
+
+// 空枚举值(如数组中的空元素)取第一个枚举值
+func TestEmptyEnumUsesFirstMember(t *testing.T) {
+	globals := model.NewGlobals()
+	globals.Types.AddField(&model.TypeDefine{Kind: model.TypeUsage_Enum, ObjectType: "Actor", Name: "首个", FieldName: "First", Value: "3"}, nil, 0)
+	globals.Types.AddField(&model.TypeDefine{Kind: model.TypeUsage_Enum, ObjectType: "Actor", FieldName: "NoAlias", Value: "5"}, nil, 0)
+	writer := NewBinaryWriter()
+	if err := writeValue(globals, writer, &model.TypeDefine{FieldType: "Actor"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(writer.Bytes(), []byte{3, 0, 0, 0}) {
+		t.Fatalf("empty enum = %x", writer.Bytes())
+	}
+}

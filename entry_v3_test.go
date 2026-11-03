@@ -64,6 +64,18 @@ func TestGenFilesWaitsForAllExports(t *testing.T) {
 	}
 }
 
+func TestGenFilesRecoversExporterPanic(t *testing.T) {
+	name := filepath.Join(t.TempDir(), "out.bin")
+	err := genFiles(model.NewGlobals(), []V3GenEntry{
+		{name: "broken", param: &name, genSingleFile: func(*model.Globals) ([]byte, error) {
+			panic("unknown type:A")
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "broken") || !strings.Contains(err.Error(), "unknown type:A") {
+		t.Fatalf("panic was not returned as error: %v", err)
+	}
+}
+
 func TestV3ExampleExportConsistency(t *testing.T) {
 	dir, err := ioutil.TempDir("", "tabtoy-example-export-")
 	if err != nil {

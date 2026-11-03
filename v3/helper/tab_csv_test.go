@@ -82,3 +82,21 @@ func TestCSVLoadGBK(t *testing.T) {
 		t.Fatalf("GBK not decoded: %q", file.records)
 	}
 }
+
+func TestCSVLoadRaggedRows(t *testing.T) {
+	name := filepath.Join(t.TempDir(), "ragged.csv")
+	if err := os.WriteFile(name, []byte("ID,Name,Level\n1,a\n2,b,3,extra\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	file := NewCSVFile()
+	if err := file.Load(name); err != nil {
+		t.Fatalf("ragged rows rejected: %v", err)
+	}
+	sheet := file.Sheets()[0]
+	if got := sheet.GetValue(1, 2, nil); got != "" {
+		t.Fatalf("missing cell = %q", got)
+	}
+	if got := sheet.GetValue(2, 2, nil); got != "3" {
+		t.Fatalf("long row cell = %q", got)
+	}
+}

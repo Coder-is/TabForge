@@ -52,9 +52,8 @@ func checkHeaderTypes(tab *model.DataTable, symbols *model.TypeTable) {
 			continue
 		}
 
-		// 原始类型检查
-		if !model.PrimitiveExists(header.TypeInfo.FieldType) &&
-			!symbols.ObjectExists(header.TypeInfo.FieldType) { // 对象检查
+		// 只支持原始类型和枚举, 导出器均不支持嵌套结构体
+		if !model.PrimitiveExists(header.TypeInfo.FieldType) && !symbols.IsEnumKind(header.TypeInfo.FieldType) {
 
 			report.ReportError("UnknownFieldType", header.TypeInfo.FieldType, header.Cell)
 		}

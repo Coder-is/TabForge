@@ -95,7 +95,10 @@ func (self *CSVFile) Load(fileName string) error {
 	// Excel/Notepad write a UTF-8 BOM, which must not become part of the first header.
 	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
 
-	self.records, err = csv.NewReader(bytes.NewReader(data)).ReadAll()
+	reader := csv.NewReader(bytes.NewReader(data))
+	// 手写CSV行长度可能不一致, 缺失的列按空值读取
+	reader.FieldsPerRecord = -1
+	self.records, err = reader.ReadAll()
 
 	if err != nil {
 		return err
