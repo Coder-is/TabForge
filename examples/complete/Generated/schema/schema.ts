@@ -8,6 +8,8 @@ export interface FieldShape {
     list?: boolean;
     mapKey?: string;
     required?: boolean;
+    /** Original Proto field name when it differs from the JSON name (the field key). */
+    protoName?: string;
 }
 export interface MessageShape {
     fields: Readonly<Record<string, FieldShape>>;
@@ -111,6 +113,67 @@ export function protoBytes(value: string): string | undefined {
         body = body.slice(0, -1) + BASE64[BASE64.indexOf(body[body.length - 1]) & (rest === 2 ? 0x30 : 0x3c)] + (rest === 2 ? "==" : "=");
     return body;
 }
+// Days from 1970-01-01 to a proleptic Gregorian date (year 0 allowed: offsets
+// can move "0000-12-31T23:59:59-00:01" into range). Shifted by 400 years so
+// every division is of a non-negative number.
+function civilDays(year: number, month: number, day: number): number {
+    const y = year + 400 - (month <= 2 ? 1 : 0), era = Math.floor(y / 400), yoe = y - era * 400;
+    const doy = Math.floor((153 * ((month + 9) % 12) + 2) / 5) + day - 1;
+    return era * 146097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy - 719468 - 146097;
+}
+const daysInMonth = (year: number, month: number): number => month === 2 ? (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28) : [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+const TIMESTAMP = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?:([.,])([0-9]+))?(?:Z|([+-])([0-9]{2}):([0-9]{2}))$/;
+/**
+ * Go protojson Timestamp input: time.Parse(time.RFC3339Nano), then 0001-01-01
+ * to 9999-12-31 in UTC and at most 9 digits after ".". Like Go this accepts any
+ * offset (hours to 24, minutes to 60), a one-digit hour, and "," before a
+ * fraction of any length (Go truncates it); "z", "t" and leap seconds are rejected.
+ */
+export function protoTimestamp(value: unknown): boolean {
+    const match = typeof value === "string" ? TIMESTAMP.exec(value) : null;
+    if (!match)
+        return false;
+    const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
+    if ((match[7] === "." && match[8].length > 9) || month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month) || hour > 23 || minute > 59 || second > 59)
+        return false;
+    let offset = 0;
+    if (match[9] !== undefined) {
+        const hours = Number(match[10]), minutes = Number(match[11]);
+        if (hours > 24 || minutes > 60)
+            return false;
+        offset = (match[9] === "-" ? -1 : 1) * (hours * 3600 + minutes * 60);
+    }
+    const seconds = civilDays(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset;
+    return seconds >= -62135596800 && seconds <= 253402300799;
+}
+const DURATION = /^[+-]?(0|[1-9][0-9]*)?(\.[0-9]{0,9})?s$/;
+/**
+ * Go protojson Duration input: optional sign, integer and/or "." with up to 9
+ * digits ("1.s", ".5s", "-.5s" and ".s" are accepted), then "s", within
+ * ±315576000000 seconds.
+ */
+export function protoDuration(value: unknown): boolean {
+    const match = typeof value === "string" ? DURATION.exec(value) : null;
+    if (!match || (match[1] === undefined && match[2] === undefined))
+        return false;
+    const seconds = match[1] ?? "";
+    return seconds.length < 12 || (seconds.length === 12 && seconds <= "315576000000");
+}
+// 2^128 - 2^104 is the largest float32; decimals from 2^128 - 2^103 up overflow it.
+const FLOAT32_MAX = 3.4028234663852886e38, FLOAT32_LIMIT = 3.4028235677973366e38;
+/** Whether JSON number text is below 2^128 - 2^103 in magnitude, compared exactly. */
+export function belowFloat32Limit(text: string): boolean {
+    const match = JSON_NUMBER.exec(text);
+    if (!match)
+        return false;
+    // The value is 0.<digits> * 10^exponent.
+    let digits = match[1] + (match[2] ?? ""), exponent = match[1].length + Number(match[3] ?? "0");
+    const lead = digits.length - digits.replace(/^0+/, "").length;
+    digits = digits.slice(lead).replace(/0+$/, "");
+    exponent -= lead;
+    const limit = "340282356779733661637539395458142568448";
+    return digits === "" || exponent < limit.length || (exponent === limit.length && digits < limit);
+}
 const protobufWrappers: Readonly<Record<string, string>> = {
     DoubleValue: "double", FloatValue: "float", Int64Value: "int64", UInt64Value: "uint64",
     Int32Value: "int32", UInt32Value: "uint32", BoolValue: "bool", StringValue: "string", BytesValue: "bytes"
@@ -175,7 +238,24 @@ export class SchemaValidator {
             this.fail(path, "known message type");
         const shape = this.schema.messages[type];
         const fields = this.record(value, path);
-        const present = (name: string): boolean => hasOwn(fields, name) && (fields[name] !== null || !hasOwn(shape.fields, name) || nullable(shape.fields[name]));
+        // A member is spelled as the JSON name or the original Proto name; like Go
+        // protojson, a field given twice (also once in each spelling) is rejected.
+        const members: [string, string][] = [], spelled = new Map<string, string>();
+        for (const member of Object.keys(fields)) {
+            if (skipType && member === "@type")
+                continue;
+            const name = this.fieldName(shape, member);
+            if (name === undefined)
+                this.fail(path + "." + member, "declared field");
+            if (spelled.has(name))
+                this.fail(path + "." + member, "field given once");
+            spelled.set(name, member);
+            members.push([member, name]);
+        }
+        const present = (name: string): boolean => {
+            const member = spelled.get(name);
+            return member !== undefined && (fields[member] !== null || nullable(shape.fields[name]));
+        };
         for (const group of shape.oneofs ?? []) {
             if (group.filter(present).length > 1)
                 this.fail(path, "at most one oneof member");
@@ -183,16 +263,12 @@ export class SchemaValidator {
         for (const [name, field] of Object.entries(shape.fields))
             if (field.required && !present(name))
                 this.fail(path + "." + name, "required field");
-        for (const name of Object.keys(fields)) {
-            if (skipType && name === "@type")
-                continue;
-            const next = path + "." + name;
-            if (!hasOwn(shape.fields, name))
-                this.fail(next, "declared field");
-            const field = shape.fields[name], item = fields[name];
+        for (const [member, name] of members) {
+            const next = path + "." + member;
+            const field = shape.fields[name], item = fields[member];
             if (item === null && !nullable(field)) {
                 if (this.normalize)
-                    delete fields[name];
+                    delete fields[member];
                 continue;
             }
             if (field.mapKey) {
@@ -215,7 +291,7 @@ export class SchemaValidator {
                     const rebuilt: Record<string, unknown> = {};
                     for (const [original, canonical] of keys)
                         setOwn(rebuilt, canonical, entries[original]);
-                    fields[name] = rebuilt;
+                    fields[member] = rebuilt;
                 }
             }
             else if (field.list) {
@@ -229,12 +305,31 @@ export class SchemaValidator {
                 }
             }
             else {
-                const result = this.scalar(field, item, next, depth + 1, false, fields, name);
+                const result = this.scalar(field, item, next, depth + 1, false, fields, member);
                 if (this.normalize && result !== item)
-                    fields[name] = result;
+                    fields[member] = result;
+            }
+            if (this.normalize && member !== name) {
+                setOwn(fields, name, fields[member]);
+                delete fields[member];
             }
         }
         return fields;
+    }
+    private aliases = new WeakMap<MessageShape, Map<string, string>>();
+    // JSON name of a member spelled as the JSON name or the original Proto name.
+    private fieldName(shape: MessageShape, member: string): string | undefined {
+        if (hasOwn(shape.fields, member))
+            return member;
+        let names = this.aliases.get(shape);
+        if (!names) {
+            names = new Map();
+            for (const [name, field] of Object.entries(shape.fields))
+                if (typeof field.protoName === "string" && !hasOwn(shape.fields, field.protoName))
+                    names.set(field.protoName, name);
+            this.aliases.set(shape, names);
+        }
+        return names.get(member);
     }
     // Returns undefined for types without a special JSON form.
     private wellKnown(type: string, value: unknown, path: string, depth: number, holder: object, key: string): { value: unknown } | undefined {
@@ -243,17 +338,12 @@ export class SchemaValidator {
         if (hasOwn(protobufWrappers, name))
             return { value: this.scalar({ kind: protobufWrappers[name] }, value, path, depth, true, holder, key) };
         if (name === "Timestamp") {
-            if (typeof value !== "string" || !fullMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(?:\d{3}|\d{6}|\d{9}))?Z$/, value) || Number(value.slice(0, 4)) === 0)
-                this.fail(path, "canonical UTC timestamp");
-            const date = new Date(value);
-            if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 19) !== value.slice(0, 19))
-                this.fail(path, "valid UTC timestamp");
+            if (!protoTimestamp(value))
+                this.fail(path, "RFC 3339 timestamp in range");
             return { value };
         }
         if (name === "Duration") {
-            if (typeof value !== "string" || !fullMatch(/^-?(0|[1-9]\d*)(?:\.(?:\d{3}|\d{6}|\d{9}))?s$/, value) || Math.abs(Number(value.slice(0, -1))) > 315576000001)
-                this.fail(path, "duration in range");
-            if (Math.abs(Number(value.slice(0, -1).split(".")[0])) > 315576000000)
+            if (!protoDuration(value))
                 this.fail(path, "duration in range");
             return { value };
         }
@@ -287,7 +377,8 @@ export class SchemaValidator {
             if (typeof fields["@type"] !== "string")
                 this.fail(path, "Any @type");
             const nestedType = (fields["@type"] as string).split("/").slice(-1)[0];
-            if (nestedType === type || !hasOwn(this.schema.messages, nestedType))
+            // An Any may hold another Any; the depth budget bounds the recursion.
+            if (!hasOwn(this.schema.messages, nestedType))
                 this.fail(path, "known Any type");
             const members = Object.keys(fields).filter(member => member !== "@type");
             if (nestedType === prefix + "Empty" && members.length === 0)
@@ -332,11 +423,24 @@ export class SchemaValidator {
         if (kind === "double" || kind === "float") {
             if (value === "NaN" || value === "Infinity" || value === "-Infinity")
                 return value;
-            const number = typeof value === "number" ? value : typeof value === "string" && JSON_NUMBER.test(value) ? Number(value) : NaN;
-            // Go emits float32 max as 3.4028235e+38; accept values that round to a finite float32.
-            if (!Number.isFinite(number) || (kind === "float" && !Number.isFinite(Math.fround(number))))
+            const text = typeof value === "string" ? (JSON_NUMBER.test(value) ? value : undefined) : this.numberText(value, holder, key);
+            const number = text === undefined ? NaN : Number(text);
+            if (!Number.isFinite(number))
                 this.fail(path, kind);
-            return number;
+            if (kind !== "float")
+                return number;
+            // Go rounds the decimal text to float32 once (3.40282356e+38 becomes
+            // 3.4028235e+38, 1e-50 becomes 0). Rounding through a double differs
+            // only for text that rounds to the float32 overflow threshold itself.
+            if (Math.abs(number) === FLOAT32_LIMIT) {
+                if (!belowFloat32Limit(text!))
+                    this.fail(path, kind);
+                return Math.sign(number) * FLOAT32_MAX;
+            }
+            const rounded = Math.fround(number);
+            if (!Number.isFinite(rounded))
+                this.fail(path, kind);
+            return rounded;
         }
         if (kind === "bool") {
             if (typeof value !== "boolean")

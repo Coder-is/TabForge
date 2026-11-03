@@ -1,7 +1,9 @@
 import copy
 import hashlib
+import os
 from pathlib import Path
 import re
+import stat
 from threading import Lock
 
 from .schema import SchemaValidator, parse_json
@@ -13,6 +15,27 @@ def _local(name):
 
 def _hash(value):
     return isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value)
+
+
+def _exact(value, *names):
+    """Manifest members must be known and spelled exactly, as in every TabForge loader."""
+    if isinstance(value, dict):
+        for name in value:
+            if name not in names:
+                raise ValueError("Unknown data manifest member: " + name)
+
+
+def _link(path):
+    """Symlinks, and on Windows junctions and other reparse points except
+    deduplicated files: what Go reports as ModeSymlink or ModeIrregular."""
+    if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
+        return True
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    reparse = getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(reparse) and getattr(info, "st_reparse_tag", 0) != 0x80000013  # IO_REPARSE_TAG_DEDUP
 
 
 class DataBundle:
@@ -29,8 +52,8 @@ class DataBundle:
             current = root
             for part in name.split("/"):
                 current = current / part
-                if current.is_symlink():
-                    raise ValueError("Symlink bundle path: " + name)
+                if _link(current):
+                    raise ValueError("Symlink or junction bundle path: " + name)
             if not current.is_file():
                 raise ValueError("Not a regular bundle file: " + name)
             return current.read_bytes()
@@ -45,6 +68,12 @@ class DataBundle:
             return data
 
         manifest = parse_json(read("data_manifest.json").decode("utf-8"))
+        _exact(manifest, "format", "schemaHash", "descriptor", "wireSchema", "data")
+        if isinstance(manifest, dict):
+            _exact(manifest.get("descriptor"), "path", "sha256")
+            _exact(manifest.get("wireSchema"), "path", "sha256")
+            for entry in manifest.get("data") if isinstance(manifest.get("data"), list) else []:
+                _exact(entry, "path", "sha256", "message", "encoding")
         if not isinstance(manifest, dict) or manifest.get("format") != "tabforge.data.v1" or not _hash(manifest.get("schemaHash")) or not isinstance(manifest.get("data"), list) or (expected_hash and expected_hash != manifest["schemaHash"]):
             raise ValueError("Invalid manifest or schema hash mismatch")
         checked(manifest.get("descriptor"))

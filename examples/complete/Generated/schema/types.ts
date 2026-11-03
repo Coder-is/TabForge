@@ -169,7 +169,8 @@ export const wireSchema = {
     "google.protobuf.Any": {
       "fields": {
         "typeUrl": {
-          "kind": "string"
+          "kind": "string",
+          "protoName": "type_url"
         },
         "value": {
           "kind": "bytes"
@@ -288,25 +289,31 @@ export const wireSchema = {
     "google.protobuf.Value": {
       "fields": {
         "boolValue": {
-          "kind": "bool"
+          "kind": "bool",
+          "protoName": "bool_value"
         },
         "listValue": {
           "kind": "message",
-          "type": "google.protobuf.ListValue"
+          "type": "google.protobuf.ListValue",
+          "protoName": "list_value"
         },
         "nullValue": {
           "kind": "enum",
-          "type": "google.protobuf.NullValue"
+          "type": "google.protobuf.NullValue",
+          "protoName": "null_value"
         },
         "numberValue": {
-          "kind": "double"
+          "kind": "double",
+          "protoName": "number_value"
         },
         "stringValue": {
-          "kind": "string"
+          "kind": "string",
+          "protoName": "string_value"
         },
         "structValue": {
           "kind": "message",
-          "type": "google.protobuf.Struct"
+          "type": "google.protobuf.Struct",
+          "protoName": "struct_value"
         }
       },
       "oneofs": [
@@ -346,7 +353,8 @@ export const wireSchema = {
     "tabforge.demo.chat.ChatRequest": {
       "fields": {
         "conversationId": {
-          "kind": "uint64"
+          "kind": "uint64",
+          "protoName": "conversation_id"
         },
         "prompt": {
           "kind": "string"
@@ -388,7 +396,8 @@ export const wireSchema = {
           "kind": "uint64"
         },
         "itemId": {
-          "kind": "int32"
+          "kind": "int32",
+          "protoName": "item_id"
         }
       }
     },
@@ -406,7 +415,8 @@ export const wireSchema = {
         },
         "createdAt": {
           "kind": "message",
-          "type": "google.protobuf.Timestamp"
+          "type": "google.protobuf.Timestamp",
+          "protoName": "created_at"
         },
         "enabled": {
           "kind": "bool"
@@ -416,7 +426,8 @@ export const wireSchema = {
           "type": "google.protobuf.Struct"
         },
         "iconHash": {
-          "kind": "bytes"
+          "kind": "bytes",
+          "protoName": "icon_hash"
         },
         "id": {
           "kind": "int32"
@@ -441,10 +452,12 @@ export const wireSchema = {
           "kind": "string"
         },
         "ownerId": {
-          "kind": "uint64"
+          "kind": "uint64",
+          "protoName": "owner_id"
         },
         "powerEffect": {
-          "kind": "int32"
+          "kind": "int32",
+          "protoName": "power_effect"
         },
         "price": {
           "kind": "double"
@@ -462,7 +475,8 @@ export const wireSchema = {
           "type": "tabforge.demo.common.Reward"
         },
         "signedTotal": {
-          "kind": "int64"
+          "kind": "int64",
+          "protoName": "signed_total"
         },
         "stats": {
           "kind": "int32",
@@ -476,14 +490,16 @@ export const wireSchema = {
           "list": true
         },
         "textEffect": {
-          "kind": "string"
+          "kind": "string",
+          "protoName": "text_effect"
         },
         "ttl": {
           "kind": "message",
           "type": "google.protobuf.Duration"
         },
         "unlockLevel": {
-          "kind": "int32"
+          "kind": "int32",
+          "protoName": "unlock_level"
         },
         "weight": {
           "kind": "float"
@@ -499,7 +515,8 @@ export const wireSchema = {
     "tabforge.demo.config.Settings": {
       "fields": {
         "maxLevel": {
-          "kind": "int32"
+          "kind": "int32",
+          "protoName": "max_level"
         }
       }
     },
@@ -508,7 +525,8 @@ export const wireSchema = {
         "byId": {
           "kind": "message",
           "type": "tabforge.demo.config.Item",
-          "mapKey": "int32"
+          "mapKey": "int32",
+          "protoName": "by_id"
         },
         "items": {
           "kind": "message",
@@ -524,19 +542,24 @@ export const wireSchema = {
     "tabforge.demo.structures.ScalarVariants": {
       "fields": {
         "signedFixed": {
-          "kind": "sfixed32"
+          "kind": "sfixed32",
+          "protoName": "signed_fixed"
         },
         "signedFixed64": {
-          "kind": "sfixed64"
+          "kind": "sfixed64",
+          "protoName": "signed_fixed64"
         },
         "signedZigzag": {
-          "kind": "sint64"
+          "kind": "sint64",
+          "protoName": "signed_zigzag"
         },
         "unsignedFixed": {
-          "kind": "fixed32"
+          "kind": "fixed32",
+          "protoName": "unsigned_fixed"
         },
         "unsignedFixed64": {
-          "kind": "fixed64"
+          "kind": "fixed64",
+          "protoName": "unsigned_fixed64"
         }
       }
     },

@@ -4,6 +4,7 @@ import com.google.gson.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.*;
 import java.util.*;
 
@@ -39,6 +40,12 @@ public final class DataBundle {
   public static DataBundle open(Path directory, String expectedHash) throws IOException {
     Reader reader = new Reader(directory);
     JsonObject manifest = StrictJson.object(StrictJson.parse(reader.read("data_manifest.json")));
+    exact(manifest, "format", "schemaHash", "descriptor", "wireSchema", "data");
+    exact(manifest.get("descriptor"), "path", "sha256");
+    exact(manifest.get("wireSchema"), "path", "sha256");
+    if (manifest.has("data") && manifest.get("data").isJsonArray())
+      for (JsonElement entry : manifest.getAsJsonArray("data"))
+        exact(entry, "path", "sha256", "message", "encoding");
     String hash = StrictJson.string(manifest.get("schemaHash"));
     if (!"tabforge.data.v1".equals(StrictJson.string(manifest.get("format")))
         || !hash(hash)
@@ -105,6 +112,14 @@ public final class DataBundle {
     return validator.validate(message, StrictJson.parse(text.getBytes(StandardCharsets.UTF_8)));
   }
 
+  /** Manifest members must be known and spelled exactly, as in every TabForge loader. */
+  private static void exact(JsonElement value, String... names) throws IOException {
+    if (value == null || !value.isJsonObject()) return;
+    for (String name : value.getAsJsonObject().keySet())
+      if (!Arrays.asList(names).contains(name))
+        throw new IOException("Unknown data manifest member: " + name);
+  }
+
   private static boolean hash(String value) {
     return value.matches("[a-f0-9]{64}");
   }
@@ -129,7 +144,11 @@ public final class DataBundle {
       Path current = root;
       for (String part : name.split("/")) {
         current = current.resolve(part);
-        if (Files.isSymbolicLink(current)) throw new IOException("Symlink bundle path: " + name);
+        // Windows junctions and other reparse points are "other" files (Go: ModeIrregular).
+        BasicFileAttributes attributes =
+            Files.readAttributes(current, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (attributes.isSymbolicLink() || attributes.isOther())
+          throw new IOException("Symlink or junction bundle path: " + name);
       }
       if (!Files.isRegularFile(current, LinkOption.NOFOLLOW_LINKS))
         throw new IOException("Not a regular bundle file: " + name);

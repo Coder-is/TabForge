@@ -1,7 +1,8 @@
-import datetime
+import decimal
 import json
 import math
 import re
+import struct
 
 # Data bundle budget shared by every TabForge data loader (Go, Node.js, Java,
 # Python, Unity, Godot, Unreal): container nesting depth (root value = 0) and
@@ -20,6 +21,14 @@ _INTEGER_KINDS = {
 _BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 _FLOAT_SPECIALS = ("NaN", "Infinity", "-Infinity")
 _UNSET = object()
+# json.loads joins escaped surrogate pairs, so any surrogate left is unpaired.
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+# 2^128 - 2^104 is the largest float32; decimals from 2^128 - 2^103 up overflow.
+_FLOAT32_MAX = 3.4028234663852886e38
+_FLOAT32_LIMIT = 3.4028235677973366e38
+_FLOAT32_HALFWAY = decimal.Decimal(340282356779733661637539395458142568448)
+_TIMESTAMP = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?:([.,])([0-9]+))?(?:Z|([+-])([0-9]{2}):([0-9]{2}))")
+_DURATION = re.compile(r"[+-]?(0|[1-9][0-9]*)?(\.[0-9]{0,9})?s")
 
 
 class _RawFloat(float):
@@ -63,9 +72,14 @@ def parse_json(text, max_depth=MAX_JSON_DEPTH, max_nodes=MAX_JSON_NODES):
         if depth > max_depth or nodes > max_nodes:
             raise ValueError("JSON exceeds depth %d or %d values" % (max_depth, max_nodes))
         if isinstance(value, dict):
+            for key in value:
+                if _LONE_SURROGATE.search(key):
+                    raise ValueError("Unpaired surrogate in JSON member name")
             stack.extend((item, depth + 1) for item in value.values())
         elif isinstance(value, list):
             stack.extend((item, depth + 1) for item in value)
+        elif isinstance(value, str) and _LONE_SURROGATE.search(value):
+            raise ValueError("Unpaired surrogate in JSON string")
     return result
 
 
@@ -144,6 +158,60 @@ def proto_bytes(value):
     return body
 
 
+def _civil_days(year, month, day):
+    """Days from 1970-01-01, proleptic Gregorian; year 0 is allowed (offsets can reach year 1)."""
+    y = year + 400 - (1 if month <= 2 else 0)
+    era, yoe = divmod(y, 400)
+    doy = (153 * ((month + 9) % 12) + 2) // 5 + day - 1
+    return era * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + doy - 719468 - 146097
+
+
+def _days_in_month(year, month):
+    if month == 2:
+        return 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28
+    return (31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)[month - 1]
+
+
+def proto_timestamp(value):
+    """Go protojson Timestamp input: time.Parse(time.RFC3339Nano), then 0001-01-01 to
+    9999-12-31 in UTC and at most 9 digits after ".". Like Go: any offset (hours to 24,
+    minutes to 60), a one-digit hour, and "," before a fraction of any length."""
+    match = _TIMESTAMP.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        return False
+    year, month, day, hour, minute, second = (int(match.group(index)) for index in range(1, 7))
+    if (match.group(7) == "." and len(match.group(8)) > 9) or not 1 <= month <= 12 or not 1 <= day <= _days_in_month(year, month) or hour > 23 or minute > 59 or second > 59:
+        return False
+    offset = 0
+    if match.group(9):
+        hours, minutes = int(match.group(10)), int(match.group(11))
+        if hours > 24 or minutes > 60:
+            return False
+        offset = (-1 if match.group(9) == "-" else 1) * (hours * 3600 + minutes * 60)
+    seconds = _civil_days(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset
+    return -62135596800 <= seconds <= 253402300799
+
+
+def proto_duration(value):
+    """Go protojson Duration input: optional sign, integer and/or "." with up to 9 digits
+    ("1.s", ".5s" and ".s" are accepted), then "s", within 315576000000 seconds."""
+    match = _DURATION.fullmatch(value) if isinstance(value, str) else None
+    if not match or (match.group(1) is None and match.group(2) is None):
+        return False
+    seconds = match.group(1) or ""
+    return len(seconds) < 12 or (len(seconds) == 12 and seconds <= "315576000000")
+
+
+def _float32(number, text):
+    """Go's float32 value of finite JSON number text (rounded once, from the exact
+    decimal), or None when it overflows float32."""
+    if abs(number) == _FLOAT32_LIMIT:
+        return math.copysign(_FLOAT32_MAX, number) if decimal.Decimal(text).copy_abs() < _FLOAT32_HALFWAY else None
+    if abs(number) > _FLOAT32_LIMIT:
+        return None
+    return struct.unpack("<f", struct.pack("<f", number))[0]
+
+
 def _number_text(value):
     if isinstance(value, _RawFloat):
         return value.raw
@@ -179,6 +247,7 @@ class SchemaValidator:
         self.schema = schema
         self.max_depth = max_depth
         self.max_nodes = max_nodes
+        self.aliases = {}  # message name -> {original Proto name: JSON name}
 
     def validate(self, message, value):
         # Keep budgets per call so one validator can serve concurrent readers.
@@ -190,6 +259,7 @@ class _Validation:
         self.schema = owner.schema
         self.max_depth = owner.max_depth
         self.max_nodes = owner.max_nodes
+        self.aliases = owner.aliases
         self.nodes = 0
 
     @staticmethod
@@ -218,9 +288,28 @@ class _Validation:
         shape = self.schema["messages"][name]
         declared = shape["fields"]
         fields = self.record(value, path)
+        aliases = self.aliases.get(name)
+        if aliases is None:
+            aliases = {field["protoName"]: json_name for json_name, field in declared.items() if isinstance(field.get("protoName"), str) and field["protoName"] not in declared}
+            self.aliases[name] = aliases
+        # A member is spelled as the JSON name or the original Proto name; like Go
+        # protojson, a field given twice (also once in each spelling) is rejected.
+        members = []
+        spelled = {}
+        for key in list(fields):
+            if skip_type and key == "@type":
+                continue
+            json_name = key if key in declared else aliases.get(key)
+            if json_name is None:
+                self.fail(path + "." + key, "declared field")
+            if json_name in spelled:
+                self.fail(path + "." + key, "field given once")
+            spelled[json_name] = key
+            members.append((key, json_name))
 
-        def present(key):
-            return key in fields and (fields[key] is not None or key not in declared or _nullable(declared[key]))
+        def present(json_name):
+            key = spelled.get(json_name)
+            return key is not None and (fields[key] is not None or _nullable(declared[json_name]))
 
         for group in shape.get("oneofs", []):
             if sum(1 for key in group if present(key)) > 1:
@@ -228,13 +317,9 @@ class _Validation:
         for key, field in declared.items():
             if field.get("required") and not present(key):
                 self.fail(path + "." + key, "required field")
-        for key in list(fields):
-            if skip_type and key == "@type":
-                continue
+        for key, json_name in members:
             next_path = path + "." + key
-            if key not in declared:
-                self.fail(next_path, "declared field")
-            field = declared[key]
+            field = declared[json_name]
             item = fields[key]
             if item is None and not _nullable(field):
                 del fields[key]
@@ -263,6 +348,8 @@ class _Validation:
                     item[index] = self.scalar(field, element, "%s[%d]" % (next_path, index), depth + 2, False)
             else:
                 fields[key] = self.scalar(field, item, next_path, depth + 1, False)
+            if key != json_name:
+                fields[json_name] = fields.pop(key)
         return fields
 
     def well_known(self, name, value, path, depth):
@@ -270,15 +357,11 @@ class _Validation:
         if short in _WRAPPERS:
             return self.scalar({"kind": _WRAPPERS[short]}, value, path, depth, True)
         if short == "Timestamp":
-            if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?Z", value):
-                self.fail(path, "canonical UTC timestamp")
-            try:
-                datetime.datetime.strptime(value[:19], "%Y-%m-%dT%H:%M:%S")
-            except ValueError:
-                self.fail(path, "valid UTC timestamp")
+            if not proto_timestamp(value):
+                self.fail(path, "RFC 3339 timestamp in range")
             return value
         if short == "Duration":
-            if not isinstance(value, str) or not re.fullmatch(r"-?(0|[1-9][0-9]*)(?:\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?s", value) or abs(int(value[:-1].split(".")[0])) > 315576000000:
+            if not proto_duration(value):
                 self.fail(path, "duration in range")
             return value
         if short == "FieldMask":
@@ -307,7 +390,8 @@ class _Validation:
             if not isinstance(url, str):
                 self.fail(path, "Any @type")
             nested = url.split("/")[-1]
-            if nested == name or nested not in self.schema["messages"]:
+            # An Any may hold another Any; the depth budget bounds the recursion.
+            if nested not in self.schema["messages"]:
                 self.fail(path, "known Any type")
             members = [key for key in fields if key != "@type"]
             if nested == _PREFIX + "Empty" and not members:
@@ -353,8 +437,14 @@ class _Validation:
                 number = float(value)
             else:
                 number = math.inf
-            if not math.isfinite(number) or (kind == "float" and abs(number) >= 3.4028235677973366e38):
+            if not math.isfinite(number):
                 self.fail(path, kind)
+            if kind == "float":
+                # Go keeps float32: 3.40282356e+38 becomes 3.4028234663852886e+38, 1e-50 becomes 0.
+                rounded = _float32(number, value if isinstance(value, str) else _number_text(value))
+                if rounded is None:
+                    self.fail(path, kind)
+                return value if type(value) is int and rounded == value else rounded
             return value if type(value) is int else number
         if kind == "bool":
             if type(value) is not bool:

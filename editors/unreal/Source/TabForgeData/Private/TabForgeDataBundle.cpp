@@ -20,7 +20,10 @@ bool Load(const FString& Path, TabForgeWire::FJsonDocument& Document, FString& E
     TArray<uint8> Bytes;
     if (!FFileHelper::LoadFileToArray(Bytes, *Path)) { Error = TEXT("Cannot read ") + Path; return false; }
     const std::string Raw(reinterpret_cast<const char*>(Bytes.GetData()), Bytes.Num());
-    if (!TabForgeWire::Parse(Raw, Document, TabForgeWire::JsonMaxDepth, TabForgeWire::DataMaxNodes)) { Error = TEXT("Invalid UTF-8, duplicate-key or oversized JSON: ") + Path; return false; }
+    if (!TabForgeWire::Parse(Raw, Document, TabForgeWire::JsonMaxDepth, TabForgeWire::DataMaxNodes)) {
+        Error = Document.bCaseFoldedKeys ? TEXT("Member names that differ only by case cannot be held by FJsonObject: ") + Path : TEXT("Invalid UTF-8, duplicate-key or oversized JSON: ") + Path;
+        return false;
+    }
     if (Document.Root->Type != EJson::Object) { Error = TEXT("Expected a JSON object: ") + Path; return false; }
     return true;
 }

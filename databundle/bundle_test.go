@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -220,5 +223,129 @@ func TestManifestCaseVariantCannotBypassSymlink(t *testing.T) {
 	}
 	if _, err := databundle.Open(dir, ""); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("case variant read through symlink: %v", err)
+	}
+}
+
+func exampleCopy(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.CopyFS(root, os.DirFS("../examples/complete/Generated")); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// Member names are exact and unknown members are rejected at every manifest
+// level, as in every other TabForge loader (encoding/json alone folds case).
+func TestManifestMembersAreExact(t *testing.T) {
+	dir := exampleCopy(t)
+	path := filepath.Join(dir, databundle.ManifestName)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, edit := range [][2]string{
+		{`"format"`, `"FORMAT"`}, {`"schemaHash"`, `"schemahash"`}, {`"data": [`, `"Data": [`}, {`"format"`, `"extra": 1, "format"`},
+		{`"descriptor": {`, `"descriptor": {"size": 1, `}, {`"sha256"`, `"SHA256"`}, {`"encoding"`, `"Encoding"`}, {`"message"`, `"note": "", "message"`},
+	} {
+		changed := strings.Replace(string(raw), edit[0], edit[1], 1)
+		if err := os.WriteFile(path, []byte(changed), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := databundle.Open(dir, ""); err == nil {
+			t.Fatalf("manifest accepted after %q -> %q", edit[0], edit[1])
+		}
+	}
+	if err := os.WriteFile(path, append([]byte("\xef\xbb\xbf"), raw...), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := databundle.Open(dir, ""); err == nil {
+		t.Fatal("manifest with a UTF-8 BOM accepted")
+	}
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := databundle.Open(dir, ""); err != nil {
+		t.Fatal(err)
+	}
+	wire := filepath.Join(dir, "schema", "wire_schema.json")
+	schema, err := os.ReadFile(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wire, []byte(strings.Replace(string(schema), `"messages"`, `"Messages"`, 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var m databundle.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if err := databundle.WriteManifest(dir, m.SchemaHash, m.Data); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := databundle.Open(dir, ""); err == nil {
+		t.Fatal("wire schema with a misspelled member accepted")
+	}
+}
+
+// Go 1.23+ reports Windows junctions as ModeIrregular rather than ModeSymlink.
+func TestJunctionRejected(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junctions are a Windows feature")
+	}
+	dir := exampleCopy(t)
+	data := filepath.Join(dir, "data")
+	if err := os.Rename(data, data+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("cmd", "/c", "mklink", "/J", data, data+".old").CombinedOutput(); err != nil {
+		t.Skipf("cannot create a junction: %v %s", err, output)
+	}
+	if _, err := databundle.Open(dir, ""); err == nil || !strings.Contains(err.Error(), "junction") {
+		t.Fatalf("junction accepted: %v", err)
+	}
+}
+
+// Packages exported before wire schemas carried protoName must still load, but
+// a schema that drops only some aliases matches neither form.
+func TestLegacyWireSchemaWithoutProtoNames(t *testing.T) {
+	dir := exampleCopy(t)
+	raw, err := os.ReadFile(filepath.Join(dir, databundle.ManifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m databundle.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	wire := filepath.Join(dir, "schema", "wire_schema.json")
+	schema, err := os.ReadFile(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := regexp.MustCompile(`,\s*"protoName": "[a-z0-9_]+"`)
+	for _, tc := range []struct {
+		limit int
+		ok    bool
+	}{{-1, true}, {1, false}} {
+		n := 0
+		edited := alias.ReplaceAllStringFunc(string(schema), func(s string) string {
+			if n++; tc.limit >= 0 && n > tc.limit {
+				return s
+			}
+			return ""
+		})
+		if edited == string(schema) {
+			t.Fatal("fixture has no protoName aliases")
+		}
+		if err := os.WriteFile(wire, []byte(edited), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := databundle.WriteManifest(dir, m.SchemaHash, m.Data); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := databundle.Open(dir, ""); (err == nil) != tc.ok {
+			t.Fatalf("removed %d aliases: open error %v", tc.limit, err)
+		}
 	}
 }

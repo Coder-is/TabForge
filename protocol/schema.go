@@ -21,12 +21,17 @@ type MessageShape struct {
 	Fields map[string]FieldShape `json:"fields"`
 	Oneofs [][]string            `json:"oneofs,omitempty"`
 }
+
+// FieldShape is keyed by the field's JSON name. ProtoName is the original Proto
+// field name when it differs; Go protojson accepts either spelling on input
+// (never both), and validators return members under the JSON name.
 type FieldShape struct {
-	Kind     string `json:"kind"`
-	Type     string `json:"type,omitempty"`
-	List     bool   `json:"list,omitempty"`
-	MapKey   string `json:"mapKey,omitempty"`
-	Required bool   `json:"required,omitempty"`
+	Kind      string `json:"kind"`
+	Type      string `json:"type,omitempty"`
+	List      bool   `json:"list,omitempty"`
+	MapKey    string `json:"mapKey,omitempty"`
+	Required  bool   `json:"required,omitempty"`
+	ProtoName string `json:"protoName,omitempty"`
 }
 
 func (c *Contract) WireSchema() WireSchema {
@@ -71,6 +76,9 @@ func (c *Contract) WireSchema() WireSchema {
 			field := FieldShape{Kind: value.Kind().String(), List: f.IsList(), Required: f.Cardinality() == protoreflect.Required}
 			if f.IsMap() {
 				field.MapKey = f.MapKey().Kind().String()
+			}
+			if name := string(f.TextName()); name != f.JSONName() {
+				field.ProtoName = name
 			}
 			if value.Message() != nil {
 				field.Type = string(value.Message().FullName())

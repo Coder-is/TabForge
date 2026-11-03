@@ -2,8 +2,8 @@ package io.tabforge.data;
 
 import com.google.gson.*;
 import java.math.*;
-import java.time.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.*;
 
 /**
@@ -30,10 +30,91 @@ final class SchemaValidator {
           "StringValue", "string",
           "BytesValue", "bytes");
 
+  private static final Pattern TIMESTAMP =
+      Pattern.compile(
+          "([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?:([.,])([0-9]+))?(?:Z|([+-])([0-9]{2}):([0-9]{2}))");
+  private static final Pattern DURATION = Pattern.compile("[+-]?(0|[1-9][0-9]*)?(\\.[0-9]{0,9})?s");
+  // 2^128 - 2^104 is the largest float32; decimals from 2^128 - 2^103 up overflow it.
+  private static final double FLOAT32_LIMIT = 3.4028235677973366e38;
+  private static final BigDecimal FLOAT32_HALFWAY =
+      new BigDecimal("340282356779733661637539395458142568448");
+
   private final JsonObject schema;
+  // Message name -> original Proto field name -> JSON name.
+  private final Map<String, Map<String, String>> aliases = new ConcurrentHashMap<>();
 
   SchemaValidator(JsonObject schema) {
     this.schema = schema;
+  }
+
+  // Days from 1970-01-01, proleptic Gregorian; year 0 is allowed (offsets can reach year 1).
+  private static long civilDays(int year, int month, int day) {
+    long y = year + 400 - (month <= 2 ? 1 : 0), era = y / 400, yoe = y - era * 400;
+    long doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    return era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468 - 146097;
+  }
+
+  private static int daysInMonth(int year, int month) {
+    if (month == 2) return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) ? 29 : 28;
+    return new int[] {31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}[month - 1];
+  }
+
+  /**
+   * Go protojson Timestamp input: time.Parse(time.RFC3339Nano), then 0001-01-01 to 9999-12-31 in
+   * UTC and at most 9 digits after ".". Like Go: any offset (hours to 24, minutes to 60), a
+   * one-digit hour, and "," before a fraction of any length.
+   */
+  static boolean protoTimestamp(String value) {
+    Matcher match = TIMESTAMP.matcher(value);
+    if (!match.matches()) return false;
+    int year = Integer.parseInt(match.group(1)),
+        month = Integer.parseInt(match.group(2)),
+        day = Integer.parseInt(match.group(3)),
+        hour = Integer.parseInt(match.group(4)),
+        minute = Integer.parseInt(match.group(5)),
+        second = Integer.parseInt(match.group(6));
+    if ((".".equals(match.group(7)) && match.group(8).length() > 9)
+        || month < 1
+        || month > 12
+        || day < 1
+        || day > daysInMonth(year, month)
+        || hour > 23
+        || minute > 59
+        || second > 59) return false;
+    long offset = 0;
+    if (match.group(9) != null) {
+      int hours = Integer.parseInt(match.group(10)), minutes = Integer.parseInt(match.group(11));
+      if (hours > 24 || minutes > 60) return false;
+      offset = (match.group(9).equals("-") ? -1 : 1) * (hours * 3600L + minutes * 60L);
+    }
+    long seconds =
+        civilDays(year, month, day) * 86400L + hour * 3600L + minute * 60L + second - offset;
+    return seconds >= -62135596800L && seconds <= 253402300799L;
+  }
+
+  /**
+   * Go protojson Duration input: optional sign, integer and/or "." with up to 9 digits ("1.s",
+   * ".5s" and ".s" are accepted), then "s", within 315576000000 seconds.
+   */
+  static boolean protoDuration(String value) {
+    Matcher match = DURATION.matcher(value);
+    if (!match.matches() || (match.group(1) == null && match.group(2) == null)) return false;
+    String seconds = match.group(1) == null ? "" : match.group(1);
+    return seconds.length() < 12
+        || (seconds.length() == 12 && seconds.compareTo("315576000000") <= 0);
+  }
+
+  /**
+   * Go's float32 value of finite JSON number text, rounded once from the exact decimal, or null
+   * when it overflows float32 (3.40282356e+38 becomes 3.4028235e+38, 1e-50 becomes 0).
+   */
+  static Double float32(double number, String text) {
+    if (Math.abs(number) == FLOAT32_LIMIT)
+      return new BigDecimal(text).abs().compareTo(FLOAT32_HALFWAY) < 0
+          ? Math.copySign((double) Float.MAX_VALUE, number)
+          : null;
+    if (Math.abs(number) > FLOAT32_LIMIT) return null;
+    return (double) (float) number;
   }
 
   /** Returns the canonical value; containers are normalized in place. */
@@ -217,11 +298,11 @@ final class SchemaValidator {
           String text = numberText(value);
           if (text == null || !JSON_NUMBER.matcher(text).matches()) fail(path, kind);
           double number = Double.parseDouble(text);
-          // Go emits float32 max as 3.4028235e+38; accept values that round to a finite float32.
-          if (!Double.isFinite(number)
-              || (kind.equals("float") && Math.abs(number) >= 3.4028235677973366e38))
-            fail(path, kind);
-          return new JsonPrimitive(number);
+          if (!Double.isFinite(number)) fail(path, kind);
+          if (kind.equals("double")) return new JsonPrimitive(number);
+          Double rounded = float32(number, text);
+          if (rounded == null) fail(path, kind);
+          return new JsonPrimitive(rounded);
         case "bool":
           if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean())
             fail(path, "boolean");
@@ -267,28 +348,11 @@ final class SchemaValidator {
       }
       switch (shortName) {
         case "Timestamp":
-          if (!isString(value)
-              || !value
-                  .getAsString()
-                  .matches(
-                      "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?Z")
-              || value.getAsString().startsWith("0000")) fail(path, "canonical UTC timestamp");
-          try {
-            LocalDateTime.parse(value.getAsString().substring(0, 19));
-          } catch (DateTimeException error) {
-            fail(path, "valid UTC timestamp");
-          }
+          if (!isString(value) || !protoTimestamp(value.getAsString()))
+            fail(path, "RFC 3339 timestamp in range");
           return value;
         case "Duration":
-          if (!isString(value)
-              || !value
-                  .getAsString()
-                  .matches("-?(0|[1-9][0-9]*)(?:\\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?s"))
-            fail(path, "duration in range");
-          String seconds =
-              value.getAsString().substring(0, value.getAsString().length() - 1).split("\\.")[0];
-          if (seconds.length() > 13
-              || new BigInteger(seconds).abs().compareTo(new BigInteger("315576000000")) > 0)
+          if (!isString(value) || !protoDuration(value.getAsString()))
             fail(path, "duration in range");
           return value;
         case "FieldMask":
@@ -318,8 +382,8 @@ final class SchemaValidator {
           if (!isString(fields.get("@type"))) fail(path, "Any @type");
           String url = fields.get("@type").getAsString(),
               nested = url.substring(url.lastIndexOf('/') + 1);
-          if (nested.equals(name) || !schema.getAsJsonObject("messages").has(nested))
-            fail(path, "known Any type");
+          // An Any may hold another Any; the depth budget bounds the recursion.
+          if (!schema.getAsJsonObject("messages").has(nested)) fail(path, "known Any type");
           List<String> members = new ArrayList<>(fields.keySet());
           members.remove("@type");
           // Go tolerates an omitted Empty value on input.
@@ -352,22 +416,34 @@ final class SchemaValidator {
       JsonObject shape = messages.getAsJsonObject(name),
           fields = object(value, path),
           definitions = shape.getAsJsonObject("fields");
+      Map<String, String> protoNames = aliases.computeIfAbsent(name, ignored -> protoNameIndex(definitions));
+      // A member is spelled as the JSON name or the original Proto name; like Go protojson, a
+      // field given twice (also once in each spelling) is rejected.
+      List<String[]> members = new ArrayList<>();
+      Map<String, String> spelled = new HashMap<>();
+      for (String key : new ArrayList<>(fields.keySet())) {
+        if (skipType && key.equals("@type")) continue;
+        String jsonName = definitions.has(key) ? key : protoNames.get(key);
+        if (jsonName == null) fail(path + "." + key, "declared field");
+        if (spelled.containsKey(jsonName)) fail(path + "." + key, "field given once");
+        spelled.put(jsonName, key);
+        members.add(new String[] {key, jsonName});
+      }
       if (shape.has("oneofs"))
         for (JsonElement group : shape.getAsJsonArray("oneofs")) {
           int count = 0;
           for (JsonElement key : group.getAsJsonArray())
-            if (present(fields, definitions, key.getAsString())) count++;
+            if (present(fields, definitions, spelled, key.getAsString())) count++;
           if (count > 1) fail(path, "at most one oneof member");
         }
       for (var entry : definitions.entrySet())
         if (flag(entry.getValue().getAsJsonObject(), "required")
-            && !present(fields, definitions, entry.getKey()))
+            && !present(fields, definitions, spelled, entry.getKey()))
           fail(path + "." + entry.getKey(), "required field");
-      for (String key : new ArrayList<>(fields.keySet())) {
-        if (skipType && key.equals("@type")) continue;
+      for (String[] member : members) {
+        String key = member[0], jsonName = member[1];
         String next = path + "." + key;
-        if (!definitions.has(key)) fail(next, "declared field");
-        JsonObject field = definitions.getAsJsonObject(key);
+        JsonObject field = definitions.getAsJsonObject(jsonName);
         JsonElement item = fields.get(key);
         if (item.isJsonNull() && !nullable(field)) {
           fields.remove(key);
@@ -402,15 +478,26 @@ final class SchemaValidator {
           for (int i = 0; i < array.size(); i++)
             array.set(i, scalar(field, array.get(i), next + "[" + i + "]", depth + 2, false));
         } else fields.add(key, scalar(field, item, next, depth + 1, false));
+        if (!key.equals(jsonName)) fields.add(jsonName, fields.remove(key));
       }
       return fields;
     }
 
-    boolean present(JsonObject fields, JsonObject definitions, String name) {
-      return fields.has(name)
-          && (!fields.get(name).isJsonNull()
-              || !definitions.has(name)
-              || nullable(definitions.getAsJsonObject(name)));
+    Map<String, String> protoNameIndex(JsonObject definitions) {
+      Map<String, String> names = new HashMap<>();
+      for (var entry : definitions.entrySet()) {
+        JsonElement protoName = entry.getValue().getAsJsonObject().get("protoName");
+        if (isString(protoName) && !definitions.has(protoName.getAsString()))
+          names.put(protoName.getAsString(), entry.getKey());
+      }
+      return names;
+    }
+
+    boolean present(
+        JsonObject fields, JsonObject definitions, Map<String, String> spelled, String name) {
+      String key = spelled.get(name);
+      return key != null
+          && (!fields.get(key).isJsonNull() || nullable(definitions.getAsJsonObject(name)));
     }
   }
 }

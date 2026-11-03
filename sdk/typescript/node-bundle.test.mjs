@@ -82,4 +82,29 @@ test("decoded data is canonical ProtoJSON with exact 64-bit integers", async () 
     assert.equal(Object.getPrototypeOf(item.stats), Object.prototype);
     assert.deepEqual(bundle.decode("tabforge.demo.config.Tables", '{"byId":{"+1":{"id":1},"02":{}}}'), { byId: { "1": { id: 1 }, "2": {} } });
     assert.equal(bundle.decode("google.protobuf.UInt64Value", "18446744073709551615"), "18446744073709551615");
+    // float fields hold Go's float32 value; Proto names come back as JSON names.
+    assert.deepEqual(bundle.decode("tabforge.demo.config.Item", '{"weight":3.40282356e+38,"price":1e-50,"unlock_level":5,"text_effect":"x","icon_hash":"AAF"}'),
+        { weight: 3.4028234663852886e38, price: 1e-50, unlockLevel: 5, textEffect: "x", iconHash: "AAE=" });
+    for (const [json, weight] of [["1e-50", 0], ["-1e-50", -0], ["16777217", 16777216], ["3.4028235677973366e+38", 3.4028234663852886e38], ['"0.1"', Math.fround(0.1)]])
+        assert.equal(bundle.decode("tabforge.demo.config.Item", '{"weight":' + json + "}").weight, weight, json);
+    assert.throws(() => bundle.decode("tabforge.demo.config.Item", '{"weight":3.40282356779733661637539395458142568448e38}'));
+    assert.deepEqual(bundle.decode("tabforge.demo.config.Item", '{"metadata":{"@type":"type.googleapis.com/tabforge.demo.common.Reward","item_id":"5"}}').metadata,
+        { "@type": "type.googleapis.com/tabforge.demo.common.Reward", itemId: 5 });
+});
+
+test("BOM files and misspelled or unknown manifest members are rejected like Go", async t => {
+    const root = await mkdtemp(join(tmpdir(), "tabforge strict "));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    await cp(source, root, { recursive: true });
+    const manifestPath = join(root, "data_manifest.json");
+    const original = await readFile(manifestPath, "utf8");
+    await DataBundle.open(root);
+    for (const change of [m => { m.FORMAT = m.format; delete m.format; }, m => { m.extra = 1; }, m => { m.descriptor.size = 1; }, m => { m.wireSchema.SHA256 = m.wireSchema.sha256; delete m.wireSchema.sha256; }, m => { m.data[0].Path = m.data[0].path; }, m => { m.data[0].note = ""; }]) {
+        const manifest = JSON.parse(original);
+        change(manifest);
+        await writeFile(manifestPath, JSON.stringify(manifest));
+        await assert.rejects(DataBundle.open(root), /manifest/);
+    }
+    await writeFile(manifestPath, "\ufeff" + original);
+    await assert.rejects(DataBundle.open(root), /Invalid JSON/);
 });

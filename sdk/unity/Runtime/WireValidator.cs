@@ -25,10 +25,17 @@ namespace TabForge.Protocol
         };
         private static readonly Regex JsonNumber = new Regex(@"\A-?(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?\z", RegexOptions.CultureInvariant);
         private const string Base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        private static readonly Regex TimestampPattern = new Regex(@"\A([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?:([.,])([0-9]+))?(?:Z|([+-])([0-9]{2}):([0-9]{2}))\z", RegexOptions.CultureInvariant);
+        private static readonly Regex DurationPattern = new Regex(@"\A[+-]?(0|[1-9][0-9]*)?(\.[0-9]{0,9})?s\z", RegexOptions.CultureInvariant);
+        // 2^128 - 2^104 is the largest float32; decimals from 2^128 - 2^103 up overflow it.
+        private const double Float32Limit = 3.4028235677973366e38;
+        private const string Float32Halfway = "340282356779733661637539395458142568448";
         private readonly JObject schema;
         private readonly int maxDepth, maxNodes;
         private readonly bool normalize;
         private int nodes;
+        // Message name -> original Proto field name -> JSON name.
+        private readonly Dictionary<string, Dictionary<string, string>> aliases = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
 
         public WireValidator(JObject schema) : this(schema, MaxDepth, ProtocolMaxNodes, false)
         {
@@ -174,6 +181,77 @@ namespace TabForge.Protocol
             return body;
         }
 
+        // Days from 1970-01-01, proleptic Gregorian; year 0 is allowed (offsets can reach year 1).
+        private static long CivilDays(int year, int month, int day)
+        {
+            long y = year + 400 - (month <= 2 ? 1 : 0), era = y / 400, yoe = y - era * 400;
+            long doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+            return era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468 - 146097;
+        }
+
+        private static int DaysInMonth(int year, int month)
+        {
+            if (month == 2)
+                return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) ? 29 : 28;
+            return new[] { 31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }[month - 1];
+        }
+
+        // Go protojson Timestamp input: time.Parse(time.RFC3339Nano), then 0001-01-01 to
+        // 9999-12-31 in UTC and at most 9 digits after ".". Like Go: any offset (hours to 24,
+        // minutes to 60), a one-digit hour, and "," before a fraction of any length.
+        public static bool ProtoTimestamp(string value)
+        {
+            var match = value == null ? null : TimestampPattern.Match(value);
+            if (match == null || !match.Success)
+                return false;
+            Func<int, int> group = index => int.Parse(match.Groups[index].Value, CultureInfo.InvariantCulture);
+            int year = group(1), month = group(2), day = group(3), hour = group(4), minute = group(5), second = group(6);
+            if ((match.Groups[7].Value == "." && match.Groups[8].Length > 9) || month < 1 || month > 12 || day < 1 || day > DaysInMonth(year, month) || hour > 23 || minute > 59 || second > 59)
+                return false;
+            long offset = 0;
+            if (match.Groups[9].Success)
+            {
+                int hours = group(10), minutes = group(11);
+                if (hours > 24 || minutes > 60)
+                    return false;
+                offset = (match.Groups[9].Value == "-" ? -1 : 1) * (hours * 3600L + minutes * 60L);
+            }
+            var seconds = CivilDays(year, month, day) * 86400L + hour * 3600L + minute * 60L + second - offset;
+            return seconds >= -62135596800L && seconds <= 253402300799L;
+        }
+
+        // Go protojson Duration input: optional sign, integer and/or "." with up to 9 digits
+        // ("1.s", ".5s" and ".s" are accepted), then "s", within 315576000000 seconds.
+        public static bool ProtoDuration(string value)
+        {
+            var match = value == null ? null : DurationPattern.Match(value);
+            if (match == null || !match.Success || (!match.Groups[1].Success && !match.Groups[2].Success))
+                return false;
+            var seconds = match.Groups[1].Value;
+            return seconds.Length < 12 || (seconds.Length == 12 && string.CompareOrdinal(seconds, "315576000000") <= 0);
+        }
+
+        // Whether JSON number text is below 2^128 - 2^103 in magnitude, compared exactly.
+        public static bool BelowFloat32Limit(string text)
+        {
+            var match = text == null ? null : JsonNumber.Match(text);
+            if (match == null || !match.Success)
+                return false;
+            // The value is 0.<digits> * 10^exponent.
+            var digits = match.Groups[1].Value + match.Groups[2].Value;
+            long exponent = match.Groups[1].Length;
+            if (match.Groups[3].Success)
+            {
+                if (!long.TryParse(match.Groups[3].Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var shift))
+                    return match.Groups[3].Value.StartsWith("-", StringComparison.Ordinal);
+                exponent += shift;
+            }
+            var significant = digits.TrimStart('0');
+            exponent -= digits.Length - significant.Length;
+            significant = significant.TrimEnd('0');
+            return significant.Length == 0 || exponent < Float32Halfway.Length || (exponent == Float32Halfway.Length && string.CompareOrdinal(significant, Float32Halfway) < 0);
+        }
+
         private static bool IntegerKind(string kind, out bool signed, out int bits)
         {
             signed = kind == "int32" || kind == "sint32" || kind == "sfixed32" || kind == "int64" || kind == "sint64" || kind == "sfixed64";
@@ -234,13 +312,37 @@ namespace TabForge.Protocol
             if (shape == null || record == null)
                 Fail(path, "known message object");
             var declared = (JObject)shape["fields"];
+            if (!aliases.TryGetValue(type, out var protoNames))
+            {
+                protoNames = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var field in declared.Properties())
+                    if ((field.Value as JObject)?["protoName"]?.Type == JTokenType.String && declared.Property((string)field.Value["protoName"]) == null)
+                        protoNames[(string)field.Value["protoName"]] = field.Name;
+                aliases[type] = protoNames;
+            }
+
+            // A member is spelled as the JSON name or the original Proto name; like Go protojson,
+            // a field given twice (also once in each spelling) is rejected.
+            var spelled = new Dictionary<string, JProperty>(StringComparer.Ordinal);
+            var members = new List<KeyValuePair<JProperty, string>>();
+            foreach (var entry in record.Properties().ToList())
+            {
+                if (skipType && entry.Name == "@type")
+                    continue;
+                var jsonName = declared.Property(entry.Name) != null ? entry.Name : protoNames.TryGetValue(entry.Name, out var alias) ? alias : null;
+                if (jsonName == null)
+                    Fail(path + "." + entry.Name, "declared field");
+                if (spelled.ContainsKey(jsonName))
+                    Fail(path + "." + entry.Name, "field given once");
+                spelled[jsonName] = entry;
+                members.Add(new KeyValuePair<JProperty, string>(entry, jsonName));
+            }
+
             Func<string, bool> present = name =>
             {
-                var property = record.Property(name);
-                if (property == null)
+                if (!spelled.TryGetValue(name, out var property))
                     return false;
-                var field = declared[name] as JObject;
-                return property.Value.Type != JTokenType.Null || field == null || Nullable(field);
+                return property.Value.Type != JTokenType.Null || Nullable((JObject)declared[name]);
             };
             foreach (var group in shape["oneofs"] as JArray ?? new JArray())
                 if (((JArray)group).Count(field => present((string)field)) > 1)
@@ -248,14 +350,13 @@ namespace TabForge.Protocol
             foreach (var field in declared.Properties())
                 if ((bool?)field.Value["required"] == true && !present(field.Name))
                     Fail(path, "required " + field.Name);
-            foreach (var entry in record.Properties().ToList())
+            foreach (var member in members)
             {
-                if (skipType && entry.Name == "@type")
-                    continue;
-                var field = declared[entry.Name] as JObject;
+                var entry = member.Key;
+                var field = declared[member.Value] as JObject;
                 var next = path + "." + entry.Name;
                 if (field == null)
-                    Fail(next, "declared field");
+                    Fail(next, "field schema");
                 if (entry.Value.Type == JTokenType.Null && !Nullable(field))
                 {
                     if (normalize)
@@ -313,6 +414,9 @@ namespace TabForge.Protocol
                     if (normalize && !ReferenceEquals(result, entry.Value))
                         entry.Value = result;
                 }
+
+                if (normalize && entry.Name != member.Value)
+                    entry.Replace(new JProperty(member.Value, entry.Value));
             }
 
             return record;
@@ -330,14 +434,14 @@ namespace TabForge.Protocol
 
             if (name == "Timestamp")
             {
-                if (value?.Type != JTokenType.String || !Regex.IsMatch((string)value, @"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?Z\z") || !DateTime.TryParseExact(((string)value).Substring(0, 19), "yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
-                    Fail(path, "canonical UTC timestamp");
+                if (value?.Type != JTokenType.String || !ProtoTimestamp((string)value))
+                    Fail(path, "RFC 3339 timestamp in range");
                 return true;
             }
 
             if (name == "Duration")
             {
-                if (value?.Type != JTokenType.String || !Regex.IsMatch((string)value, @"\A-?(0|[1-9][0-9]*)(?:\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?s\z") || !decimal.TryParse(((string)value).TrimEnd('s'), NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var duration) || Math.Abs(decimal.Truncate(duration)) > 315576000000m)
+                if (value?.Type != JTokenType.String || !ProtoDuration((string)value))
                     Fail(path, "duration in range");
                 return true;
             }
@@ -395,7 +499,8 @@ namespace TabForge.Protocol
                 if (fields["@type"]?.Type != JTokenType.String)
                     Fail(path, "Any @type");
                 var nestedType = ((string)fields["@type"]).Split('/').Last();
-                if (nestedType == type || schema["messages"]?[nestedType] == null)
+                // An Any may hold another Any; the depth budget bounds the recursion.
+                if (schema["messages"]?[nestedType] == null)
                     Fail(path, "known Any type");
                 var members = fields.Properties().Where(property => property.Name != "@type").ToList();
                 if (nestedType == "google.protobuf.Empty" && members.Count == 0)
@@ -452,8 +557,21 @@ namespace TabForge.Protocol
                 var ok = value?.Type == JTokenType.String
                     ? JsonNumber.IsMatch((string)value) && double.TryParse((string)value, NumberStyles.Float, CultureInfo.InvariantCulture, out floating) && !double.IsInfinity(floating)
                     : Number(value, out floating);
-                if (!ok || (kind == "float" && Math.Abs(floating) >= 3.4028235677973366e38))
+                if (!ok)
                     Fail(path, kind);
+                if (kind == "float")
+                {
+                    // Go keeps float32, rounded once from the exact decimal: 3.40282356e+38 becomes
+                    // 3.4028235e+38 and 1e-50 becomes 0.
+                    // Near 2^128 - 2^103 decide on the text: a double can round either way there.
+                    var nearLimit = Math.Abs(Math.Abs(floating) - Float32Limit) <= Float32Limit * 1e-12;
+                    var text = value.Type == JTokenType.String ? (string)value : NumberText(value);
+                    if (nearLimit ? !BelowFloat32Limit(text) : Math.Abs(floating) > Float32Limit)
+                        Fail(path, kind);
+                    var rounded = nearLimit ? Math.Sign(floating) * (double)float.MaxValue : (double)(float)floating;
+                    return value.Type == JTokenType.Integer && rounded == floating ? value : Canonical(value, new JValue(rounded));
+                }
+
                 return value.Type == JTokenType.Integer || value.Type == JTokenType.Float ? value : new JValue(floating);
             }
 

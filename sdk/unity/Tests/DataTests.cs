@@ -28,6 +28,12 @@ internal static class DataTests
         Check(normalized.SelectTokens("$..*").All(token => token.Type != JTokenType.Raw), "Raw numbers must be normalized");
         var mapped = loader.Decode("tabforge.demo.config.Tables", @"{""byId"":{""+1"":{},""02"":{}}}");
         Check(string.Join(",", ((JObject)mapped["byId"]).Properties().Select(p => p.Name)) == "1,2", "Canonical map keys");
+        // float fields hold Go's float32 value; Proto names come back as JSON names.
+        var spelled = (JObject)loader.Decode("tabforge.demo.config.Item", @"{""weight"":3.40282356e+38,""price"":1e-50,""unlock_level"":5,""icon_hash"":""AAF""}");
+        Check((double)spelled["weight"] == (double)float.MaxValue && (double)spelled["price"] == 1e-50, "float32 weight: " + spelled.ToString(Newtonsoft.Json.Formatting.None));
+        Check((long)spelled["unlockLevel"] == 5 && spelled["unlock_level"] == null && (string)spelled["iconHash"] == "AAE=", "Proto names: " + spelled.ToString(Newtonsoft.Json.Formatting.None));
+        Check((double)loader.Decode("tabforge.demo.config.Item", @"{""weight"":1e-50}")["weight"] == 0 && (double)loader.Decode("tabforge.demo.config.Item", @"{""weight"":16777217}")["weight"] == 16777216, "float32 rounding");
+        Check(WireValidator.ProtoTimestamp("0000-12-31T23:59:59-00:01") && !WireValidator.ProtoTimestamp("0001-01-01T00:00:00+00:01") && WireValidator.ProtoDuration(".5s") && !WireValidator.ProtoDuration("-s"), "Go Timestamp and Duration ranges");
 
         // 20,000 rows, 180,002 JSON values: above the network budget, inside the data budget.
         var rows = new StringBuilder(@"{""items"":[");

@@ -123,3 +123,27 @@ func _data_tests() -> void:
 	check(not protocol.validate("N", Wire.parse_json(large, Wire.DATA_MAX_NODES).value).is_empty(), "Protocol validator keeps the 100,000-value budget")
 	var request := {"id": 5, "n": ["1e1"]}
 	check(protocol.validate("N", request).is_empty() and request.id == 5 and request.n == ["1e1"], "Protocol validation does not rewrite requests")
+	_shared_cases()
+
+# examples/backend/cases.json records Go protojson's verdicts; every runtime replays them.
+func _shared_cases() -> void:
+	var root := ProjectSettings.globalize_path("res://").path_join("../..")
+	var schema_file := FileAccess.open(root.path_join("examples/complete/Generated/schema/wire_schema.json"), FileAccess.READ)
+	var cases_file := FileAccess.open(root.path_join("examples/backend/cases.json"), FileAccess.READ)
+	check(schema_file != null and cases_file != null, "Shared cases and example wire schema are readable")
+	if schema_file == null or cases_file == null:
+		return
+	var schema: Dictionary = Wire.parse_json_bytes(schema_file.get_buffer(schema_file.get_length()), Wire.DATA_MAX_NODES).get("value", {})
+	var cases: Variant = Wire.parse_json_bytes(cases_file.get_buffer(cases_file.get_length()), Wire.DATA_MAX_NODES).get("value")
+	check(cases is Array and not schema.is_empty(), "Shared cases parse")
+	if not cases is Array:
+		return
+	var loader := Data.new(schema)
+	for item in cases:
+		var accepted: bool = loader.decode(item.message, item.json) != null
+		check(accepted == item.valid, "Shared wire case %s %s: %s" % [item.message, item.json, loader.error])
+	var spelled: Variant = loader.decode("tabforge.demo.config.Item", "{\"weight\":3.40282356e+38,\"price\":1e-50,\"unlock_level\":5,\"icon_hash\":\"AAF\"}")
+	check(spelled is Dictionary and spelled.weight == (pow(2.0, 24) - 1.0) * pow(2.0, 104) and spelled.price > 0.0, "float32 weight, double price")
+	check(spelled is Dictionary and spelled.get("unlockLevel") == 5 and not spelled.has("unlock_level") and spelled.get("iconHash") == "AAE=", "Proto names normalize to JSON names")
+	var tiny: Variant = loader.decode("tabforge.demo.config.Item", "{\"weight\":1e-50}")
+	check(tiny is Dictionary and tiny.weight == 0.0, "float32 underflow")

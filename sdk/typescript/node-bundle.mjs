@@ -8,7 +8,12 @@ const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const local = name => typeof name === "string" && name !== "" && !/[\\:]/.test(name) && name.split("/").every(p => p && p !== "." && p !== "..");
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
-const utf8 = bytes => new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+// ignoreBOM keeps a UTF-8 BOM in the text, so the JSON parser rejects it as Go does.
+const utf8 = bytes => new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+// Manifest members must be known and spelled exactly, as in every TabForge loader.
+const exact = (value, ...names) => {
+    if (record(value)) for (const name of Object.keys(value)) if (!names.includes(name)) throw new Error(`Unknown data manifest member: ${name}`);
+};
 
 /** Immutable Node.js snapshot of a portable Generated directory. */
 export class DataBundle {
@@ -37,6 +42,12 @@ export class DataBundle {
             return data;
         };
         const manifest = parseJSON(utf8(await read("data_manifest.json")), DATA_LIMITS);
+        exact(manifest, "format", "schemaHash", "descriptor", "wireSchema", "data");
+        if (record(manifest)) {
+            exact(manifest.descriptor, "path", "sha256");
+            exact(manifest.wireSchema, "path", "sha256");
+            if (Array.isArray(manifest.data)) for (const entry of manifest.data) exact(entry, "path", "sha256", "message", "encoding");
+        }
         if (!record(manifest) || manifest.format !== "tabforge.data.v1" || !hash(manifest.schemaHash) || !Array.isArray(manifest.data) || (expectedHash && expectedHash !== manifest.schemaHash)) throw new Error("Invalid manifest or schema hash mismatch");
         await checked(manifest.descriptor);
         const wire = parseJSON(utf8(await checked(manifest.wireSchema)), DATA_LIMITS);

@@ -87,6 +87,32 @@ public final class BackendSmoke {
         bundle.decode("tabforge.demo.config.Tables", "{\"byId\":{\"+1\":{},\"02\":{}}}").getAsJsonObject();
     require(mapped.getAsJsonObject("byId").keySet().equals(new java.util.LinkedHashSet<>(java.util.List.of("1", "2"))), "map keys");
     rejects(() -> bundle.decode("tabforge.demo.config.Tables", "{\"byId\":{\"1\":{},\"01\":{}}}"));
+    // float fields hold Go's float32 value; Proto names come back as JSON names.
+    JsonObject spelled =
+        bundle
+            .decode(
+                "tabforge.demo.config.Item",
+                "{\"weight\":3.40282356e+38,\"price\":1e-50,\"unlock_level\":5,\"icon_hash\":\"AAF\"}")
+            .getAsJsonObject();
+    require(spelled.get("weight").getAsDouble() == (double) Float.MAX_VALUE, "float32 maximum");
+    require(spelled.get("price").getAsDouble() == 1e-50, "double keeps precision");
+    require(spelled.get("unlockLevel").getAsLong() == 5 && !spelled.has("unlock_level"), "JSON name");
+    require(spelled.get("iconHash").getAsString().equals("AAE="), "Proto name bytes");
+    for (String[] pair :
+        new String[][] {{"1e-50", "0.0"}, {"16777217", "1.6777216E7"}, {"3.4028235677973366e+38", "3.4028234663852886E38"}})
+      require(
+          bundle
+                  .decode("tabforge.demo.config.Item", "{\"weight\":" + pair[0] + "}")
+                  .getAsJsonObject()
+                  .get("weight")
+                  .getAsDouble()
+              == Double.parseDouble(pair[1]),
+          "float32 " + pair[0]);
+    rejects(
+        () ->
+            bundle.decode(
+                "tabforge.demo.config.Item",
+                "{\"weight\":3.40282356779733661637539395458142568448e38}"));
     ExecutorService pool = Executors.newFixedThreadPool(4);
     try {
       for (int i = 0; i < 16; i++)
@@ -128,6 +154,24 @@ public final class BackendSmoke {
         manifest.getAsJsonArray("data").get(0).getAsJsonObject().addProperty("path", "../escape");
         Files.writeString(manifestPath, manifest.toString());
         rejects(() -> DataBundle.open(root));
+        // Exact, known manifest members and no byte order mark, as in Go.
+        Files.write(data, original);
+        for (String[] edit :
+            new String[][] {
+              {"\"format\"", "\"FORMAT\""},
+              {"\"format\"", "\"extra\": 1, \"format\""},
+              {"\"sha256\"", "\"SHA256\""},
+              {"\"message\"", "\"note\": \"\", \"message\""}
+            }) {
+          Files.writeString(manifestPath, raw.replaceFirst(java.util.regex.Pattern.quote(edit[0]), edit[1]));
+          rejects(() -> DataBundle.open(root));
+        }
+        Files.write(
+            manifestPath,
+            ("\uFEFF" + raw).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        rejects(() -> DataBundle.open(root));
+        Files.writeString(manifestPath, raw);
+        require(DataBundle.open(root).schemaHash().equals(bundle.schemaHash()), "restored bundle");
       } finally {
         Files.writeString(manifestPath, raw);
       }

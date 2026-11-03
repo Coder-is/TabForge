@@ -134,12 +134,93 @@ inline bool ProtoBytes(const FString& Value, FString& Out) {
     if (Rest == 3) Out += TEXT("=");
     return true;
 }
+// Whether JSON number text is below 2^128 - 2^103 in magnitude, compared exactly:
+// Go rounds the decimal once to float32, and from there it overflows.
+inline bool BelowFloat32Limit(const FString& Text) {
+    bool Negative; FString Int, Frac, Exp;
+    if (!NumberParts(Text, Negative, Int, Frac, Exp)) return false;
+    // The value is 0.<Digits> * 10^Exponent (Int is empty for a leading "0").
+    FString Digits = Int + Frac; int64 Exponent = Int.Len();
+    if (!Exp.IsEmpty()) {
+        const bool ExpNegative = Exp[0] == '-';
+        int32 K = (Exp[0] == '+' || Exp[0] == '-') ? 1 : 0;
+        while (K < Exp.Len() && Exp[K] == '0') ++K;
+        if (Exp.Len() - K > 10) return ExpNegative;
+        int64 Shift = 0; for (; K < Exp.Len(); ++K) Shift = Shift * 10 + (Exp[K] - '0');
+        Exponent += ExpNegative ? -Shift : Shift;
+    }
+    int32 Lead = 0; while (Lead < Digits.Len() && Digits[Lead] == '0') ++Lead;
+    Digits = Digits.Mid(Lead); Exponent -= Lead;
+    while (!Digits.IsEmpty() && Digits[Digits.Len() - 1] == '0') Digits.LeftChopInline(1);
+    const FString Limit = TEXT("340282356779733661637539395458142568448");
+    return Digits.IsEmpty() || Exponent < Limit.Len() || (Exponent == Limit.Len() && Digits.Compare(Limit, ESearchCase::CaseSensitive) < 0);
+}
+// Go protojson Timestamp input: time.Parse(time.RFC3339Nano), then 0001-01-01 to
+// 9999-12-31 in UTC and at most 9 digits after ".". Like Go: any offset (hours to
+// 24, minutes to 60), a one-digit hour, and "," before a fraction of any length.
+inline bool ProtoTimestamp(const FString& Value) {
+    int32 I = 0; const int32 N = Value.Len();
+    auto Fixed = [&](int32 Count, int64& Number) {
+        Number = 0;
+        for (int32 K = 0; K < Count; ++K, ++I) { if (I >= N || !Digit(Value[I])) return false; Number = Number * 10 + (Value[I] - '0'); }
+        return true;
+    };
+    auto Take = [&](TCHAR Ch) { if (I >= N || Value[I] != Ch) return false; ++I; return true; };
+    int64 Year = 0, Month = 0, Day = 0, Hour = 0, Minute = 0, Second = 0, Offset = 0;
+    if (!Fixed(4, Year) || !Take('-') || !Fixed(2, Month) || !Take('-') || !Fixed(2, Day) || !Take('T') || I >= N || !Digit(Value[I])) return false;
+    Hour = Value[I++] - '0';
+    if (I < N && Digit(Value[I])) Hour = Hour * 10 + (Value[I++] - '0');
+    if (!Take(':') || !Fixed(2, Minute) || !Take(':') || !Fixed(2, Second)) return false;
+    if (I < N && (Value[I] == '.' || Value[I] == ',')) {
+        const bool Period = Value[I++] == '.'; const int32 Start = I;
+        while (I < N && Digit(Value[I])) ++I;
+        if (I == Start || (Period && I - Start > 9)) return false;
+    }
+    if (!Take('Z')) {
+        if (I >= N || (Value[I] != '+' && Value[I] != '-')) return false;
+        const bool West = Value[I++] == '-'; int64 Hours = 0, Minutes = 0;
+        if (!Fixed(2, Hours) || !Take(':') || !Fixed(2, Minutes) || Hours > 24 || Minutes > 60) return false;
+        Offset = (West ? -1 : 1) * (Hours * 3600 + Minutes * 60);
+    }
+    static const int32 Days[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    const bool Leap = Year % 4 == 0 && (Year % 100 != 0 || Year % 400 == 0);
+    if (I != N || Month < 1 || Month > 12 || Day < 1 || Day > Days[Month - 1] + (Month == 2 && Leap ? 1 : 0) || Hour > 23 || Minute > 59 || Second > 59) return false;
+    // Days from 1970-01-01 (year 0 allowed: an offset can reach year 1), shifted by 400 years.
+    const int64 Y = Year + 400 - (Month <= 2 ? 1 : 0), Era = Y / 400, Yoe = Y - Era * 400;
+    const int64 Doy = (153 * ((Month + 9) % 12) + 2) / 5 + Day - 1;
+    const int64 Seconds = (Era * 146097 + Yoe * 365 + Yoe / 4 - Yoe / 100 + Doy - 719468 - 146097) * 86400 + Hour * 3600 + Minute * 60 + Second - Offset;
+    return Seconds >= -62135596800LL && Seconds <= 253402300799LL;
+}
+// Go protojson Duration input: optional sign, integer and/or "." with up to 9
+// digits ("1.s", ".5s" and ".s" are accepted), then "s", within 315576000000 s.
+inline bool ProtoDuration(const FString& Value) {
+    const int32 End = Value.Len() - 1;
+    if (End < 1 || Value[End] != 's') return false;
+    int32 I = (Value[0] == '+' || Value[0] == '-') ? 1 : 0;
+    const int32 Start = I;
+    if (I < End && Value[I] == '0') ++I;
+    else while (I < End && Digit(Value[I])) ++I;
+    const int32 Length = I - Start;
+    bool Fraction = false;
+    if (I < End && Value[I] == '.') {
+        Fraction = true; const int32 First = ++I;
+        while (I < End && Digit(Value[I])) ++I;
+        if (I - First > 9) return false;
+    }
+    if (I != End || (Length == 0 && !Fraction)) return false;
+    return Length < 12 || (Length == 12 && Value.Mid(Start, Length).Compare(TEXT("315576000000"), ESearchCase::CaseSensitive) <= 0);
+}
 
 // A parsed document plus the exact source text of every number in it.
 struct FJsonDocument {
     TSharedPtr<FJsonValue> Root;
     TMap<const FJsonValue*, FString> Numbers;
     TArray<TSharedPtr<FJsonValue>> NumberValues; // keeps Numbers keys alive
+    // Set when an object has member names that differ only by case ({"hp":1,"HP":2}).
+    // That is valid ProtoJSON (for example map<string, V> keys), but FJsonObject
+    // matches names case-insensitively and cannot hold both, so Parse fails
+    // rather than silently dropping a member.
+    bool bCaseFoldedKeys = false;
 };
 inline FString Utf8Text(const std::string& Text) { FUTF8ToTCHAR Converted(Text.data(), static_cast<int32>(Text.size())); return FString(Converted.Length(), Converted.Get()); }
 class FJsonBuilder final : public tabforge::JsonVisitor {
@@ -156,9 +237,12 @@ public:
     explicit FJsonBuilder(FJsonDocument& InDocument) : Document(InDocument) {}
     bool begin_object() override { FFrame Frame; Frame.Object = MakeShared<FJsonObject>(); Stack.Add(MoveTemp(Frame)); return true; }
     bool key(const std::string& Name) override {
-        // FJsonObject cannot hold members that differ only by case; reject instead of overwriting.
+        // Exact duplicates were rejected by JsonSyntax. FJsonObject cannot hold members
+        // that differ only by case; fail (see FJsonDocument) instead of overwriting.
         FFrame& Top = Stack.Last(); Top.Key = Utf8Text(Name);
-        return !Top.Object->Values.Contains(Top.Key);
+        if (!Top.Object->Values.Contains(Top.Key)) return true;
+        Document.bCaseFoldedKeys = true;
+        return false;
     }
     bool end_object() override { FFrame Frame = Stack.Pop(); return Add(MakeShared<FJsonValueObject>(Frame.Object)); }
     bool begin_array() override { Stack.Add(FFrame()); return true; }
@@ -249,8 +333,17 @@ class Validator {
                 Number = FCString::Atod(*Special);
             } else if (Value->Type == EJson::Number) Number = Value->AsNumber();
             else return Fail(Path, Kind);
-            // Go emits float32 max as 3.4028235e+38; accept values that round to a finite float32.
-            if (!FMath::IsFinite(Number) || (Kind == TEXT("float") && FMath::Abs(Number) >= 3.4028235677973366e38)) return Fail(Path, Kind);
+            if (!FMath::IsFinite(Number)) return Fail(Path, Kind);
+            if (Kind == TEXT("float")) {
+                // Go keeps float32, rounded once from the exact decimal: 3.40282356e+38 becomes
+                // 3.4028235e+38 and 1e-50 becomes 0. Decimals from 2^128 - 2^103 up overflow;
+                // rounding through a double differs only for text rounding to that threshold.
+                const double Limit = 3.4028235677973366e38, Float32Max = 3.4028234663852886e38;
+                FString Text;
+                if (FMath::Abs(Number) > Limit || (FMath::Abs(Number) == Limit && (!NumberSource(Value, Text) || !BelowFloat32Limit(Text)))) return Fail(Path, Kind);
+                Out = MakeShared<FJsonValueNumber>(FMath::Abs(Number) == Limit ? (Number < 0 ? -Float32Max : Float32Max) : static_cast<double>(static_cast<float>(Number)));
+                return true;
+            }
             Out = MakeShared<FJsonValueNumber>(Number); return true;
         }
         if (Kind == TEXT("bool")) return Value->Type == EJson::Boolean || Fail(Path, TEXT("boolean"));
@@ -267,18 +360,8 @@ class Validator {
         const FString Name = Type.Mid(16);
         static const TMap<FString, FString> Wrappers { {TEXT("DoubleValue"), TEXT("double")}, {TEXT("FloatValue"), TEXT("float")}, {TEXT("Int64Value"), TEXT("int64")}, {TEXT("UInt64Value"), TEXT("uint64")}, {TEXT("Int32Value"), TEXT("int32")}, {TEXT("UInt32Value"), TEXT("uint32")}, {TEXT("BoolValue"), TEXT("bool")}, {TEXT("StringValue"), TEXT("string")}, {TEXT("BytesValue"), TEXT("bytes")} };
         if (const FString* Kind = Wrappers.Find(Name)) return Scalar(*Kind, FString(), Value, Path, Depth, true, Out);
-        if (Name == TEXT("Timestamp")) {
-            if (Value->Type != EJson::String || !Matches(TEXT("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?Z$"), Value->AsString())) return Fail(Path, TEXT("canonical UTC timestamp"));
-            const FString Stamp = Value->AsString(); const int32 Year = FCString::Atoi(*Stamp.Left(4)), Month = FCString::Atoi(*Stamp.Mid(5, 2)), Day = FCString::Atoi(*Stamp.Mid(8, 2));
-            static const int32 Days[] = {31,28,31,30,31,30,31,31,30,31,30,31};
-            const bool Leap = Year % 4 == 0 && (Year % 100 != 0 || Year % 400 == 0);
-            return (Year >= 1 && Month >= 1 && Month <= 12 && Day >= 1 && Day <= Days[Month - 1] + (Month == 2 && Leap ? 1 : 0) && FCString::Atoi(*Stamp.Mid(11,2)) <= 23 && FCString::Atoi(*Stamp.Mid(14,2)) <= 59 && FCString::Atoi(*Stamp.Mid(17,2)) <= 59) || Fail(Path, TEXT("valid UTC timestamp"));
-        }
-        if (Name == TEXT("Duration")) {
-            if (Value->Type != EJson::String || !Matches(TEXT("^-?(0|[1-9][0-9]*)(?:\\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?s$"), Value->AsString())) return Fail(Path, TEXT("canonical duration"));
-            FString Seconds = Value->AsString().LeftChop(1); Seconds.RemoveFromStart(TEXT("-")); int32 Dot; if (Seconds.FindChar('.', Dot)) Seconds = Seconds.Left(Dot);
-            return (Seconds.Len() < 12 || (Seconds.Len() == 12 && Seconds.Compare(TEXT("315576000000"), ESearchCase::CaseSensitive) <= 0)) || Fail(Path, TEXT("duration range"));
-        }
+        if (Name == TEXT("Timestamp")) return (Value->Type == EJson::String && ProtoTimestamp(Value->AsString())) || Fail(Path, TEXT("RFC 3339 timestamp in range"));
+        if (Name == TEXT("Duration")) return (Value->Type == EJson::String && ProtoDuration(Value->AsString())) || Fail(Path, TEXT("duration in range"));
         if (Name == TEXT("FieldMask")) return (Value->Type == EJson::String && Matches(TEXT("^(?:[A-Za-z][A-Za-z0-9]*(?:\\.[A-Za-z][A-Za-z0-9]*)*(?:,[A-Za-z][A-Za-z0-9]*(?:\\.[A-Za-z][A-Za-z0-9]*)*)*)?$"), Value->AsString())) || Fail(Path, TEXT("field mask"));
         if (Name == TEXT("Value")) return Json(Value, Path, Depth, true);
         if (Name == TEXT("Struct")) {
@@ -298,7 +381,8 @@ class Validator {
             const auto Url = Exact(Fields, TEXT("@type"));
             if (!Url.IsValid() || Url->Type != EJson::String) return Fail(Path, TEXT("Any @type"));
             int32 Slash; const FString NestedType = Url->AsString().FindLastChar('/', Slash) ? Url->AsString().Mid(Slash + 1) : Url->AsString();
-            if (Same(NestedType, Type) || !Exact(FieldObject(Schema, TEXT("messages")), NestedType).IsValid()) return Fail(Path, TEXT("known Any type"));
+            // An Any may hold another Any; the depth budget bounds the recursion.
+            if (!Exact(FieldObject(Schema, TEXT("messages")), NestedType).IsValid()) return Fail(Path, TEXT("known Any type"));
             const int32 Members = Fields->Values.Num() - 1;
             if (Same(NestedType, TEXT("google.protobuf.Empty")) && Members == 0) return true; // Go tolerates an omitted Empty value
             if (NestedType.StartsWith(TEXT("google.protobuf."), ESearchCase::CaseSensitive)) {
@@ -323,9 +407,21 @@ class Validator {
         const auto Shape = FieldObject(FieldObject(Schema, TEXT("messages")), Type); const auto Fields = Object(Value);
         if (!Shape.IsValid() || !Fields.IsValid()) return Fail(Path, TEXT("known message object"));
         const auto Declared = FieldObject(Shape, TEXT("fields")); if (!Declared.IsValid()) return Fail(Path, TEXT("field schema"));
+        // A member is spelled as the JSON name or the original Proto name; like Go
+        // protojson, a field given twice (also once in each spelling) is rejected.
+        TArray<TPair<FString, FString>> Members; // spelling, JSON name
+        for (const auto& Pair : Fields->Values) {
+            if (SkipType && Same(Pair.Key, TEXT("@type"))) continue;
+            const FString JsonName = FieldName(Declared, Pair.Key);
+            if (JsonName.IsEmpty()) return Fail(Path + TEXT(".") + Pair.Key, TEXT("declared field"));
+            for (const auto& Seen : Members) if (Same(Seen.Value, JsonName)) return Fail(Path + TEXT(".") + Pair.Key, TEXT("field given once"));
+            Members.Add(TPair<FString, FString>(Pair.Key, JsonName));
+        }
+        auto Spelling = [&](const FString& JsonName) -> FString { for (const auto& Member : Members) if (Same(Member.Value, JsonName)) return Member.Key; return FString(); };
         // JSON null means "absent" except where null is itself a value.
         auto Present = [&](const FString& Name) {
-            const auto Item = Exact(Fields, Name); if (!Item.IsValid()) return false;
+            const FString Key = Spelling(Name); if (Key.IsEmpty()) return false;
+            const auto Item = Exact(Fields, Key); if (!Item.IsValid()) return false;
             const auto Field = Object(Exact(Declared, Name));
             return Item->Type != EJson::Null || !Field.IsValid() || Nullable(String(Field, TEXT("kind")), String(Field, TEXT("type")));
         };
@@ -336,7 +432,8 @@ class Validator {
         for (auto& Pair : Fields->Values) {
             if (SkipType && Same(Pair.Key, TEXT("@type"))) continue;
             const FString Next = Path + TEXT(".") + Pair.Key;
-            const auto Field = Object(Exact(Declared, Pair.Key));
+            FString JsonName; for (const auto& Member : Members) if (Same(Member.Key, Pair.Key)) { JsonName = Member.Value; break; }
+            const auto Field = Object(Exact(Declared, JsonName));
             if (!Field.IsValid()) return Fail(Next, TEXT("declared field"));
             if (!Pair.Value.IsValid()) return Fail(Next, TEXT("JSON value"));
             const FString Kind = String(Field, TEXT("kind")), FieldType = String(Field, TEXT("type")), KeyKind = String(Field, TEXT("mapKey"));
@@ -372,8 +469,29 @@ class Validator {
                 if (bNormalize) Pair.Value = Normalized;
             }
         }
-        if (bNormalize) for (const FString& Key : Absent) Fields->RemoveField(Key);
+        if (bNormalize) {
+            for (const FString& Key : Absent) Fields->RemoveField(Key);
+            // Members given with the original Proto name are returned under the JSON name.
+            for (const auto& Member : Members) {
+                if (Same(Member.Key, Member.Value)) continue;
+                const TSharedPtr<FJsonValue>* Moved = Fields->Values.Find(Member.Key);
+                if (!Moved) continue; // a null member, already removed
+                const TSharedPtr<FJsonValue> MovedValue = *Moved;
+                Fields->RemoveField(Member.Key);
+                Fields->SetField(Member.Value, MovedValue);
+            }
+        }
         return true;
+    }
+    // JSON name of a member spelled as the JSON name or the original Proto name,
+    // compared case-sensitively; empty when the member is not declared.
+    static FString FieldName(const TSharedPtr<FJsonObject>& Declared, const FString& Member) {
+        if (Exact(Declared, Member).IsValid()) return Member;
+        for (const auto& Pair : Declared->Values) {
+            const auto Field = Object(Pair.Value); FString ProtoName;
+            if (Field.IsValid() && Field->TryGetStringField(TEXT("protoName"), ProtoName) && Same(ProtoName, Member) && !Exact(Declared, ProtoName).IsValid()) return Pair.Key;
+        }
+        return FString();
     }
 public:
     FString Error;

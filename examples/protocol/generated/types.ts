@@ -120,7 +120,8 @@ export const wireSchema = {
         },
         "toolDelta": {
           "kind": "message",
-          "type": "tabforge.example.ToolCallDelta"
+          "type": "tabforge.example.ToolCallDelta",
+          "protoName": "tool_delta"
         },
         "usage": {
           "kind": "message",
@@ -153,7 +154,8 @@ export const wireSchema = {
     "tabforge.example.ChatRequest": {
       "fields": {
         "conversationId": {
-          "kind": "uint64"
+          "kind": "uint64",
+          "protoName": "conversation_id"
         },
         "prompt": {
           "kind": "string"
@@ -181,10 +183,12 @@ export const wireSchema = {
     "tabforge.example.ToolCallDelta": {
       "fields": {
         "argumentsDelta": {
-          "kind": "string"
+          "kind": "string",
+          "protoName": "arguments_delta"
         },
         "callId": {
-          "kind": "string"
+          "kind": "string",
+          "protoName": "call_id"
         },
         "name": {
           "kind": "string"
@@ -194,10 +198,12 @@ export const wireSchema = {
     "tabforge.example.Usage": {
       "fields": {
         "inputTokens": {
-          "kind": "uint64"
+          "kind": "uint64",
+          "protoName": "input_tokens"
         },
         "outputTokens": {
-          "kind": "uint64"
+          "kind": "uint64",
+          "protoName": "output_tokens"
         }
       }
     }

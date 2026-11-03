@@ -343,17 +343,18 @@ Node、Python 的 hash 参数和 Java `open(path)` 可省略；Go 的参数不�
 | enum | 已声明名称或 int32 数值（数值不能写成字符串）；不存在的名称会被拒绝 |
 | bytes | 输入可为标准或 URL 安全 Base64，填充可省略；读取结果为带填充的标准 Base64；Go 消息中是字节切片 |
 | null | 等同于未填写该字段（不计入 oneof / 必填），读取结果中删除；`google.protobuf.Value` / `NullValue` 字段的 null 是取值；数组 / map 中的 null 会被拒绝 |
-| float / double | JSON 数字、`"NaN"`、`"Infinity"`、`"-Infinity"` 或数字字符串（读取结果为数字） |
-| Timestamp / Duration / FieldMask | 保留规范 ProtoJSON 的字符串表示 |
+| 字段名 | JSON 名（`ownerId`）或 proto 原字段名（`owner_id`）均可，同一字段的两种写法同时出现会被拒绝；读取结果统一为 JSON 名。字段名与 map key 区分大小写 |
+| float / double | JSON 数字、`"NaN"`、`"Infinity"`、`"-Infinity"` 或数字字符串（读取结果为数字）；float 与 Go 一样舍入为 float32，如 `3.40282356e+38` 读为 `3.4028235e+38`，`1e-50` 读为 0 |
+| Timestamp / Duration / FieldMask | 输入规则同 Go：Timestamp 为 RFC 3339，可带任意时区偏移与 1～9 位小数，换算为 UTC 后在 0001-01-01 至 9999-12-31 之间；Duration 可带正负号，可写 `1.s`、`.5s`，最多 9 位小数，范围 ±315576000000 秒。读取结果保留原字符串 |
 | Struct / Value / Any | 按内建类型规则校验；Any 的类型必须来自已加载结构 |
 
-已知差异：Go 还接受 proto 原字段名（如 `owner_id`）以及带时区偏移、任意 1～9 位小数的 Timestamp / Duration；其他端只接受 JSON 字段名和规范 UTC / 3、6、9 位小数格式。TabForge 导出的数据始终使用后者。
+所有端拒绝 UTF-8 BOM 与未配对的 UTF-16 代理项转义（如 `"�"`）。清单成员名区分大小写，未知成员会被拒绝。已知差异：Unreal 的 FJsonObject 按不区分大小写的方式保存成员名，无法同时保存仅大小写不同的成员（如 `map<string, int32>` 中的 `hp` 与 `HP`），Unreal 加载端会拒绝此类文档而不是丢弃其中一个。
 
 仅生成结构时可以从配置删除 tables，清单的 data 为 `[]`。此时 `read` 没有可读取条目，但 `decode` 仍可用于校验任意已生成类型，例如 `tabforge.demo.structures.Tree`。
 
 ## 6. 加载、校验与重新加载
 
-所有入口成功返回前，都会校验清单与登记文件的校验值，并校验全部 ProtoJSON。未知字段、oneof 冲突、错误类型、数值溢出、重复 JSON 键（含转义后相同的键）、错误路径、重复路径和文件缺失会使加载失败。
+所有入口成功返回前，都会校验清单与登记文件的校验值，并校验全部 ProtoJSON。未知字段、oneof 冲突、错误类型、数值溢出、重复 JSON 键（含转义后相同的键）、错误路径、重复路径、路径中的符号链接或 Windows 目录联接（junction）以及文件缺失会使加载失败。
 
 数据包中的每个 JSON 文件（清单、wire schema、数据）在所有加载端使用同一预算：嵌套深度不超过 64（根值深度为 0，每进入一层对象 / 数组加 1），JSON 值总数不超过 10,000,000（标量与对象 / 数组各计 1 个，键不计）。超出预算的包在所有端都加载失败，未超出的在所有端都能加载；Go 通过 `databundle.CheckBudget`、`MaxJSONDepth`、`MaxJSONNodes` 公开该预算，Node 为 `DATA_LIMITS`。网络协议消息仍使用 64 层 / 100,000 个值的预算，并受 1 MiB 消息上限约束。2 万行 × 9 个值的表约 18 万个值，可正常加载。Go 还独立重算描述的 schemaHash，并检查 wire schema 与描述一致。其他三端使用清单给出的 schemaHash 与文件校验值，不解析二进制描述。
 

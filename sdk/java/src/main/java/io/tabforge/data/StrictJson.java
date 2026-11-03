@@ -67,6 +67,8 @@ final class StrictJson {
             .onUnmappableCharacter(CodingErrorAction.REPORT)
             .decode(ByteBuffer.wrap(bytes))
             .toString();
+    // Gson skips a leading byte order mark; a BOM is not JSON, as in every TabForge loader.
+    if (text.startsWith("\uFEFF")) throw new IOException("JSON must not start with a byte order mark");
     try (JsonReader reader = new JsonReader(new StringReader(text))) {
       reader.setStrictness(Strictness.STRICT);
       JsonElement value = value(reader, 0, new int[] {0});
@@ -84,7 +86,7 @@ final class StrictJson {
         JsonObject object = new JsonObject();
         reader.beginObject();
         while (reader.hasNext()) {
-          String key = reader.nextName();
+          String key = paired(reader.nextName());
           if (object.has(key)) throw new IOException("Duplicate JSON member: " + key);
           object.add(key, value(reader, depth + 1, nodes));
         }
@@ -97,7 +99,7 @@ final class StrictJson {
         reader.endArray();
         return array;
       case STRING:
-        return new JsonPrimitive(reader.nextString());
+        return new JsonPrimitive(paired(reader.nextString()));
       case NUMBER:
         String number = reader.nextString();
         // Same bound as Gson's own number parsing; BigInteger parsing is superlinear.
@@ -114,6 +116,19 @@ final class StrictJson {
       default:
         throw new IOException("Invalid JSON token");
     }
+  }
+
+  // Gson decodes escaped lone surrogates as they are; Go and the other loaders reject them.
+  private static String paired(String value) throws IOException {
+    for (int i = 0; i < value.length(); i++) {
+      char ch = value.charAt(i);
+      if (Character.isHighSurrogate(ch)
+          && i + 1 < value.length()
+          && Character.isLowSurrogate(value.charAt(i + 1))) i++;
+      else if (Character.isSurrogate(ch))
+        throw new IOException("Unpaired surrogate in JSON string");
+    }
+    return value;
   }
 
   static JsonObject object(JsonElement value) {

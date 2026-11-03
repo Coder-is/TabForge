@@ -21,8 +21,14 @@ export type NumberSources = WeakMap<object, Map<string, string>>;
 export const JSON_ROOT: object = Object.freeze({});
 
 const NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+// In Unicode mode a well-formed surrogate pair is one code point, so this only
+// matches unpaired surrogates. Go and every other TabForge runtime reject them.
+const LONE_SURROGATE = /\p{Cs}/u;
 
-/** Parse strict JSON, rejecting duplicate members (also after unescaping) and oversized input. */
+/**
+ * Parse strict JSON, rejecting duplicate members (also after unescaping),
+ * unpaired surrogates in strings and keys (e.g. "\ud800") and oversized input.
+ */
 export function parseJSON(text: string, limits: JSONLimits = PROTOCOL_LIMITS, sources?: NumberSources): unknown {
     let pos = 0, nodes = 0;
     const fail = (): never => { throw new Error(`Invalid JSON at offset ${pos}`); };
@@ -35,12 +41,17 @@ export function parseJSON(text: string, limits: JSONLimits = PROTOCOL_LIMITS, so
     };
     const string = (): string => {
         const start = pos++;
-        let escaped = false;
+        let escaped = false, surrogate = false;
         while (pos < text.length) {
             const code = text.charCodeAt(pos++);
-            if (code === 34) return escaped ? JSON.parse(text.slice(start, pos)) as string : text.slice(start + 1, pos - 1);
+            if (code === 34) {
+                const result = escaped ? JSON.parse(text.slice(start, pos)) as string : text.slice(start + 1, pos - 1);
+                if ((escaped || surrogate) && LONE_SURROGATE.test(result)) fail();
+                return result;
+            }
             if (code < 32) fail();
             if (code === 92) { escaped = true; pos++; }
+            else if (code >= 0xd800 && code <= 0xdfff) surrogate = true;
         }
         return fail();
     };

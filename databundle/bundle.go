@@ -13,6 +13,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -127,8 +129,9 @@ func OpenFS(fsys fs.FS, dir, expectedHash string) (*Bundle, error) {
 			}
 			for _, entry := range entries {
 				// Case-insensitive volumes resolve "DATA" through a symlink named "data".
-				if strings.EqualFold(entry.Name(), part) && entry.Type()&fs.ModeSymlink != 0 {
-					return nil, fmt.Errorf("symlink bundle path %q", name)
+				// Windows junctions and other reparse points report ModeIrregular.
+				if strings.EqualFold(entry.Name(), part) && entry.Type()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+					return nil, fmt.Errorf("symlink or junction bundle path %q", name)
 				}
 			}
 			parent = path.Join(parent, part)
@@ -150,6 +153,9 @@ func OpenFS(fsys fs.FS, dir, expectedHash string) (*Bundle, error) {
 		return nil, err
 	}
 	if err := protocol.ValidateJSON(raw); err != nil {
+		return nil, err
+	}
+	if err := exactManifest(raw); err != nil {
 		return nil, err
 	}
 	var m Manifest
@@ -202,15 +208,11 @@ func OpenFS(fsys fs.FS, dir, expectedHash string) (*Bundle, error) {
 	if err := protocol.ValidateJSON(wire); err != nil {
 		return nil, err
 	}
-	var actual protocol.WireSchema
-	d = json.NewDecoder(bytes.NewReader(wire))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&actual); err != nil {
+	var actual any
+	if err := json.Unmarshal(wire, &actual); err != nil {
 		return nil, err
 	}
-	a, _ := json.Marshal(actual)
-	b, _ := json.Marshal(s.WireSchema())
-	if !bytes.Equal(a, b) {
+	if schema := s.WireSchema(); !sameWireSchema(actual, schema, false) && !sameWireSchema(actual, schema, true) {
 		return nil, fmt.Errorf("wire schema does not match descriptor")
 	}
 	bundle := &Bundle{manifest: m, schema: s, data: map[string]proto.Message{}}
@@ -234,6 +236,65 @@ func OpenFS(fsys fs.FS, dir, expectedHash string) (*Bundle, error) {
 		bundle.data[entry.Path] = msg
 	}
 	return bundle, nil
+}
+
+// sameWireSchema compares JSON values, not structs: encoding/json would match
+// member names case-insensitively, while every other loader reads them exactly.
+// With legacy set, the expected schema omits protoName as packages exported
+// before it existed do; loaders treat a missing protoName as no alias.
+func sameWireSchema(actual any, schema protocol.WireSchema, legacy bool) bool {
+	if legacy {
+		messages := map[string]protocol.MessageShape{}
+		for name, message := range schema.Messages {
+			fields := map[string]protocol.FieldShape{}
+			for key, field := range message.Fields {
+				field.ProtoName = ""
+				fields[key] = field
+			}
+			message.Fields = fields
+			messages[name] = message
+		}
+		schema.Messages = messages
+	}
+	var expected any
+	canonical, _ := json.Marshal(schema)
+	return json.Unmarshal(canonical, &expected) == nil && reflect.DeepEqual(actual, expected)
+}
+
+// exactManifest requires exactly spelled, known members at every level of the
+// manifest. encoding/json alone matches names case-insensitively ("FORMAT"),
+// and every TabForge loader must accept and reject the same manifests.
+func exactManifest(raw []byte) error {
+	members := func(value json.RawMessage, allowed ...string) (map[string]json.RawMessage, error) {
+		var object map[string]json.RawMessage
+		if json.Unmarshal(value, &object) != nil {
+			return nil, nil // not an object: the typed decode reports it
+		}
+		for name := range object {
+			if !slices.Contains(allowed, name) {
+				return nil, fmt.Errorf("unknown data manifest member %q", name)
+			}
+		}
+		return object, nil
+	}
+	top, err := members(raw, "format", "schemaHash", "descriptor", "wireSchema", "data")
+	if err != nil {
+		return err
+	}
+	for _, name := range []string{"descriptor", "wireSchema"} {
+		if _, err := members(top[name], "path", "sha256"); err != nil {
+			return err
+		}
+	}
+	var entries []json.RawMessage
+	if json.Unmarshal(top["data"], &entries) == nil {
+		for _, entry := range entries {
+			if _, err := members(entry, "path", "sha256", "message", "encoding"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func local(name string) bool {

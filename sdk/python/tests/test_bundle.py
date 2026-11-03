@@ -1,7 +1,9 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -79,6 +81,37 @@ class BundleTests(unittest.TestCase):
         self.assertIsNone(proto_map_key("+1", "uint32"))
         self.assertEqual(proto_bytes("-_-_"), "+/+/")
         self.assertIsNone(proto_bytes("AA+_"))
+        # float fields hold Go's float32 value; Proto names come back as JSON names.
+        item = bundle.decode("tabforge.demo.config.Item", '{"weight":3.40282356e+38,"price":1e-50,"unlock_level":5,"text_effect":"x","icon_hash":"AAF"}')
+        self.assertEqual(item, {"weight": 3.4028234663852886e38, "price": 1e-50, "unlockLevel": 5, "textEffect": "x", "iconHash": "AAE="})
+        for text, weight in [("1e-50", 0.0), ("16777217", 16777216.0), ("3.4028235677973366e+38", 3.4028234663852886e38), ('"0.1"', 0.10000000149011612), ("1", 1)]:
+            self.assertEqual(bundle.decode("tabforge.demo.config.Item", '{"weight":%s}' % text)["weight"], weight, text)
+        with self.assertRaises(ValueError):
+            bundle.decode("tabforge.demo.config.Item", '{"weight":3.40282356779733661637539395458142568448e38}')
+        self.assertEqual(bundle.decode("tabforge.demo.config.Item", '{"metadata":{"@type":"type.googleapis.com/tabforge.demo.common.Reward","item_id":"5"}}')["metadata"],
+                         {"@type": "type.googleapis.com/tabforge.demo.common.Reward", "itemId": 5})
+
+    def test_manifest_members_bom_and_junctions_match_go(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "Generated"
+            shutil.copytree(ROOT / "examples/complete/Generated", root)
+            manifest_path = root / "data_manifest.json"
+            original = manifest_path.read_text(encoding="utf-8")
+            DataBundle.open(root)
+            for old, new in [('"format"', '"FORMAT"'), ('"format"', '"extra": 1, "format"'), ('"sha256"', '"SHA256"'), ('"descriptor": {', '"descriptor": {"size": 1, '), ('"message"', '"note": "", "message"')]:
+                manifest_path.write_text(original.replace(old, new, 1), encoding="utf-8")
+                with self.assertRaises(ValueError, msg=new):
+                    DataBundle.open(root)
+            manifest_path.write_bytes(b"\xef\xbb\xbf" + original.encode("utf-8"))
+            with self.assertRaises(ValueError):
+                DataBundle.open(root)
+            manifest_path.write_text(original, encoding="utf-8")
+            if os.name == "nt":
+                data = root / "data"
+                data.rename(root / "data.old")
+                if subprocess.run(["cmd", "/c", "mklink", "/J", str(data), str(root / "data.old")], capture_output=True).returncode == 0:
+                    with self.assertRaisesRegex(ValueError, "junction"):
+                        DataBundle.open(root)
 
     def test_data_budget(self):
         nested = lambda depth: "[" * depth + "0" + "]" * depth

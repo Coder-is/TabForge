@@ -23,7 +23,7 @@ const transport = new FetchTransport(baseURL, protocolVersion, globalThis.fetch,
 });
 ```
 
-生成规则描述 ProtoJSON 的输出形态：64 位整数必须为十进制字符串，默认字段可省略，非有限浮点数为标准字符串，bytes 为有填充的标准 Base64。Timestamp、Duration 等按输出规则检查。Any 的类型必须存在于描述包中。Go 输入仍使用标准 ProtoJSON 解码器，同时额外拒绝重复 JSON 成员与过深输入。此 SDK 验证不声称代替官方全部 ProtoJSON conformance 测试。
+生成规则描述 ProtoJSON 的输出形态：64 位整数必须为十进制字符串，默认字段可省略，非有限浮点数为标准字符串，bytes 为有填充的标准 Base64。Timestamp、Duration 按 Go protojson 的输入规则检查（可带时区偏移与 1～9 位小数），字段名可为 JSON 名或 proto 原字段名。Any 的类型必须存在于描述包中。Go 输入仍使用标准 ProtoJSON 解码器，同时额外拒绝重复 JSON 成员与过深输入。此 SDK 验证不声称代替官方全部 ProtoJSON conformance 测试。
 
 ## HTTP 服务
 

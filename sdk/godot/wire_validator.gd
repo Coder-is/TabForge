@@ -30,6 +30,8 @@ var normalize: bool
 var result: Variant
 var _nodes := 0
 var _error := ""
+# Message name -> {original Proto field name: JSON name}.
+var _aliases := {}
 
 func _init(wire_schema: Dictionary = {}, node_budget: int = PROTOCOL_MAX_NODES, normalize_values: bool = false) -> void:
 	schema = wire_schema
@@ -256,13 +258,24 @@ static func _nullable(field: Dictionary) -> bool:
 	var type_name: String = field.get("type", "")
 	return (kind == "message" and type_name == "google.protobuf.Value") or (kind == "enum" and type_name == "google.protobuf.NullValue")
 
-# JSON null means "field absent" except where null is itself a value.
-static func _present(fields: Dictionary, shapes: Dictionary, name: String) -> bool:
-	if not fields.has(name):
+# JSON null means "field absent" except where null is itself a value. spelled
+# maps each JSON name to the member spelling it was given with.
+static func _present(fields: Dictionary, shapes: Dictionary, spelled: Dictionary, name: String) -> bool:
+	if not spelled.has(name):
 		return false
-	if typeof(fields[name]) != TYPE_NIL or not shapes.has(name):
+	if typeof(fields[spelled[name]]) != TYPE_NIL:
 		return true
 	return _nullable(shapes[name])
+
+func _proto_names(type_name: String, shapes: Dictionary) -> Dictionary:
+	if not _aliases.has(type_name):
+		var names := {}
+		for json_name in shapes:
+			var proto_name: Variant = shapes[json_name].get("protoName")
+			if proto_name is String and not shapes.has(proto_name):
+				names[proto_name] = json_name
+		_aliases[type_name] = names
+	return _aliases[type_name]
 
 func _message(type_name: String, value: Variant, path: String, depth: int, counted: bool, skip_type: bool) -> Variant:
 	if not counted and not _budget(path, depth):
@@ -279,21 +292,38 @@ func _message(type_name: String, value: Variant, path: String, depth: int, count
 	var shape: Dictionary = messages[type_name]
 	var shapes: Dictionary = shape.get("fields", {})
 	var fields: Dictionary = value
+	var proto_names := _proto_names(type_name, shapes)
+	# A member is spelled as the JSON name or the original Proto name; like Go
+	# protojson, a field given twice (also once in each spelling) is rejected.
+	var spelled := {}
+	var members: Array = []
+	for key in fields.keys():
+		if skip_type and key is String and key == "@type":
+			continue
+		var json_name := ""
+		if key is String and shapes.has(key):
+			json_name = key
+		elif key is String:
+			json_name = proto_names.get(key, "")
+		if json_name.is_empty():
+			_fail(path + "." + str(key), "declared field"); return null
+		if spelled.has(json_name):
+			_fail(path + "." + str(key), "field given once"); return null
+		spelled[json_name] = key
+		members.append([key, json_name])
 	for group in shape.get("oneofs", []):
 		var count := 0
 		for name in group:
-			if _present(fields, shapes, name): count += 1
+			if _present(fields, shapes, spelled, name): count += 1
 		if count > 1:
 			_fail(path, "at most one oneof member"); return null
 	for name in shapes:
-		if shapes[name].get("required", false) and not _present(fields, shapes, name):
+		if shapes[name].get("required", false) and not _present(fields, shapes, spelled, name):
 			_fail(path + "." + name, "required field"); return null
-	for name in fields.keys():
-		if skip_type and name is String and name == "@type":
-			continue
-		if not name is String or not shapes.has(name):
-			_fail(path + "." + str(name), "declared field"); return null
-		var field: Dictionary = shapes[name]
+	for member in members:
+		var name: String = member[0]
+		var canonical_name: String = member[1]
+		var field: Dictionary = shapes[canonical_name]
 		var item: Variant = fields[name]
 		var next: String = path + "." + name
 		if typeof(item) == TYPE_NIL and not _nullable(field):
@@ -336,6 +366,9 @@ func _message(type_name: String, value: Variant, path: String, depth: int, count
 			if not _error.is_empty():
 				return null
 			if normalize: fields[name] = single
+		if normalize and name != canonical_name:
+			fields[canonical_name] = fields[name]
+			fields.erase(name)
 	return fields
 
 # [value] for types with a special JSON form, [] otherwise.
@@ -380,7 +413,8 @@ func _well_known(type_name: String, value: Variant, path: String, depth: int) ->
 			_fail(path, "Any @type"); return [null]
 		var url: String = wrapper["@type"]
 		var nested: String = url.get_slice("/", url.get_slice_count("/") - 1)
-		if nested == type_name or not schema.get("messages", {}).has(nested):
+		# An Any may hold another Any; the depth budget bounds the recursion.
+		if not schema.get("messages", {}).has(nested):
 			_fail(path, "known Any type"); return [null]
 		var members := wrapper.size() - 1
 		if nested == "google.protobuf.Empty" and members == 0:
@@ -438,9 +472,22 @@ func _scalar(field: Dictionary, value: Variant, path: String, depth: int, counte
 			number = (value as RawNumber).value
 		elif value is String and not _number_parts(value).is_empty():
 			number = str(value).to_float()
-		if not is_finite(number) or (kind == "float" and absf(number) >= 3.4028235677973366e38):
+		if not is_finite(number):
 			_fail(path, kind); return null
-		return number
+		if kind != "float":
+			return number
+		# Go keeps float32, rounded once from the exact decimal: 3.40282356e+38
+		# becomes 3.4028235e+38 and 1e-50 becomes 0. Decimals from 2^128 - 2^103
+		# up overflow. Near that threshold decide on the text: a double (and
+		# Godot's own number parsing) can round either way there.
+		var limit := (pow(2.0, 24) - 0.5) * pow(2.0, 104)
+		if absf(absf(number) - limit) <= limit * 1e-12:
+			if not below_float32_limit(_source_text(value)):
+				_fail(path, kind); return null
+			return signf(number) * (pow(2.0, 24) - 1.0) * pow(2.0, 104)
+		if absf(number) > limit:
+			_fail(path, kind); return null
+		return PackedFloat32Array([number])[0]
 	if kind == "bool":
 		if not value is bool: _fail(path, "boolean")
 		return value
@@ -483,21 +530,102 @@ func _json(value: Variant, path: String, depth: int, counted: bool) -> Variant:
 	_fail(path, "JSON value"); return null
 
 func _well_known_string(name: String, value: String) -> bool:
-	var regex := RegEx.new()
-	if name == "FieldMask":
-		regex.compile("^(?:[A-Za-z][A-Za-z0-9]*(?:\\.[A-Za-z][A-Za-z0-9]*)*(?:,[A-Za-z][A-Za-z0-9]*(?:\\.[A-Za-z][A-Za-z0-9]*)*)*)?$")
-		return regex.search(value) != null
+	if name == "Timestamp":
+		return proto_timestamp(value)
 	if name == "Duration":
-		regex.compile("^-?(0|[1-9][0-9]*)(?:\\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?s$")
-		var matched := regex.search(value)
-		return matched != null and matched.get_string(1).length() <= 12 and int(matched.get_string(1)) <= 315576000000
-	regex.compile("^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\\.(?:[0-9]{3}|[0-9]{6}|[0-9]{9}))?Z$")
+		return proto_duration(value)
+	var regex := RegEx.new()
+	regex.compile("^(?:[A-Za-z][A-Za-z0-9]*(?:\\.[A-Za-z][A-Za-z0-9]*)*(?:,[A-Za-z][A-Za-z0-9]*(?:\\.[A-Za-z][A-Za-z0-9]*)*)*)?$")
+	return regex.search(value) != null
+
+# The whole of value matched by pattern, or null. PCRE "$" also matches before
+# a final newline, so the match must end at the end of the string.
+static func _full_match(pattern: String, value: String) -> RegExMatch:
+	var regex := RegEx.new()
+	regex.compile(pattern)
 	var matched := regex.search(value)
-	if matched == null: return false
-	var year := int(matched.get_string(1)); var month := int(matched.get_string(2)); var day := int(matched.get_string(3))
-	if year < 1 or month < 1 or month > 12 or day < 1: return false
-	var days := [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-	return day <= days[month - 1] and int(matched.get_string(4)) < 24 and int(matched.get_string(5)) < 60 and int(matched.get_string(6)) < 60
+	if matched == null or matched.get_start() != 0 or matched.get_end() != value.length():
+		return null
+	return matched
+
+# Days from 1970-01-01, proleptic Gregorian; year 0 is allowed (offsets can
+# reach year 1). Shifted by 400 years so every division is non-negative.
+static func _civil_days(year: int, month: int, day: int) -> int:
+	var y := year + 400 - (1 if month <= 2 else 0)
+	var era := floori(y / 400.0)
+	var yoe := y - era * 400
+	var doy := floori((153 * ((month + 9) % 12) + 2) / 5.0) + day - 1
+	return era * 146097 + yoe * 365 + floori(yoe / 4.0) - floori(yoe / 100.0) + doy - 719468 - 146097
+
+static func _days_in_month(year: int, month: int) -> int:
+	if month == 2:
+		return 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28
+	return [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+
+# Go protojson Timestamp input: time.Parse(time.RFC3339Nano), then 0001-01-01
+# to 9999-12-31 in UTC and at most 9 digits after ".". Like Go: any offset
+# (hours to 24, minutes to 60), a one-digit hour, and "," before a fraction of
+# any length.
+static func proto_timestamp(value: String) -> bool:
+	var matched := _full_match("^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?:([.,])([0-9]+))?(?:Z|([+-])([0-9]{2}):([0-9]{2}))$", value)
+	if matched == null:
+		return false
+	var year := matched.get_string(1).to_int()
+	var month := matched.get_string(2).to_int()
+	var day := matched.get_string(3).to_int()
+	var hour := matched.get_string(4).to_int()
+	var minute := matched.get_string(5).to_int()
+	var second := matched.get_string(6).to_int()
+	if matched.get_string(7) == "." and matched.get_string(8).length() > 9:
+		return false
+	if month < 1 or month > 12 or day < 1 or day > _days_in_month(year, month) or hour > 23 or minute > 59 or second > 59:
+		return false
+	var offset := 0
+	if not matched.get_string(9).is_empty():
+		var hours := matched.get_string(10).to_int()
+		var minutes := matched.get_string(11).to_int()
+		if hours > 24 or minutes > 60:
+			return false
+		offset = (hours * 3600 + minutes * 60) * (-1 if matched.get_string(9) == "-" else 1)
+	var seconds := _civil_days(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset
+	return seconds >= -62135596800 and seconds <= 253402300799
+
+# Go protojson Duration input: optional sign, integer and/or "." with up to 9
+# digits ("1.s", ".5s" and ".s" are accepted), then "s", within 315576000000 s.
+static func proto_duration(value: String) -> bool:
+	var matched := _full_match("^[+-]?(0|[1-9][0-9]*)?(\\.[0-9]{0,9})?s$", value)
+	if matched == null or (matched.get_string(1).is_empty() and matched.get_string(2).is_empty()):
+		return false
+	var seconds := matched.get_string(1)
+	return seconds.length() < 12 or (seconds.length() == 12 and seconds <= "315576000000")
+
+# Exact JSON number text of a raw number or numeric string; "" otherwise.
+static func _source_text(value: Variant) -> String:
+	if value is RawNumber:
+		return (value as RawNumber).text
+	if value is String:
+		return value
+	return ""
+
+# Whether JSON number text is below 2^128 - 2^103 in magnitude, compared exactly.
+static func below_float32_limit(text: String) -> bool:
+	var parts := _number_parts(text)
+	if parts.is_empty():
+		return false
+	# The value is 0.<digits> * 10^exponent.
+	var digits: String = parts[1] + parts[2]
+	var exponent: int = str(parts[1]).length()
+	var exponent_text: String = parts[3]
+	if not exponent_text.is_empty():
+		var magnitude := exponent_text.trim_prefix("+").trim_prefix("-").lstrip("0")
+		if magnitude.length() > 10:
+			return exponent_text.begins_with("-")
+		exponent += -magnitude.to_int() if exponent_text.begins_with("-") else magnitude.to_int()
+	var significant := digits.lstrip("0")
+	exponent -= digits.length() - significant.length()
+	significant = significant.rstrip("0")
+	var limit := "340282356779733661637539395458142568448"
+	return significant.is_empty() or exponent < limit.length() or (exponent == limit.length() and significant < limit)
 
 # Strict UTF-8 validation before Godot's decoder, including overlong sequences.
 static func decode_utf8(bytes: PackedByteArray) -> Dictionary:
@@ -548,6 +676,9 @@ static func parse_json_bytes(bytes: PackedByteArray, node_budget: int = PROTOCOL
 	# NUL is valid UTF-8 but never valid in JSON; Godot strings would truncate there.
 	if bytes.find(0) >= 0:
 		return {"error": "invalid_json", "message": "NUL byte in JSON"}
+	# get_string_from_utf8() drops a leading BOM, which is not JSON (Go rejects it).
+	if bytes.size() >= 3 and bytes[0] == 0xef and bytes[1] == 0xbb and bytes[2] == 0xbf:
+		return {"error": "invalid_json", "message": "Byte order mark before JSON"}
 	var parsed := parse_json(decoded.text, node_budget, keep_raw)
 	if parsed.has("error"):
 		return {"error": "invalid_json", "message": parsed.error}
