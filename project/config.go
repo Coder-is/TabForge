@@ -135,8 +135,9 @@ func relativePath(root, name string) (string, error) {
 		if err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
-		if err == nil && info.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("symlink path is not supported: %s", current)
+		// Junctions report ModeIrregular rather than ModeSymlink on Windows.
+		if err == nil && !info.IsDir() && !info.Mode().IsRegular() {
+			return "", fmt.Errorf("symlink, junction or special file path is not supported: %s", current)
 		}
 	}
 	return path, nil

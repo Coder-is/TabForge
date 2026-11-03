@@ -3,6 +3,7 @@ package publish
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +89,52 @@ func TestRecoverKeepsBackupBesideUnknownDirectory(t *testing.T) {
 	}
 	if read(t, filepath.Join(out+BackupSuffix, "old")) != "last good" {
 		t.Fatal("backup removed")
+	}
+}
+
+func TestDirRefusesUnmarkedOutput(t *testing.T) {
+	dir := t.TempDir()
+	docs := filepath.Join(dir, "Docs")
+	if err := os.Mkdir(docs, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "design.md"), []byte("handwritten"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	readme := filepath.Join(dir, "README.md")
+	if err := os.WriteFile(readme, []byte("handwritten"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// A directory named like the marker is not a marker.
+	fake := filepath.Join(dir, "Fake")
+	if err := os.MkdirAll(filepath.Join(fake, "export.json"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, out := range []string{docs, readme, fake} {
+		stage := filepath.Join(dir, "stage")
+		output(t, stage, "next", "next")
+		if _, err := Dir(stage, out, "export.json"); err == nil || !strings.Contains(err.Error(), "refusing to replace") {
+			t.Fatalf("%s: %v", out, err)
+		}
+		if _, err := os.Lstat(out + BackupSuffix); !os.IsNotExist(err) {
+			t.Fatalf("%s: moved aside", out)
+		}
+		os.RemoveAll(stage)
+	}
+	if read(t, filepath.Join(docs, "design.md")) != "handwritten" || read(t, readme) != "handwritten" {
+		t.Fatal("handwritten file changed")
+	}
+	// An empty directory holds nothing to lose and is replaced.
+	empty := filepath.Join(dir, "Empty")
+	if err := os.Mkdir(empty, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stage := filepath.Join(dir, "stage")
+	output(t, stage, "next", "next")
+	if _, err := Dir(stage, empty, "export.json"); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(empty, "next")) != "next" {
+		t.Fatal("empty directory not replaced")
 	}
 }

@@ -8,9 +8,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/Coder-is/TabForge/databundle"
 	"github.com/Coder-is/TabForge/project"
 )
 
@@ -302,5 +304,71 @@ func TestImportRecoversInterruptedPublishAndStaleLock(t *testing.T) {
 		if _, err := os.Lstat(name); !os.IsNotExist(err) {
 			t.Fatalf("%s left behind: %v", name, err)
 		}
+	}
+}
+
+// The checksums used to verify copied files must come from the exact manifest
+// bytes that databundle validated, not from a second read of the file.
+func TestChecksumsComeFromValidatedManifestBytes(t *testing.T) {
+	source := fixture(t)
+	file := filepath.Join(source, "data_manifest.json")
+	valid, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		SchemaHash string `json:"schemaHash"`
+	}
+	if err := json.Unmarshal(valid, &m); err != nil {
+		t.Fatal(err)
+	}
+	// The file on disk is now garbage; validation must use the pinned bytes.
+	if err := os.WriteFile(file, []byte("swapped"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	pinned := pinnedFS{os.DirFS(source), "data_manifest.json", valid}
+	if _, err := databundle.OpenFS(pinned, ".", m.SchemaHash); err != nil {
+		t.Fatalf("pinned manifest not used: %v", err)
+	}
+	if _, err := verifiedChecksums(source, m.SchemaHash); err == nil {
+		t.Fatal("swapped manifest accepted")
+	}
+	if err := os.WriteFile(file, valid, 0644); err != nil {
+		t.Fatal(err)
+	}
+	checksums, err := verifiedChecksums(source, m.SchemaHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checksums["schema/schema.pb"].SHA256 == "" || checksums["data/tables.json"].Encoding != "protojson" {
+		t.Fatalf("checksums: %+v", checksums)
+	}
+}
+
+func junction(t *testing.T, link, target string) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		t.Skip("directory junctions are Windows-only")
+	}
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Skipf("mklink /J: %v %s", err, out)
+	}
+}
+
+// Go reports junctions as ModeIrregular, not ModeSymlink; they must not
+// redirect generated assets outside the engine project.
+func TestImportRejectsJunctionDestination(t *testing.T) {
+	source := fixture(t)
+	root := engine(t, "cocos")
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "assets"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	junction(t, filepath.Join(root, "assets", "resources"), outside)
+	if _, err := Import(context.Background(), source, root, "cocos", false); err == nil || !strings.Contains(err.Error(), "junction") {
+		t.Fatalf("junction destination accepted: %v", err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("wrote through junction: %v", entries)
 	}
 }

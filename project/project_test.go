@@ -311,3 +311,40 @@ func TestOutputAliasesCannotReplaceSources(t *testing.T) {
 		t.Fatalf("discover job error lost its directory: %v", err)
 	}
 }
+
+// An output path naming handwritten files must never be moved aside or deleted.
+func TestExportRefusesHandwrittenOutput(t *testing.T) {
+	root := copyFixture(t)
+	if err := os.MkdirAll(filepath.Join(root, "Docs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Docs/design.md", "README.md"} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte("handwritten"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := snapshot(t, root)
+	for _, output := range []string{"Docs", "README.md"} {
+		p, err := Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Config.Output = output
+		if _, err := p.Export(context.Background()); err == nil || !strings.Contains(err.Error(), "refusing to replace") {
+			t.Fatalf("output %q: %v", output, err)
+		}
+		// Check never publishes, so it may still validate the project.
+		if _, err := p.Check(context.Background()); err != nil {
+			t.Fatalf("check %q: %v", output, err)
+		}
+	}
+	if !reflect.DeepEqual(before, snapshot(t, root)) {
+		t.Fatal("handwritten files changed")
+	}
+	entries, _ := os.ReadDir(root)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".tabforge-") || strings.HasSuffix(entry.Name(), ".tabforge-backup") {
+			t.Fatalf("left behind: %s", entry.Name())
+		}
+	}
+}

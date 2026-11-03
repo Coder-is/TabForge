@@ -154,8 +154,8 @@ func (p *Project) discover(d *DiscoverConfig) ([]*model.IndexDefine, error) {
 		if err != nil {
 			return err
 		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symlink table input: %s", file)
+		if entry.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+			return fmt.Errorf("symlink or junction table input: %s", file)
 		}
 		if file == dir {
 			return nil

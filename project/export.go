@@ -69,6 +69,13 @@ func (p *Project) generate(ctx context.Context, publishOutput bool) (*Result, er
 	}
 	defer lock.Release()
 	out, _ := relativePath(p.Root, p.Config.Output)
+	// Fail before compiling when output names a handwritten file or directory;
+	// publish.Dir repeats the check before it moves anything.
+	if publishOutput {
+		if err := publish.Replaceable(out, "export.json"); err != nil {
+			return nil, fmt.Errorf("output %q: %w", p.Config.Output, err)
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
 		return nil, err
 	}
@@ -88,8 +95,8 @@ func (p *Project) generate(ctx context.Context, publishOutput bool) (*Result, er
 				if err != nil {
 					return err
 				}
-				if entry.Type()&os.ModeSymlink != 0 {
-					return fmt.Errorf("symlink Proto input: %s", path)
+				if entry.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+					return fmt.Errorf("symlink or junction Proto input: %s", path)
 				}
 				if !entry.IsDir() && strings.EqualFold(filepath.Ext(path), ".proto") {
 					name, err := filepath.Rel(dir, path)

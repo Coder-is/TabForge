@@ -2,14 +2,17 @@
 package clientbundle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Coder-is/TabForge/databundle"
 	"github.com/Coder-is/TabForge/internal/filelock"
@@ -122,10 +125,7 @@ func Import(ctx context.Context, source, engineRoot, kind string, check bool) (*
 	// they still import structure only.
 	var checksums map[string]databundle.Entry
 	if declared[databundle.ManifestName] {
-		if _, err := databundle.Open(source, manifest.SchemaHash); err != nil {
-			return nil, fmt.Errorf("verify %s: %w", databundle.ManifestName, err)
-		}
-		if checksums, err = readChecksums(source); err != nil {
+		if checksums, err = verifiedChecksums(source, manifest.SchemaHash); err != nil {
 			return nil, err
 		}
 	} else if len(manifest.Data) > 0 {
@@ -384,8 +384,9 @@ func safePath(root, name string) (string, error) {
 		if err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
-		if err == nil && info.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("symlink bundle path: %s", current)
+		// Junctions report ModeIrregular rather than ModeSymlink on Windows.
+		if err == nil && !info.IsDir() && !info.Mode().IsRegular() {
+			return "", fmt.Errorf("symlink, junction or special file bundle path: %s", current)
 		}
 	}
 	return filepath.Join(root, clean), nil
@@ -398,8 +399,8 @@ func preserveMetadata(out, stage string) error {
 		if err != nil {
 			return err
 		}
-		if e.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symlink in generated assets: %s", path)
+		if e.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+			return fmt.Errorf("symlink or junction in generated assets: %s", path)
 		}
 		if e.IsDir() {
 			return nil
@@ -424,9 +425,11 @@ func preserveMetadata(out, stage string) error {
 	})
 }
 
-// readChecksums indexes data_manifest.json by path. databundle.Open has already
-// validated its structure, paths and digests.
-func readChecksums(source string) (map[string]databundle.Entry, error) {
+// verifiedChecksums reads data_manifest.json once, has databundle validate
+// exactly those bytes (structure, paths and digests), and indexes the same
+// bytes by path. Re-reading the file after validation would let a manifest
+// swapped in between supply unverified checksums.
+func verifiedChecksums(source, schemaHash string) (map[string]databundle.Entry, error) {
 	path, err := safePath(source, databundle.ManifestName)
 	if err != nil {
 		return nil, err
@@ -434,6 +437,9 @@ func readChecksums(source string) (map[string]databundle.Entry, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
+	}
+	if _, err := databundle.OpenFS(pinnedFS{os.DirFS(source), databundle.ManifestName, raw}, ".", schemaHash); err != nil {
+		return nil, fmt.Errorf("verify %s: %w", databundle.ManifestName, err)
 	}
 	var m databundle.Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -448,3 +454,37 @@ func readChecksums(source string) (map[string]databundle.Entry, error) {
 	}
 	return checksums, nil
 }
+
+// pinnedFS serves one file from memory and everything else from FS.
+type pinnedFS struct {
+	fs.FS
+	name string
+	data []byte
+}
+
+func (f pinnedFS) Open(name string) (fs.File, error) {
+	if name == f.name {
+		return &pinnedFile{bytes.NewReader(f.data), pinnedInfo{f.name, int64(len(f.data))}}, nil
+	}
+	return f.FS.Open(name)
+}
+
+type pinnedFile struct {
+	*bytes.Reader
+	info pinnedInfo
+}
+
+func (f *pinnedFile) Stat() (fs.FileInfo, error) { return f.info, nil }
+func (f *pinnedFile) Close() error               { return nil }
+
+type pinnedInfo struct {
+	name string
+	size int64
+}
+
+func (i pinnedInfo) Name() string       { return i.name }
+func (i pinnedInfo) Size() int64        { return i.size }
+func (i pinnedInfo) Mode() fs.FileMode  { return 0444 }
+func (i pinnedInfo) ModTime() time.Time { return time.Time{} }
+func (i pinnedInfo) IsDir() bool        { return false }
+func (i pinnedInfo) Sys() any           { return nil }

@@ -19,6 +19,11 @@ import (
 // so only crashes in that instant or locks from older tool versions qualify.
 const StaleAge = 10 * time.Minute
 
+// startSlack absorbs the whole-second Started field and clock adjustments when
+// a live PID's creation time is compared with the lock: only a process created
+// clearly after the lock was written is a reused PID, not the owner.
+const startSlack = time.Minute
+
 // Owner is the JSON content of a lock file.
 type Owner struct {
 	PID     int       `json:"pid"`
@@ -47,10 +52,11 @@ func (e *HeldError) Error() string {
 type Lock struct{ path string }
 
 // Release removes the lock file.
-func (l *Lock) Release() error { return os.Remove(l.path) }
+func (l *Lock) Release() error { return remove(l.path) }
 
 // Acquire creates path exclusively. An existing lock is reclaimed only when it
-// was written on this host by a process that no longer exists, or when its
+// was written on this host by a process that no longer exists (or whose PID now
+// belongs to a process started after the lock was written), or when its
 // content is unreadable and older than StaleAge. Otherwise a *HeldError is
 // returned. Concurrent reclaimers are serialized by a sibling ".reclaim" file;
 // the loser fails instead of deleting the winner's fresh lock.
@@ -124,7 +130,15 @@ func inspect(data []byte, info fs.FileInfo) (*Owner, bool) {
 	if host == "" || !strings.EqualFold(owner.Host, host) {
 		return &owner, false // another machine's process cannot be checked
 	}
-	return &owner, owner.PID != os.Getpid() && !alive(owner.PID)
+	if owner.PID == os.Getpid() {
+		return &owner, false
+	}
+	if !alive(owner.PID) {
+		return &owner, true
+	}
+	// A live PID may have been reused, e.g. after a reboot.
+	started, ok := processStart(owner.PID)
+	return &owner, ok && !owner.Started.IsZero() && started.After(owner.Started.Add(startSlack))
 }
 
 // reclaim deletes the stale lock if it is still exactly the observed file.
@@ -138,24 +152,60 @@ func reclaim(path string, observed []byte, observedInfo fs.FileInfo) error {
 		if readErr == nil {
 			if _, stale := inspect(data, info); stale {
 				// A reclaimer crashed mid-way; clear its guard for the next run.
-				os.Remove(guard)
+				if err := removeUnchanged(guard, data, info); err != nil {
+					return err
+				}
 				return fmt.Errorf("removed abandoned %s; try again", guard)
 			}
 		}
 		return fmt.Errorf("lock %s is being reclaimed by another process; try again", path)
 	}
-	defer os.Remove(guard)
-	data, info, err := read(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	if !bytes.Equal(data, observed) || !info.ModTime().Equal(observedInfo.ModTime()) {
-		return nil // replaced meanwhile; the caller re-inspects it
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	defer remove(guard)
+	if err := removeUnchanged(path, observed, observedInfo); err != nil {
 		return fmt.Errorf("reclaim stale lock %s: %w", path, err)
 	}
 	return nil
+}
+
+// removeUnchanged deletes path only while it still has the observed bytes and
+// modification time. A file replaced meanwhile, such as a fresh guard or lock
+// written by another process, is left alone for the caller to re-inspect.
+// Windows refuses to delete a file another process is reading, so a failed
+// delete is retried briefly, re-checking the content each time.
+func removeUnchanged(path string, observed []byte, observedInfo fs.FileInfo) error {
+	for attempt := 0; ; attempt++ {
+		data, info, err := read(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if !bytes.Equal(data, observed) || !info.ModTime().Equal(observedInfo.ModTime()) {
+			return nil
+		}
+		err = os.Remove(path)
+		if err == nil || errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if attempt == removeAttempts-1 {
+			return err
+		}
+		time.Sleep(removeDelay)
+	}
+}
+
+const (
+	removeAttempts = 5
+	removeDelay    = 10 * time.Millisecond
+)
+
+// remove deletes path, retrying a delete refused while another process reads it.
+func remove(path string) error {
+	for attempt := 0; ; attempt++ {
+		err := os.Remove(path)
+		if err == nil || errors.Is(err, fs.ErrNotExist) || attempt == removeAttempts-1 {
+			return err
+		}
+		time.Sleep(removeDelay)
+	}
 }

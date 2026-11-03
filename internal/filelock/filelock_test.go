@@ -167,3 +167,95 @@ func TestConcurrentReclaimHasOneWinner(t *testing.T) {
 		t.Fatal("no goroutine acquired the stale lock")
 	}
 }
+
+// TestHelperSleeper is a child process that stays alive until killed.
+func TestHelperSleeper(t *testing.T) {
+	if os.Getenv("FILELOCK_SLEEPER") != "1" {
+		t.Skip("helper process")
+	}
+	time.Sleep(time.Minute)
+}
+
+func livePID(t *testing.T) int {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestHelperSleeper$")
+	cmd.Env = append(os.Environ(), "FILELOCK_SLEEPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	return cmd.Process.Pid
+}
+
+func TestReusedPIDIsReclaimed(t *testing.T) {
+	pid := livePID(t)
+	if _, ok := processStart(pid); !ok {
+		t.Skip("process creation time is not available on this platform")
+	}
+	host, _ := os.Hostname()
+	path := filepath.Join(t.TempDir(), "x.lock")
+	// The lock predates the live process, so that process cannot be its owner.
+	data, _ := json.Marshal(Owner{PID: pid, Host: host, Started: time.Now().UTC().Add(-time.Hour)})
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("reused pid kept the lock: %v", err)
+	}
+	lock.Release()
+	// The same live process written as owner after it started still holds it.
+	writeOwner(t, path, pid, host)
+	var held *HeldError
+	if _, err := Acquire(path); !errors.As(err, &held) {
+		t.Fatalf("live owner lost the lock: %v", err)
+	}
+}
+
+func TestAbandonedGuardReplacedMeanwhileIsKept(t *testing.T) {
+	guard := filepath.Join(t.TempDir(), "x.lock.reclaim")
+	host, _ := os.Hostname()
+	writeOwner(t, guard, deadPID(t), host)
+	data, info, err := read(guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, stale := inspect(data, info); !stale {
+		t.Skip("dead pid was reused")
+	}
+	// Another reclaimer removed the abandoned guard and created a fresh one
+	// after this process observed the abandoned one.
+	if err := os.Remove(guard); err != nil {
+		t.Fatal(err)
+	}
+	if err := create(guard); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := os.ReadFile(guard)
+	if err := removeUnchanged(guard, data, info); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := os.ReadFile(guard); err != nil || string(after) != string(fresh) {
+		t.Fatalf("fresh guard deleted or changed: %v", err)
+	}
+	// The observed file itself is still removed.
+	if err := removeUnchanged(guard, fresh, mustStat(t, guard)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(guard); !os.IsNotExist(err) {
+		t.Fatal("unchanged guard not removed")
+	}
+}
+
+func mustStat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info
+}

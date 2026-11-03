@@ -133,8 +133,8 @@ func goArchive(root, out string) (err error) {
 			if err != nil {
 				return err
 			}
-			if entry.Type()&fs.ModeSymlink != 0 {
-				return fmt.Errorf("symlink runtime source: %s", path)
+			if entry.Type()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+				return fmt.Errorf("symlink or junction runtime source: %s", path)
 			}
 			if entry.IsDir() {
 				if entry.Name() == "node_modules" || entry.Name() == "dist" {

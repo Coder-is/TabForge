@@ -151,8 +151,9 @@ func WriteReport(root string, r RunReport) error {
 		return err
 	}
 	path := filepath.Join(root, ReportName)
-	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("report cannot replace a symlink: %s", path)
+	// Junctions and other reparse points report ModeIrregular on Windows.
+	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("report cannot replace a symlink, junction or non-regular file: %s", path)
 	}
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }

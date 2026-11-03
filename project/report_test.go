@@ -3,8 +3,10 @@ package project
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -76,5 +78,66 @@ func TestReportCannotOverwriteSymlink(t *testing.T) {
 	data, err := os.ReadFile(outside)
 	if err != nil || string(data) != "source" {
 		t.Fatal("report changed source")
+	}
+}
+
+func junction(t *testing.T, link, target string) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		t.Skip("directory junctions are Windows-only")
+	}
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Skipf("mklink /J: %v %s", err, out)
+	}
+}
+
+// Go reports junctions as ModeIrregular, not ModeSymlink; every symlink guard
+// must reject them too.
+func TestJunctionsAreRejectedLikeSymlinks(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "keep.txt"), []byte("outside"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, outside)
+
+	root := copyFixture(t)
+	junction(t, filepath.Join(root, "Linked"), outside)
+	p, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Config.Output = "Linked/Generated"
+	if _, err := p.Export(context.Background()); err == nil || !strings.Contains(err.Error(), "junction") {
+		t.Fatalf("output through junction: %v", err)
+	}
+
+	// Discovered tables and Proto inputs must not follow a junction either.
+	tables := copyFixture(t)
+	junction(t, filepath.Join(tables, "Tables", "Linked"), outside)
+	p, err = Load(tables)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "junction") {
+		t.Fatalf("table junction: %v", err)
+	}
+	protos := copyFixture(t)
+	junction(t, filepath.Join(protos, "Protocols", "linked.proto"), outside)
+	p, err = Load(protos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Config.Tables = nil
+	if _, err := p.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "junction") {
+		t.Fatalf("Proto junction: %v", err)
+	}
+
+	report := t.TempDir()
+	junction(t, filepath.Join(report, ReportName), outside)
+	if err := WriteReport(report, RunReport{}); err == nil {
+		t.Fatal("report followed a junction")
+	}
+	if !reflect.DeepEqual(before, snapshot(t, outside)) {
+		t.Fatal("wrote through a junction")
 	}
 }

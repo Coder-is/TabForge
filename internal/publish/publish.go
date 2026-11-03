@@ -46,11 +46,41 @@ func Recover(out, marker string) error {
 	return nil
 }
 
+// Replaceable reports whether out may be replaced by a generated directory:
+// it is missing, an empty directory, or a directory holding the regular marker
+// file that every complete output contains. Anything else may be handwritten
+// and is never moved aside or deleted.
+func Replaceable(out, marker string) error {
+	info, err := os.Lstat(out)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		if marked, err := os.Lstat(filepath.Join(out, marker)); err == nil && marked.Mode().IsRegular() {
+			return nil
+		}
+		entries, err := os.ReadDir(out)
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("refusing to replace %s: it exists but is not a generated output (no %s); move or delete it yourself, or choose another output path", out, marker)
+}
+
 // Dir replaces out with stage. If installing fails, the previous output is put
 // back. A non-nil warning means stage was installed but the superseded backup
-// could not be deleted; the next Recover removes it.
+// could not be deleted; the next Recover removes it. An existing out that is
+// not Replaceable is refused untouched.
 func Dir(stage, out, marker string) (warning, err error) {
 	if err := Recover(out, marker); err != nil {
+		return nil, err
+	}
+	if err := Replaceable(out, marker); err != nil {
 		return nil, err
 	}
 	backup := out + BackupSuffix

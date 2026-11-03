@@ -2,12 +2,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"strings"
+	"syscall"
 
+	"github.com/Coder-is/TabForge/internal/filelock"
 	"github.com/Coder-is/TabForge/internal/release"
 )
 
@@ -35,7 +40,11 @@ func main() {
 		} else if *check || *sync {
 			err = release.Versions(root, *sync)
 		} else {
-			err = build(root, o)
+			// Ctrl+C or termination stops the steps and still removes the
+			// stage directory and lock instead of killing the process outright.
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			err = build(ctx, root, o)
+			stop()
 		}
 	}
 	if err != nil {
@@ -48,8 +57,8 @@ func main() {
 	}
 }
 
-func run(root, executable string, args ...string) error {
-	cmd := exec.Command(executable, args...)
+func run(ctx context.Context, root, executable string, args ...string) error {
+	cmd := exec.CommandContext(ctx, executable, args...)
 	cmd.Dir = root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -59,11 +68,40 @@ func run(root, executable string, args ...string) error {
 	return nil
 }
 
-func build(root string, o options) error {
-	return buildUsing(root, o, run)
+func build(ctx context.Context, root string, o options) error {
+	return buildUsing(ctx, root, o, func(dir, executable string, args ...string) error {
+		return run(ctx, dir, executable, args...)
+	})
 }
 
-func buildUsing(root string, o options, execute func(string, string, ...string) error) error {
+// stagePrefix names build directories after their destination, so a run that
+// holds the destination's lock can recognize stages left by killed runs.
+func stagePrefix(out string) string {
+	return "." + filepath.Base(out) + ".tabforge-release-"
+}
+
+// removeStaleStages deletes stage directories of earlier runs for out. The
+// caller holds out's lock, so no live run can still be using them.
+func removeStaleStages(out string) error {
+	parent, prefix := filepath.Dir(out), stagePrefix(out)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		suffix, ok := strings.CutPrefix(entry.Name(), prefix)
+		// os.MkdirTemp appends only decimal digits.
+		if !ok || suffix == "" || strings.Trim(suffix, "0123456789") != "" || !entry.IsDir() {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(parent, entry.Name())); err != nil {
+			return fmt.Errorf("remove stale release stage: %w", err)
+		}
+	}
+	return nil
+}
+
+func buildUsing(ctx context.Context, root string, o options, execute func(string, string, ...string) error) error {
 	if err := release.Versions(root, false); err != nil {
 		return err
 	}
@@ -92,16 +130,32 @@ func buildUsing(root string, o options, execute func(string, string, ...string) 
 		return err
 	}
 	// Cooperative lock covers building and publication to the same destination.
-	lock := out + ".lock"
-	if err := os.Mkdir(lock, 0755); err != nil {
-		return fmt.Errorf("acquire delivery lock %s: %w", lock, err)
+	// It records its owner, so one left by a killed run is reclaimed.
+	lockPath := out + ".lock"
+	lock, err := filelock.Acquire(lockPath)
+	if err != nil {
+		if info, statErr := os.Lstat(lockPath); statErr == nil && info.IsDir() {
+			return fmt.Errorf("acquire delivery lock: %s is a directory lock from an older release tool; remove it if no release is running", lockPath)
+		}
+		return fmt.Errorf("acquire delivery lock: %w", err)
 	}
-	defer os.Remove(lock)
-	stage, err := os.MkdirTemp(filepath.Dir(out), ".tabforge-release-")
+	defer lock.Release()
+	if err := removeStaleStages(out); err != nil {
+		return err
+	}
+	stage, err := os.MkdirTemp(filepath.Dir(out), stagePrefix(out))
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(stage)
+	// Stop between steps once interrupted; the deferred cleanup still runs.
+	inner := execute
+	execute = func(dir, executable string, args ...string) error {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("release interrupted: %w", err)
+		}
+		return inner(dir, executable, args...)
+	}
 	infoPath := filepath.Join(stage, "build-info.json")
 	if err := release.WriteJSON(infoPath, info); err != nil {
 		return err
@@ -146,6 +200,9 @@ func buildUsing(root string, o options, execute func(string, string, ...string) 
 	}
 	if err := release.WriteSums(stage); err != nil {
 		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("release interrupted: %w", err)
 	}
 	if _, err := os.Lstat(out); !os.IsNotExist(err) {
 		return fmt.Errorf("delivery destination appeared during build: %s", out)

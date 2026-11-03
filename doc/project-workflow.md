@@ -40,7 +40,7 @@ VS Code 安装对应平台 `.vsix` 后，执行 **TabForge: 导出项目**。可
 | 规则 | 说明 |
 | --- | --- |
 | `version` | 必须为 `1`；拒绝未知配置字段 |
-| `output` | 默认 `Generated`；成功后整体替换的完整生成目录 |
+| `output` | 默认 `Generated`；成功后整体替换的完整生成目录。已存在的目标必须是空目录或含 `export.json` 的上次生成目录，否则拒绝导出，避免覆盖手写文件 |
 | `schema.dir` | 默认 `Protocols`；自动收集全部 `.proto`，包括未被 RPC 引用的类型 |
 | `schema.files` | 可选，指定相对于 `schema.dir` 的入口；依赖自动编译 |
 | `schema.imports` | 可选，额外 import 目录，相对于项目根目录 |
