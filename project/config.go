@@ -5,11 +5,14 @@ package project
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/Coder-is/TabForge/protocol"
 )
@@ -124,20 +127,31 @@ func relativePath(root, name string) (string, error) {
 		return "", fmt.Errorf("path must stay inside the project: %q", name)
 	}
 	path := filepath.Join(root, clean)
-	current := root
-	for _, part := range strings.Split(clean, string(filepath.Separator)) {
+	parts := strings.Split(clean, string(filepath.Separator))
+	for _, part := range parts {
 		// Windows drops trailing dots and spaces, so "Tables." would alias "Tables".
 		if strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
 			return "", fmt.Errorf("path segment must not end with a dot or space: %q", name)
 		}
+	}
+	current := root
+	for _, part := range parts {
 		current = filepath.Join(current, part)
 		info, err := os.Lstat(current)
+		// Unix reports ENOTDIR for "file/child" where Windows reports it missing.
+		if errors.Is(err, syscall.ENOTDIR) {
+			err = fs.ErrNotExist
+		}
 		if err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
 		// Junctions report ModeIrregular rather than ModeSymlink on Windows.
 		if err == nil && !info.IsDir() && !info.Mode().IsRegular() {
 			return "", fmt.Errorf("symlink, junction or special file path is not supported: %s", current)
+		}
+		// Nothing exists below a missing entry or a file.
+		if err != nil || !info.IsDir() {
+			break
 		}
 	}
 	return path, nil
