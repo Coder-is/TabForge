@@ -82,10 +82,17 @@ func (s *Server) HandleStream(id string, handler StreamHandler) error {
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 
+// rejectReadTimeout bounds body reads before the endpoint deadline applies:
+// net/http drains unread bodies of rejected requests, and HTTPServer has no
+// global ReadTimeout because SSE connections are long-lived.
+var rejectReadTimeout = 10 * time.Second
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	tracked := &responseWriter{ResponseWriter: w}
 	w = tracked
+	controller := http.NewResponseController(w)
+	controller.SetReadDeadline(started.Add(rejectReadTimeout))
 	result := Result{}
 	defer func() {
 		if recovered := recover(); recovered != nil && tracked.status == 0 {
@@ -158,10 +165,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(endpoint.TimeoutMS)*time.Millisecond)
 	defer cancel()
 	deadline, _ := ctx.Deadline()
-	controller := http.NewResponseController(w)
-	controller.SetReadDeadline(deadline)
 	controller.SetWriteDeadline(deadline)
-	defer controller.SetReadDeadline(time.Time{})
+	// Keep the read deadline: net/http drains unread bodies after return and
+	// installs its own header/idle deadlines before the next request.
 	defer controller.SetWriteDeadline(time.Time{})
 	if endpoint.Auth == "bearer" {
 		header := r.Header.Get("Authorization")
@@ -171,6 +177,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Only accepted requests may hold the connection until the endpoint deadline.
+	controller.SetReadDeadline(deadline)
 	limit := s.MaxBodyBytes
 	if limit <= 0 {
 		limit = 1 << 20

@@ -3,6 +3,7 @@ package httptransport
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -225,5 +226,33 @@ func TestUnaryClientCancelIsNotInternalError(t *testing.T) {
 	result := <-observed
 	if result.Code != "cancelled" || result.Status == 500 || w.Body.Len() != 0 {
 		t.Fatalf("client cancel recorded as %+v, body %q", result, w.Body.String())
+	}
+}
+
+// Rejected requests must not let a client stall the body drain indefinitely.
+func TestRejectedSlowBodyIsBounded(t *testing.T) {
+	previous := rejectReadTimeout
+	rejectReadTimeout = 300 * time.Millisecond
+	defer func() { rejectReadTimeout = previous }()
+	s := fixture(t)
+	s.Contract.Endpoints[0].Auth = "bearer"
+	s.Contract.Endpoints[0].TimeoutMS = 60000
+	server := httptest.NewServer(s)
+	defer server.Close()
+	for _, tc := range []struct{ path, extra, want string }{
+		{"/nope", "", "404"},
+		{s.Contract.Endpoints[0].Path, "X-Protocol-Version: 1.0.0\r\nX-Protocol-Schema: " + s.schemaHash + "\r\nAuthorization: Bearer invalid\r\n", "401"},
+	} {
+		conn, err := net.Dial("tcp", server.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn.SetDeadline(time.Now().Add(5 * time.Second))
+		io.WriteString(conn, "POST "+tc.path+" HTTP/1.1\r\nHost: test\r\nContent-Type: application/json\r\n"+tc.extra+"Content-Length: 100\r\n\r\n{}")
+		reply, err := io.ReadAll(conn)
+		conn.Close()
+		if err != nil || !strings.HasPrefix(string(reply), "HTTP/1.1 "+tc.want) {
+			t.Fatalf("%s: stalled body held the connection: %v %q", tc.path, err, reply)
+		}
 	}
 }
