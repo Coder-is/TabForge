@@ -43,7 +43,7 @@ func _run() -> void:
 	if events.size() == 2:
 		check(events[0].payload.delta.text == "你好😀", "SSE Unicode")
 		check(events[1].name == "completed" and events[1].sequence == "2", "SSE terminal")
-	var invalid: RefCounted = client.request("chatComplete", {"conversationId": 123})
+	var invalid: RefCounted = client.request("chatComplete", {"conversationId": 1.5})
 	await wait_for(invalid)
 	check(invalid.error.get("code") == "invalid_message", "Reject wrong request type")
 	var cancelled: RefCounted = client.stream("chatStream", data)
