@@ -482,6 +482,8 @@ namespace TabForge.Protocol
         {
             if (conn != c)
                 return;
+            if (data.Length == 0)
+                return; // Empty messages are not frames.
             RealtimeFrame f;
             try
             {

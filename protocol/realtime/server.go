@@ -30,12 +30,13 @@ type NotifyHandler func(ctx context.Context, s *Session, message proto.Message)
 // Event reports session lifecycle and message results to logs/metrics. It
 // never contains tokens or payloads. Observe must not block.
 type Event struct {
-	Type      string // session_start, session_resume, disconnect, session_end, request, notify
+	Type      string // session_start, session_resume, disconnect, session_end, handshake_reject, request, notify
 	Channel   string
 	SessionID string
 	UserID    string
 	Message   string // request/notify name
 	Code      string // error code, empty on success
+	Reason    string // error message for handshake_reject and session_end
 	Duration  time.Duration
 }
 
@@ -350,6 +351,7 @@ func (s *Server) writeTimeout() time.Duration {
 
 // reject sends a close frame on a connection that has no session yet.
 func (s *Server) reject(ws *websocket.Conn, enc Encoding, e *Error) {
+	s.observe(Event{Type: "handshake_reject", Code: e.Code, Reason: e.Message})
 	data, _ := (&Frame{Kind: KindClose, Error: e}).Encode(enc)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -366,18 +368,29 @@ func messageType(enc Encoding) websocket.MessageType {
 
 func (s *Server) serveConn(ctx context.Context, ch *channelState, ws *websocket.Conn, enc Encoding) {
 	readCtx, cancel := context.WithTimeout(ctx, s.handshakeTimeout())
-	typ, data, err := ws.Read(readCtx)
-	cancel()
-	if err != nil {
-		ws.CloseNow()
-		return
+	defer cancel()
+	var typ websocket.MessageType
+	var data []byte
+	var err error
+	for len(data) == 0 {
+		if typ, data, err = ws.Read(readCtx); err != nil {
+			ws.CloseNow()
+			return
+		}
 	}
+	cancel()
 	var hello *Frame
 	if typ == messageType(enc) {
 		hello, err = DecodeFrame(enc, data)
 	}
 	if hello == nil || err != nil || hello.Kind != KindHello {
-		s.reject(ws, enc, &Error{Code: CodeProtocolError, Message: "the first frame must be hello"})
+		detail := "got a " + messageTypeName(typ) + " message"
+		if err != nil {
+			detail = err.Error()
+		} else if hello != nil {
+			detail = "got " + hello.Kind.String()
+		}
+		s.reject(ws, enc, &Error{Code: CodeProtocolError, Message: "the first frame must be hello (" + detail + ")"})
 		return
 	}
 	h := hello.Hello
@@ -522,4 +535,11 @@ func (s *Server) remove(session *Session, reason *Error) {
 	if len(s.ended) < maxTombstones {
 		s.ended[session.id] = tombstone{resumeToken: session.resumeToken, err: reason, expires: now.Add(time.Duration(session.channel.Resume) * time.Millisecond)}
 	}
+}
+
+func messageTypeName(t websocket.MessageType) string {
+	if t == websocket.MessageText {
+		return "text"
+	}
+	return "binary"
 }

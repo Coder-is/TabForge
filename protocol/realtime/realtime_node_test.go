@@ -15,7 +15,19 @@ import (
 // checks at the end. It returns the program output.
 func chaos(t *testing.T, command func(url string) *exec.Cmd) string {
 	t.Helper()
-	f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s) })
+	f := newFixture(t, testContract(t, nil), func(s *Server) {
+		registerGame(t, s)
+		s.Observe = func(e Event) {
+			if e.Type == "handshake_reject" && e.Code == CodeProtocolError {
+				t.Errorf("server rejected a handshake: %s", e.Reason)
+			}
+		}
+		s.OnSessionEnd = func(_ *Session, e *Error) {
+			if e.Code == CodeProtocolError {
+				t.Errorf("server closed a session: %s", e.Message)
+			}
+		}
+	})
 	stop := make(chan struct{})
 	var cuts atomic.Int64
 	go func() {

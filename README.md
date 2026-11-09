@@ -31,14 +31,14 @@ go run ./cmd/package-backend -out=outputs/releases/v3 # 构建四种语言的后
 | --- | --- | --- |
 | 游戏或应用配置 | Excel/CSV、索引表；可映射已有 Proto | V3 配置代码、JSON、Lua、专用二进制或 Protobuf，见下文导表教程 |
 | 前后端网络协议 | Proto RPC 与 `contract.json` 接口清单 | 七类协议产物、Go HTTP 服务和多平台 JSON/SSE 客户端，见 [前后端接入指南](doc/protocol-integration.md) |
-| 游戏实时长连接 | 同一份 Proto 与清单中的 `channels` | WebSocket 请求/推送/通知、断线自动恢复且请求不重复执行、二进制 Protobuf 帧；Go 服务端与 Go/TypeScript/微信/Unity 客户端，见 [实时长连接](doc/realtime.md) |
+| 游戏实时长连接 | 同一份 Proto 与清单中的 `channels` | WebSocket 请求/推送/通知、断线自动恢复且请求不重复执行、二进制 Protobuf 帧；Go 服务端与 Go/TypeScript/微信/Unity/Godot 客户端，见 [实时长连接](doc/realtime.md) |
 
 统一协议模块包含字段验证、协议身份检查、全程超时/取消、大小限制、SSE 心跳和兼容性检查。普通请求返回 ProtoJSON，流式接口使用 SSE，可承载大模型文本、工具调用和用量事件。当前模型示例是固定数据，供应商适配需由业务后端实现。
 
 | 接入端 | SDK | 当前验证范围 |
 | --- | --- | --- |
 | Go 后端 | [HTTP/SSE 服务](doc/protocol-integration.md) | Go 竞态回归与跨语言 HTTP 联调 |
-| Go 实时服务 / TS、微信与 Unity 客户端 | [WebSocket 通道](doc/realtime.md) | 随机断线代理下的恰好一次与顺序校验、Go↔TS 编解码一致性、Linux 竞态；Unity C# 长连接客户端在 .NET 8 下同样通过；浏览器/微信/Unity 编辑器与真机长连接待测；Godot/Unreal/Lua 长连接客户端未实现 |
+| Go 实时服务 / TS、微信、Unity 与 Godot 客户端 | [WebSocket 通道](doc/realtime.md) | 随机断线代理下的恰好一次与顺序校验、Go↔TS 编解码一致性、Linux 竞态；Unity C# 客户端（.NET 8）与 Godot 客户端（4.5.1 headless）通过同样的断线与编解码校验；浏览器/微信/引擎编辑器与真机长连接待测；Unreal/Lua 长连接客户端未实现 |
 | 网页 / Node | [TypeScript Fetch](sdk/typescript/README.md) | Node 24、Chromium Fetch/XHR |
 | 微信小程序 | [wx.request 分块](sdk/wechat/README.md) | 开发者工具真实网络 12 项；真机与小游戏构建待测 |
 | Cocos Creator 3.8 目标 | [Fetch/XHR/微信](sdk/cocos/README.md) | Web 网络后端通过；Creator/JSB/移动构建待测 |

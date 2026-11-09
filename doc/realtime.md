@@ -8,7 +8,7 @@ HTTP 端点适合登录、商城、邮件这类一问一答的业务；房间、
 | `push` | 服务器 → 客户端 | 无 | 战斗开始、聊天消息、红点、公告 |
 | `notify` | 客户端 → 服务器 | 无 | 移动同步、表情、心跳外的轻量上报 |
 
-已实现：Go 服务端 `protocol/realtime`、Go 客户端（机器人/压测/服务间）、TypeScript 客户端（浏览器、Node、Cocos/Laya 的标准 WebSocket，以及微信 `wx.connectSocket`）、Unity C# 客户端（`ClientWebSocket`：Standalone/Android/iOS）。Godot、Unreal、Lua 的长连接客户端尚未实现，见文末。
+已实现：Go 服务端 `protocol/realtime`、Go 客户端（机器人/压测/服务间）、TypeScript 客户端（浏览器、Node、Cocos/Laya 的标准 WebSocket，以及微信 `wx.connectSocket`）、Unity C# 客户端（`ClientWebSocket`：Standalone/Android/iOS）、Godot 客户端（`WebSocketPeer`）。Unreal、Lua 的长连接客户端尚未实现，见文末。
 
 ## 1. 在清单中声明通道
 
@@ -74,7 +74,9 @@ message Hello   { string protocol_version = 1; string schema_hash = 2; string to
 message Welcome { string session_id = 1; string resume_token = 2; bool resumed = 3; uint32 heartbeat_ms = 4; uint32 resume_window_ms = 5; }
 ```
 
-解码时跳过未知字段，便于以后扩展帧；各类帧必须满足的字段组合见 [frame.go](../protocol/realtime/frame.go) 中的 `validate`，Go 与 TS 实现执行同一套规则。
+解码时跳过未知字段，便于以后扩展帧；各类帧必须满足的字段组合见 [frame.go](../protocol/realtime/frame.go) 中的 `validate`，所有实现执行同一套规则。
+
+接收方忽略长度为 0 的 WebSocket 消息：它们不是帧（Godot 4.5 的 `WebSocketPeer` 在断线重连时偶尔会发出）。服务器关闭 WebSocket 时把错误码写进关闭原因（例如 `kicked`）；如果平台在连接关闭时丢掉了最后的 `close` 帧（Godot 4.5 实测如此），客户端仍能据此得知原因。
 
 ## 3. 会话与可靠性
 
@@ -179,11 +181,13 @@ client.close();
 - push 处理函数按到达顺序同步调用；抛出的异常交给 `onError`，不影响后续消息。
 - 运行环境：标准 WebSocket（浏览器、Node 22+、Cocos Creator、Laya）用默认的 `webSocketFactory()`；微信小程序/小游戏传入 `socket: wechatSocketFactory(wx)`（[sdk/wechat/realtime.ts](../sdk/wechat/realtime.ts)）。其他平台实现 `SocketFactory` 的 `send/close` 与 `open/message/close` 三个回调即可。编解码不依赖 TextEncoder、BigInt64Array；需要 BigInt。
 
-## 6. Go 与 Unity 客户端
+## 6. Go、Unity 与 Godot 客户端
 
 `realtime.NewClient(contract, "game", "ws://host/ws/game")` 提供与 TS 相同的重连、恢复和重发逻辑：`Connect`、`realtime.Call[*gamepb.LoginReply](ctx, c, "login", req)`、`c.Notify`、`realtime.HandlePush[*gamepb.ChatMessage](c, "chatMessage", fn)`、`OnState`。适合机器人、压测和服务间连接。
 
 Unity（C#）使用 `RealtimeClient` 与 `TabForgeRealtime` 组件，消息为 ProtoJSON `JObject`，所有回调在主线程执行，用法见 [Unity SDK](../sdk/unity/README.md#实时长连接)。WebGL 需要自行提供浏览器 WebSocket 桥。
+
+Godot（GDScript）使用 `realtime_client.gd` 节点，消息为 ProtoJSON Dictionary，在 `_process` 中轮询，用法见 [Godot SDK](../sdk/godot/README.md#实时长连接)。
 
 ## 7. 验证
 
@@ -192,6 +196,7 @@ Unity（C#）使用 `RealtimeClient` 与 `TabForgeRealtime` 组件，消息为 P
 | `go test ./protocol/realtime` | 两种编码下的请求/推送/通知；随机切断 TCP 的代理下持续 2 秒并发购买（每轮约 1–3 万请求、40+ 次断线），校验每个请求恰好执行一次、推送不丢不重不乱序、会话不被替换；会话过期后的 `session_lost` 与未发出请求的转移；踢人、顶号、踢人帧丢失；握手拒绝；8 类协议违规；慢消费者；心跳超时；停机；房间广播；类型不匹配 |
 | 同上（需要 node） | TS 编解码与 Go 对 2800 条随机消息逐条一致（64 位极值、NaN/Inf、中文与 emoji、map、oneof、时间戳、未知枚举值），重新编码后 Go `proto.Equal`；Node 客户端在全程随机断线的代理下同样校验（含最后的 volatile 与踢人），两种编码 |
 | 同上（设置 `DOTNET_BIN`） | Unity C# 核心（普通 .NET 8，不是 Unity 引擎）：模拟服务器单元测试、与 Go 的 2800 条编解码一致性、全程随机断线下的同样校验，两种编码；2026-11-09 在 Docker（Linux）中连续 5 轮通过 |
+| 同上（设置 `GODOT_BIN`） | Godot 4.5.1 headless：模拟服务器单元测试、与 Go 的 2800 条编解码一致性、全程随机断线下的同样校验，两种编码；2026-11-09 在 Docker（Linux）中连续 10 轮通过 |
 | `npm test`（sdk/typescript） | 模拟服务器下的握手、校验、重复帧、恢复与过期、协议错误、永久关闭、超时/取消/背压、volatile 丢弃、微信适配 |
 | `go test -race` | 2026-11-09 在 Docker `golang:1.26`（Linux）中通过 |
 
@@ -199,5 +204,5 @@ Unity（C#）使用 `RealtimeClient` 与 `TabForgeRealtime` 组件，消息为 P
 
 ## 8. 尚未实现
 
-- Godot（GDScript）、Unreal（C++）、Lua 的长连接客户端，以及 Unity WebGL 的 WebSocket 桥；这些平台目前可使用 HTTP/SSE 客户端，或按本文第 2–3 节自行实现。
+- Unreal（C++）、Lua 的长连接客户端，以及 Unity WebGL 的 WebSocket 桥；这些平台目前可使用 HTTP/SSE 客户端，或按本文第 2–3 节自行实现。
 - 跨进程会话迁移（会话保存在单实例内存中）、TCP/KCP 传输、消息压缩（permessage-deflate 默认关闭）。

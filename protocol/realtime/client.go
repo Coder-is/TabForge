@@ -666,6 +666,9 @@ func (c *Client) readLoop(conn *clientConn) *Error {
 		if err != nil {
 			return nil
 		}
+		if len(data) == 0 {
+			continue // Empty messages are not frames.
+		}
 		var f *Frame
 		if got == typ {
 			f, err = DecodeFrame(c.Encoding, data)

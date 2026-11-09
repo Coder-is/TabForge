@@ -714,6 +714,8 @@ export class RealtimeClient<C extends ChannelShape> {
     }
 
     private receive(conn: Connection, data: string | ArrayBuffer | Uint8Array): void {
+        if ((typeof data === "string" ? data.length : data.byteLength) === 0)
+            return; // Empty messages are not frames.
         let f: Frame;
         try {
             if (this.encoding === "proto") {

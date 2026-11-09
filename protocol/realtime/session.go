@@ -348,7 +348,7 @@ func (s *Session) endIf(e *Error, condition func() bool) {
 	if s.srv.OnSessionEnd != nil {
 		s.srv.OnSessionEnd(s, e)
 	}
-	s.srv.observe(Event{Type: "session_end", Channel: s.channel.ID, SessionID: s.id, UserID: s.identity.UserID, Code: e.Code})
+	s.srv.observe(Event{Type: "session_end", Channel: s.channel.ID, SessionID: s.id, UserID: s.identity.UserID, Code: e.Code, Reason: e.Message})
 }
 
 func (s *Session) writeLoop(c *connection) {
@@ -413,6 +413,9 @@ func (s *Session) readLoop(c *connection) {
 		if err != nil {
 			s.detach(c)
 			return
+		}
+		if len(data) == 0 {
+			continue // Empty messages carry nothing (some WebSocket stacks send them); never a frame.
 		}
 		if limit > 0 {
 			now := time.Now()

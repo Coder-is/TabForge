@@ -59,3 +59,33 @@ GODOT_BIN=/absolute/path/to/godot go test -race -count=1 ./protocol/httptranspor
 ```
 
 Go 集成测试启动真实 HTTP 服务，验证普通/SSE、Unicode、大整数、输入类型错误、取消、超时、提前结束和协议身份不匹配。没有设置 GODOT_BIN 的 Go 测试会跳过引擎验证；CI 的独立 Godot 任务会下载固定版本、验证 SHA-512 后执行这些测试。
+
+## 实时长连接
+
+`realtime_client.gd` 是 WebSocket 通道客户端（基于 `WebSocketPeer`，桌面、移动与 Web 导出均可使用），协议与可靠性语义见 [实时长连接](../../doc/realtime.md)。默认使用二进制 Protobuf 帧（`realtime_codec.gd` 依据生成的 `CONTRACT.codecSchema` 与 ProtoJSON Dictionary 互转），`{"encoding": "json"}` 使用 JSON 帧。
+
+```gdscript
+const Realtime = preload("res://addons/tabforge/realtime_client.gd")
+const PROTOCOL = preload("res://generated/protocol.gd")
+
+var client := Realtime.new()
+
+func _ready() -> void:
+	add_child(client) # _process 中轮询，所有信号都在主线程触发
+	client.configure("wss://game.example.com/ws/game", PROTOCOL.CONTRACT, "game", {"token": func(): return login_token})
+	client.state_changed.connect(func(state: String, error: Dictionary) -> void:
+		# connected：新会话，重新拉取状态；resumed：原会话继续；closed：被踢、顶号等，不再重连
+		print(state, error))
+	client.on_push("chatMessage", func(message: Dictionary) -> void: print(message.text))
+	client.start()
+	var login := client.request("login", {"nickname": "勇者"})
+	login.completed.connect(func(reply: Dictionary) -> void: print(reply.playerId))
+	login.failed.connect(func(error: Dictionary) -> void: print(error.code)) # session_lost 表示结果未知
+	client.notify("move", {"position": {"x": 1.0, "y": 2.0}, "tick": 1}) # volatile：掉线时返回 false
+```
+
+- 消息是 ProtoJSON 形态的 Dictionary：64 位整数为十进制字符串，枚举为名称。发送前按 `wireSchema` 校验并规范化，失败的请求在下一帧以 `invalid_message` 触发 `failed`。
+- 节点离开场景树时关闭会话；需要跨场景保持会话时把它放在自动加载（Autoload）节点下。
+- 64 位整数在 GDScript 中按两个 32 位分量处理，`uint64` 最大值等极端值与 Go 一致。
+
+验证：`go test ./protocol/realtime` 在设置 `GODOT_BIN` 后以 headless 方式运行 [tests/realtime.gd](tests/realtime.gd)：模拟服务器单元测试、与 Go 对 2800 条随机消息的编解码一致性，以及随机断线代理下连接 Go 服务端的压测（每个请求恰好执行一次、推送不丢不重不乱序、踢人在断线时也能送达），两种编码。2026-11-09 在 Docker（Linux）中用 Godot 4.5.1 连续 10 轮通过。移动导出、Web 导出与编辑器内运行尚未实测。
