@@ -11,6 +11,7 @@
 | GitHub 标签交付、公共包仓库和市场发布准备 | [发布流程](publishing.md)、[0.5.0 版本说明](release-notes.md) |
 | 了解项目、编译工具、导出 Excel/CSV 配置 | [项目首页与 V3 教程](../README.md) |
 | 从 Proto 建立前后端协议并接入客户端 | [前后端接入指南](protocol-integration.md) |
+| 游戏实时长连接（WebSocket 推送、断线恢复） | [实时长连接](realtime.md) |
 | 运行普通 JSON 与 SSE 演示 | [协议示例](../examples/protocol/README.md) |
 | 理解包络、ProtoJSON、事件与兼容性规则 | [统一协议架构](unified-protocol.md) |
 | 配置认证、CORS、超时、限流边界与升级 | [生产部署说明](production.md) |

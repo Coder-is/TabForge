@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "output": "Generated",
+  "schema": {
+    "dir": "Protocols",
+    "go": true
+  },
+  "protocol": "Protocols/contract.json"
+}

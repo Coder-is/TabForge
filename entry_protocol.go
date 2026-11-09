@@ -53,7 +53,7 @@ func protocolEntry() error {
 		}
 		fmt.Printf("Generated protocol bundle: %s\n", *paramProtocolOut)
 	}
-	fmt.Printf("Validated protocol %s %s (%d endpoints)\n", c.Manifest.Name, c.Manifest.Version, len(c.Endpoints))
+	fmt.Printf("Validated protocol %s %s (%d endpoints, %d channels)\n", c.Manifest.Name, c.Manifest.Version, len(c.Endpoints), len(c.Channels))
 	fmt.Printf("Schema hash: %s\n", c.Fingerprint())
 	return nil
 }

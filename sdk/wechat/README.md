@@ -30,3 +30,7 @@ for await (const event of client.stream('chatStream', { prompt: '你好' }, { si
 2026-10-03 已在开发者工具 2.01.2510260、基础库 3.11.2 中通过真实 wx.request 的 12 项验收。iPhone 模拟器不代表 iOS/Android 真机通过。正式环境需 HTTPS 和合法域名；示例关闭 URL 检查仅用于本地测试。运行步骤和待测项见 [平台验收](../../doc/platform-validation.md)。
 
 API 依据：[微信官方 request 类型定义](https://github.com/wechat-miniprogram/api-typings/blob/master/types/wx/lib.wx.api.d.ts)。
+
+## 实时长连接
+
+`realtime.ts` 的 `wechatSocketFactory(wx)` 基于 `wx.connectSocket`，作为 `RealtimeClient` 的 `socket` 选项使用，二进制帧以 ArrayBuffer 发送。用法见 [实时长连接](../../doc/realtime.md)。目前只有模拟 `wx` 的单元测试，开发者工具与真机尚未实测。

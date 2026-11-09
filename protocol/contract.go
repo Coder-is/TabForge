@@ -28,6 +28,9 @@ type Manifest struct {
 	Version       string     `json:"version"`
 	Descriptor    string     `json:"descriptor"`
 	Endpoints     []Endpoint `json:"endpoints"`
+	// Channels are long-lived realtime connections (WebSocket). Omitted when
+	// empty so existing HTTP-only contracts keep their schema hash.
+	Channels []Channel `json:"channels,omitempty"`
 }
 
 type Endpoint struct {
@@ -58,6 +61,7 @@ type Contract struct {
 	Files     *protoregistry.Files
 	Types     *protoregistry.Types
 	Endpoints []ResolvedEndpoint
+	Channels  []ResolvedChannel
 }
 
 // Load resolves descriptor paths relative to the manifest, unlike table indexes.
@@ -102,8 +106,8 @@ var eventName = regexp.MustCompile(`^[a-z][a-z0-9_.-]*$`)
 var versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$`)
 
 func Resolve(m Manifest, set *descriptorpb.FileDescriptorSet) (*Contract, error) {
-	if m.SchemaVersion != SchemaVersion || m.Name == "" || m.Version == "" || len(m.Endpoints) == 0 {
-		return nil, fmt.Errorf("protocol requires schema_version=%q, name, version and endpoints", SchemaVersion)
+	if m.SchemaVersion != SchemaVersion || m.Name == "" || m.Version == "" || len(m.Endpoints)+len(m.Channels) == 0 {
+		return nil, fmt.Errorf("protocol requires schema_version=%q, name, version and endpoints or channels", SchemaVersion)
 	}
 	if !versionPattern.MatchString(m.Version) {
 		return nil, fmt.Errorf("version must use major.minor.patch with an optional prerelease suffix")
@@ -167,6 +171,9 @@ func Resolve(m Manifest, set *descriptorpb.FileDescriptorSet) (*Contract, error)
 			return nil, fmt.Errorf("%s: unsupported transport %q (v1 supports http_json and http_sse)", e.ID, e.Transport)
 		}
 		c.Endpoints = append(c.Endpoints, ResolvedEndpoint{Endpoint: e, Input: rpc.Input(), Output: rpc.Output()})
+	}
+	if err := c.resolveChannels(paths); err != nil {
+		return nil, err
 	}
 	return c, nil
 }

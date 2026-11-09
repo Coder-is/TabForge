@@ -1,0 +1,193 @@
+{
+  "messages": {
+    "google.protobuf.Timestamp": {
+      "fields": {
+        "nanos": {
+          "kind": "int32"
+        },
+        "seconds": {
+          "kind": "int64"
+        }
+      }
+    },
+    "tabforge.game.BuyReply": {
+      "fields": {
+        "gold": {
+          "kind": "int64"
+        },
+        "inventory": {
+          "kind": "uint32",
+          "mapKey": "uint32"
+        }
+      }
+    },
+    "tabforge.game.BuyRequest": {
+      "fields": {
+        "count": {
+          "kind": "uint32"
+        },
+        "itemId": {
+          "kind": "uint32",
+          "protoName": "item_id"
+        }
+      }
+    },
+    "tabforge.game.ChatAck": {
+      "fields": {
+        "messageId": {
+          "kind": "uint64",
+          "protoName": "message_id"
+        }
+      }
+    },
+    "tabforge.game.ChatMessage": {
+      "fields": {
+        "from": {
+          "kind": "uint64"
+        },
+        "messageId": {
+          "kind": "uint64",
+          "protoName": "message_id"
+        },
+        "sentAt": {
+          "kind": "message",
+          "type": "google.protobuf.Timestamp",
+          "protoName": "sent_at"
+        },
+        "text": {
+          "kind": "string"
+        }
+      }
+    },
+    "tabforge.game.ChatSend": {
+      "fields": {
+        "text": {
+          "kind": "string"
+        }
+      }
+    },
+    "tabforge.game.JoinRoomRequest": {
+      "fields": {
+        "room": {
+          "kind": "string"
+        }
+      }
+    },
+    "tabforge.game.LoginReply": {
+      "fields": {
+        "gold": {
+          "kind": "int64"
+        },
+        "nickname": {
+          "kind": "string"
+        },
+        "playerId": {
+          "kind": "uint64",
+          "protoName": "player_id"
+        }
+      }
+    },
+    "tabforge.game.LoginRequest": {
+      "fields": {
+        "nickname": {
+          "kind": "string"
+        }
+      }
+    },
+    "tabforge.game.Move": {
+      "fields": {
+        "position": {
+          "kind": "message",
+          "type": "tabforge.game.Vec2"
+        },
+        "tick": {
+          "kind": "uint32"
+        }
+      }
+    },
+    "tabforge.game.Player": {
+      "fields": {
+        "nickname": {
+          "kind": "string"
+        },
+        "playerId": {
+          "kind": "uint64",
+          "protoName": "player_id"
+        },
+        "position": {
+          "kind": "message",
+          "type": "tabforge.game.Vec2"
+        }
+      }
+    },
+    "tabforge.game.PlayerMoved": {
+      "fields": {
+        "playerId": {
+          "kind": "uint64",
+          "protoName": "player_id"
+        },
+        "position": {
+          "kind": "message",
+          "type": "tabforge.game.Vec2"
+        },
+        "tick": {
+          "kind": "uint32"
+        }
+      }
+    },
+    "tabforge.game.RoomState": {
+      "fields": {
+        "players": {
+          "kind": "message",
+          "type": "tabforge.game.Player",
+          "list": true
+        },
+        "room": {
+          "kind": "string"
+        }
+      }
+    },
+    "tabforge.game.ServerNotice": {
+      "fields": {
+        "eventName": {
+          "kind": "string",
+          "protoName": "event_name"
+        },
+        "kind": {
+          "kind": "enum",
+          "type": "tabforge.game.Notice"
+        },
+        "minutesLeft": {
+          "kind": "uint32",
+          "protoName": "minutes_left"
+        },
+        "text": {
+          "kind": "string"
+        }
+      },
+      "oneofs": [
+        [
+          "minutesLeft",
+          "eventName"
+        ]
+      ]
+    },
+    "tabforge.game.Vec2": {
+      "fields": {
+        "x": {
+          "kind": "float"
+        },
+        "y": {
+          "kind": "float"
+        }
+      }
+    }
+  },
+  "enums": {
+    "tabforge.game.Notice": [
+      "NOTICE_UNSPECIFIED",
+      "NOTICE_MAINTENANCE",
+      "NOTICE_EVENT"
+    ]
+  }
+}

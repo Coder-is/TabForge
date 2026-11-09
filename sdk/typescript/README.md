@@ -43,3 +43,7 @@ npm ci --prefix sdk/typescript --ignore-scripts
 npm --prefix sdk/typescript run check
 npm --prefix sdk/typescript test
 ```
+
+## 实时长连接
+
+`@tabforge/protocol-runtime/realtime` 提供 WebSocket 通道客户端 `RealtimeClient`：类型化的 `api`（请求）、`send`（通知）、`on`（推送），断线自动重连并恢复会话，未确认的帧自动重发且不会重复执行；`codecSchema` 启用二进制 Protobuf 帧（`./protobuf` 为编解码器）。用法、可靠性语义与验证范围见 [实时长连接](../../doc/realtime.md)。

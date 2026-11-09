@@ -1,0 +1,24 @@
+{
+  "format": "tabforge.export.v1",
+  "schemaHash": "2e48913f37aa76c168a4c2cc393ecad41cae2ef79f3ab584315f30eb8fd80aaa",
+  "files": [
+    "data_manifest.json",
+    "export.json",
+    "protocol/PROTOCOL.md",
+    "protocol/contract.json",
+    "protocol/protocol.gd",
+    "protocol/runtime.json",
+    "protocol/schema.pb",
+    "protocol/types.ts",
+    "protocol/wire_schema.json",
+    "schema/SCHEMA.md",
+    "schema/bundle.json",
+    "schema/data.ts",
+    "schema/go/game.pb.go",
+    "schema/json.ts",
+    "schema/schema.pb",
+    "schema/schema.ts",
+    "schema/types.ts",
+    "schema/wire_schema.json"
+  ]
+}

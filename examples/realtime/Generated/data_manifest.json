@@ -1,0 +1,13 @@
+{
+  "format": "tabforge.data.v1",
+  "schemaHash": "2e48913f37aa76c168a4c2cc393ecad41cae2ef79f3ab584315f30eb8fd80aaa",
+  "descriptor": {
+    "path": "schema/schema.pb",
+    "sha256": "004c93af41d49a9af75685907f71b4d1939452290d81d0a8afe9247cd05f997e"
+  },
+  "wireSchema": {
+    "path": "schema/wire_schema.json",
+    "sha256": "eccd982e69cba3b1f0f71cca9096de536d6e67680ba0f86a0b0692c224993250"
+  },
+  "data": []
+}
