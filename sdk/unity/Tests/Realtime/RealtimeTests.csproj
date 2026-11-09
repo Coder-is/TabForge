@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Runtime/ProtocolCore.cs" Link="ProtocolCore.cs" />
+    <Compile Include="../../Runtime/JsonSyntax.cs" Link="JsonSyntax.cs" />
+    <Compile Include="../../Runtime/WireValidator.cs" Link="WireValidator.cs" />
+    <Compile Include="../../Runtime/SseParser.cs" Link="SseParser.cs" />
+    <Compile Include="../../Runtime/RealtimeCodec.cs" Link="RealtimeCodec.cs" />
+    <Compile Include="../../Runtime/RealtimeClient.cs" Link="RealtimeClient.cs" />
+    <Compile Include="../../Runtime/ClientWebSocketTransport.cs" Link="ClientWebSocketTransport.cs" />
+    <Compile Include="RealtimeTests.cs" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
+  </ItemGroup>
+</Project>

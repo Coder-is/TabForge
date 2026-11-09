@@ -113,6 +113,15 @@ type codecCase struct {
 
 func TestTypeScriptCodecMatchesGo(t *testing.T) {
 	node := nodeOrSkip(t)
+	checkCodec(t, "TypeScript", func(input, output string) *exec.Cmd {
+		return exec.Command(node, "../../sdk/typescript/codec.integration.mjs", input, output)
+	})
+}
+
+// checkCodec sends random messages of every channel type to another
+// implementation, which must decode them exactly like Go protojson and
+// re-encode them to binaries that Go decodes to equal messages.
+func checkCodec(t *testing.T, language string, command func(input, output string) *exec.Cmd) {
 	c := testContract(t, nil)
 	var types []protoreflect.MessageDescriptor
 	for name := range c.CodecSchema().Messages {
@@ -148,9 +157,9 @@ func TestTypeScriptCodecMatchesGo(t *testing.T) {
 	if err := os.WriteFile(input, data, 0644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command(node, "../../sdk/typescript/codec.integration.mjs", input, output).CombinedOutput()
+	out, err := command(input, output).CombinedOutput()
 	if err != nil {
-		t.Fatalf("node: %v\n%s", err, out)
+		t.Fatalf("%s: %v %s", language, err, out)
 	}
 	t.Log(string(out))
 	var results []struct{ FromJSON, FromDecoded string }
@@ -166,7 +175,7 @@ func TestTypeScriptCodecMatchesGo(t *testing.T) {
 			binary, _ := base64.StdEncoding.DecodeString(encoded)
 			m := dynamicpb.NewMessage(originals[i].ProtoReflect().Descriptor())
 			if err := proto.Unmarshal(binary, m); err != nil {
-				t.Fatalf("case %d: Go cannot decode TypeScript output: %v", i, err)
+				t.Fatalf("case %d: Go cannot decode %s output: %v", i, language, err)
 			}
 			if !proto.Equal(m, originals[i]) {
 				t.Fatalf("case %d %s: TypeScript re-encoding differs\nwant %v\ngot  %v", i, cases[i].Type, originals[i], m)
