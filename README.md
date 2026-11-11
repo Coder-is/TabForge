@@ -38,12 +38,12 @@ go run ./cmd/package-backend -out=outputs/releases/v3 # 构建四种语言的后
 | 接入端 | SDK | 当前验证范围 |
 | --- | --- | --- |
 | Go 后端 | [HTTP/SSE 服务](doc/protocol-integration.md) | Go 竞态回归与跨语言 HTTP 联调 |
-| Go 实时服务 / TS、微信、Unity 与 Godot 客户端 | [WebSocket 通道](doc/realtime.md) | 随机断线代理下的恰好一次与顺序校验、Go↔TS 编解码一致性、Linux 竞态；Unity C# 客户端（.NET 8）、Unity WebGL jslib 桥（Node 模拟堆）与 Godot 客户端（4.5.1 headless）通过同样的断线与编解码校验；浏览器/微信/引擎编辑器与真机长连接待测；Unreal/Lua 长连接客户端未实现 |
+| Go 实时服务 / TS、微信、Unity、Godot 与 Unreal 客户端 | [WebSocket 通道](doc/realtime.md) | 随机断线代理下的恰好一次与顺序校验、Go↔TS 编解码一致性、Linux 竞态；Unity C# 客户端（.NET 8）、Unity WebGL jslib 桥（Node 模拟堆）、Godot 客户端（4.5.1 headless）与 Unreal 客户端的 C++ 核心（ASan/UBSan，Go 桥接 WebSocket）通过同样的断线与编解码校验；浏览器/微信/引擎编辑器与真机长连接、Unreal 引擎编译待测；Lua 长连接客户端未实现 |
 | 网页 / Node | [TypeScript Fetch](sdk/typescript/README.md) | Node 24、Chromium Fetch/XHR |
 | 微信小程序 | [wx.request 分块](sdk/wechat/README.md) | 开发者工具真实网络 12 项；真机与小游戏构建待测 |
 | Cocos Creator 3.8 目标 | [Fetch/XHR/微信](sdk/cocos/README.md) | Web 网络后端通过；Creator/JSB/移动构建待测 |
 | Unity 2022.3 / Unity 6 原生目标 | [UPM C#](sdk/unity/README.md) | C# 核心与 Go 联调；编辑器/IL2CPP 待测，WebGL SSE 未实现 |
-| Unreal 5.5+ 目标 | [Runtime C++ 插件](sdk/unreal/README.md) | 独立 C++ 核心 sanitizer；引擎编译和原生 HTTP 待测 |
+| Unreal 5.5+ 目标 | [Runtime C++ 插件](sdk/unreal/README.md) | 独立 C++ 核心 sanitizer（HTTP/SSE 与实时通道）；引擎编译、原生 HTTP 与 WebSocket 待测 |
 | Godot 4.5.1+ 原生目标 | [GDScript](sdk/godot/README.md) | 4.5.1 macOS headless 与 Go 联调；Web 流与移动导出待测 |
 
 完整环境与用例见 [平台验收](doc/platform-validation.md)。代码实现与目标设备实测分开记录，不能从核心测试推断所有引擎构建均已兼容。

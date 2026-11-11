@@ -141,6 +141,10 @@ jobs:
         run: |
           clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I sdk/unreal/Source/TabForgeProtocol/Public sdk/native/tests/sse_test.cpp -o "$RUNNER_TEMP/tabforge-sse-test"
           "$RUNNER_TEMP/tabforge-sse-test"
+      - name: C++ realtime core (Unreal client) against the Go server
+        env:
+          CXX_BIN: clang++
+        run: go test -race -count=1 -run NativeRealtime ./protocol/realtime
       - name: Go HTTP to TS callback adapters, C# core and C# realtime client
         env:
           DOTNET_BIN: dotnet

@@ -15,6 +15,13 @@ import (
 // checks at the end. It returns the program output.
 func chaos(t *testing.T, command func(url string) *exec.Cmd) string {
 	t.Helper()
+	return chaosRun(t, func(url string) ([]byte, error) { return command(url).CombinedOutput() })
+}
+
+// chaosRun is chaos for clients that need more than a plain command (for
+// example the native client, whose sockets the test bridges).
+func chaosRun(t *testing.T, run func(url string) ([]byte, error)) string {
+	t.Helper()
 	f := newFixture(t, testContract(t, nil), func(s *Server) {
 		registerGame(t, s)
 		// Node's WebSocket negotiates permessage-deflate, so the TS client
@@ -46,7 +53,7 @@ func chaos(t *testing.T, command func(url string) *exec.Cmd) string {
 			}
 		}
 	}()
-	out, err := command("ws://" + f.proxy.addr() + "/ws/game").CombinedOutput()
+	out, err := run("ws://" + f.proxy.addr() + "/ws/game")
 	close(stop)
 	if err != nil {
 		t.Fatalf("client: %v\n%s", err, out)

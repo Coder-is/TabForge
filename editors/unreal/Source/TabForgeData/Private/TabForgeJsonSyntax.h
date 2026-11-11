@@ -47,7 +47,8 @@ class JsonSyntax {
             if (pos_ == text_.size()) return false;
             const char ch = text_[pos_++];
             const int digit = ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
-            if (digit < 0) return false; code = (code << 4) | digit;
+            if (digit < 0) return false;
+            code = (code << 4) | digit;
         }
         return true;
     }
