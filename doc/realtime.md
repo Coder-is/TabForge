@@ -151,6 +151,7 @@ server.Shutdown(ctx) // 通知所有客户端 server_shutdown 并等待处理函
 | `Concurrency` | 1 | 同一会话同时处理的请求数；大于 1 时响应可能乱序完成（仍按 `replyTo` 对应） |
 | `HandshakeTimeout` / `WriteTimeout` | 10 s | 握手与单次写入超时 |
 | `OnSessionStart` / `OnSessionEnd` / `Observe` | — | 会话生命周期和每条消息的结果（不含令牌和载荷），用于日志与指标 |
+| `Store` / `ExportSession` / `ImportSession` | 无 | 停机时把会话交给下一个实例，见下文“跨实例会话交接” |
 
 **消息压缩。** `server.Compression = realtime.CompressionContextTakeover`（或 `CompressionNoContextTakeover`）开启 permessage-deflate（RFC 7692），只对超过 `CompressionThreshold` 的消息生效。压缩由握手协商：客户端不支持时自动不压缩，开启后不会影响任何已有客户端。
 
@@ -161,7 +162,37 @@ server.Shutdown(ctx) // 通知所有客户端 server_shutdown 并等待处理函
 
 客户端支持情况：浏览器（Safari 除外）、Node 22+、Go 客户端（`Client.Compression`）会协商压缩；微信需 `wechatSocketFactory(wx, { perMessageDeflate: true })`；Unity `ClientWebSocket`、Godot `WebSocketPeer` 不协商，保持原样。二进制 Protobuf 编码本身已很紧凑，开启前请用实际消息做基准测试；`MaxFrameBytes` 按解压后大小检查，解压后超限的消息会被拒绝并断开连接。
 
-会话保存在单个进程的内存中。多实例部署时，负载均衡需要按会话把恢复请求路由回同一实例（例如按 `session_id` 粘性），否则恢复会得到 `session_expired` 并新建会话。
+**跨实例会话交接（滚动发布）。** 默认会话只保存在本进程内存中；多实例部署时，负载均衡需要按会话把恢复请求路由回同一实例（例如按 `session_id` 粘性），否则恢复会得到 `session_expired` 并新建会话。设置 `server.Store` 后，`Shutdown` 会把会话交给下一个实例，客户端看到的是 `resumed`，不会丢失任何东西：
+
+1. 停止接收新的 request/notify：既不执行，也不确认。客户端恢复后会把它们重发给新实例。
+2. 等待已排队和正在运行的处理函数结束，它们的响应进入待确认缓存（受 `Shutdown` 的 ctx 限制，超时的会话按原方式结束）。
+3. 冻结会话，把序号、待确认帧和 `ExportSession` 返回的应用状态写入存储，写完后才发送 `server_shutdown` 通知客户端重连。
+4. 新实例收到恢复请求时，从存储中原子地取出快照（取出即删除），先调用 `ImportSession`，再调用 `OnSessionStart`（此时 `s.Restored()` 为 true），然后继续这个会话。
+
+```go
+server.Store = redisStore{rdb}                 // 任何支持“取出即删除”的存储
+server.ExportSession = func(s *realtime.Session) ([]byte, error) { return json.Marshal(playerState(s)) }
+server.ImportSession = func(s *realtime.Session, id *realtime.Identity, state []byte) error {
+    return restorePlayer(s, id, state)        // 恢复 Values，按需填写 id.Data
+}
+
+type redisStore struct{ rdb *redis.Client }   // github.com/redis/go-redis/v9，Redis 6.2+
+func (r redisStore) Put(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+    return r.rdb.Set(ctx, key, value, ttl).Err()
+}
+func (r redisStore) Take(ctx context.Context, key string) ([]byte, error) {
+    v, err := r.rdb.GetDel(ctx, key).Bytes()
+    if err == redis.Nil { return nil, nil }
+    return v, err
+}
+```
+
+- `Take` 必须是原子的“取出并删除”，保证一个会话只会在一个实例上继续，请求不会被执行两次。存储的键由会话 id 和恢复令牌的 SHA-256 生成：没有令牌既读不到快照，也无法删除它。
+- 如果客户端在旧实例排空期间自己断线并先连上新实例，新实例会看到“交接中”标记，回复可重试的 `server_shutdown`，客户端退避后再恢复；标记带有固定截止时间（最长 30 秒，不超过 `Shutdown` 的 ctx），旧实例中途崩溃时也不会让客户端无限重试。
+- 只有通过 `Shutdown` 交接的会话可以跨实例继续。进程崩溃时内存中的会话无法保存，客户端会得到 `session_expired`（与没有 `Store` 时相同）。存储写入失败时也按原方式结束，并记录 `handoff_failed` 事件。
+- 被踢下线、关闭帧又随断线丢失的会话，结束原因也会一并写入存储，客户端在新实例上恢复时仍会收到 `kicked`。
+- `Values`、`Identity.Data` 和房间（`Group`）成员关系只存在于本进程，需要通过 `ExportSession`/`ImportSession` 携带，或在 `OnSessionStart` 中重建。交接后旧实例对该会话调用 `OnSessionEnd`，原因码为 `handed_off`。快照完成后在旧实例上的 `Push` 返回 `ErrSessionClosed`。
+- 交接只用于同一契约（同一 schema hash）的实例之间，例如发布服务端代码。契约变化时新实例会拒绝旧快照，客户端握手本身也会因 `schema_mismatch` 失败，需要随新客户端一起发布。
 
 ## 5. TypeScript 客户端
 
@@ -203,17 +234,17 @@ Godot（GDScript）使用 `realtime_client.gd` 节点，消息为 ProtoJSON Dict
 
 | 检查 | 内容 |
 | --- | --- |
-| `go test ./protocol/realtime` | 两种编码下的请求/推送/通知；随机切断 TCP 的代理下持续 2 秒并发购买（每轮约 1–3 万请求、40+ 次断线），校验每个请求恰好执行一次、推送不丢不重不乱序、会话不被替换；会话过期后的 `session_lost` 与未发出请求的转移；踢人、顶号、踢人帧丢失；握手拒绝；8 类协议违规；慢消费者；心跳超时；停机；房间广播；类型不匹配 |
+| `go test ./protocol/realtime` | 两种编码下的请求/推送/通知；随机切断 TCP 的代理下持续 2 秒并发购买（每轮约 1–3 万请求、40+ 次断线），校验每个请求恰好执行一次、推送不丢不重不乱序、会话不被替换；会话过期后的 `session_lost` 与未发出请求的转移；踢人、顶号、踢人帧丢失；握手拒绝；8 类协议违规；慢消费者；心跳超时；停机；房间广播；类型不匹配；跨实例交接：A→B→C 两次替换服务器并持续随机断线下购买仍恰好一次、计数经 Export/Import 延续、推送有序且会话不重建，运行中的处理函数结果经快照送达，排空期间提前到达新实例的恢复被要求重试，伪造令牌无法取走或删除快照，异构 schema、存储失败与踢人原因的处理 |
 | 同上（需要 node） | TS 编解码与 Go 对 2800 条随机消息逐条一致（64 位极值、NaN/Inf、中文与 emoji、map、oneof、时间戳、未知枚举值），重新编码后 Go `proto.Equal`；Node 客户端在全程随机断线的代理下同样校验（含最后的 volatile 与踢人），两种编码 |
 | 同上（设置 `DOTNET_BIN`） | Unity C# 核心（普通 .NET 8，不是 Unity 引擎）：模拟服务器单元测试、与 Go 的 2800 条编解码一致性、全程随机断线下的同样校验，两种编码；2026-11-09 在 Docker（Linux）中连续 5 轮通过 |
 | 同上（需要 node） | Unity WebGL jslib 桥：在模拟的 Emscripten 堆中加载，TS 客户端全部帧经过它，全程随机断线下同样校验，两种编码；另以 `UNITY_WEBGL` 编译 C# P/Invoke 分支（设置 `DOTNET_BIN`）。2026-11-11 在本机（Windows，Node 24）与 Docker（Linux，.NET 8）中通过；Unity WebGL 构建与浏览器尚未实测 |
 | 同上（设置 `GODOT_BIN`） | Godot 4.5.1 headless：模拟服务器单元测试、与 Go 的 2800 条编解码一致性、全程随机断线下的同样校验，两种编码；2026-11-09 在 Docker（Linux）中连续 10 轮通过 |
 | `npm test`（sdk/typescript） | 模拟服务器下的握手、校验、重复帧、恢复与过期、协议错误、永久关闭、超时/取消/背压、volatile 丢弃、微信适配 |
-| `go test -race` | 2026-11-09 在 Docker `golang:1.26`（Linux）中通过 |
+| `go test -race` | 2026-11-09 在 Docker `golang:1.26`（Linux）中通过；含压缩与跨实例交接的版本 2026-11-11 连续 3 轮通过 |
 
 本地记录不代表远程 CI 已通过。浏览器、微信开发者工具、Unity 编辑器与 WebGL 构建和真机上的长连接尚未实测；正式环境需使用 `wss://`，并在负载均衡/网关上放开 WebSocket 升级与长连接超时。
 
 ## 8. 尚未实现
 
 - Unreal（C++）、Lua 的长连接客户端；这些平台目前可使用 HTTP/SSE 客户端，或按本文第 2–3 节自行实现。
-- 跨进程会话迁移（会话保存在单实例内存中）、TCP/KCP 传输。
+- 进程崩溃后的会话恢复（只有 `Shutdown` 交接的会话可跨实例继续）、TCP/KCP 传输。

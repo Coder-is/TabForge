@@ -98,7 +98,9 @@ type Session struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	inbound  chan inbound
-	running  sync.WaitGroup
+	// pending counts inbound messages queued or being processed.
+	pending sync.WaitGroup
+	running sync.WaitGroup
 
 	// Values holds application state (player, room...). It is never sent.
 	Values sync.Map
@@ -113,10 +115,17 @@ type Session struct {
 	ackSent     uint64
 	conn        *connection
 	ended       bool
-	endErr      *Error
-	expiry      *time.Timer
-	ackTimer    *time.Timer
-	onEnd       []func(*Error)
+	// draining drops new requests and notifies unacknowledged (the client
+	// resends them to the next server); frozen refuses new output after a
+	// hand-off snapshot. restored marks a session taken over from a store.
+	draining  bool
+	frozen    bool
+	restored  bool
+	expiresAt time.Time
+	endErr    *Error
+	expiry    *time.Timer
+	ackTimer  *time.Timer
+	onEnd     []func(*Error)
 }
 
 func (s *Session) ID() string               { return s.id }
@@ -124,6 +133,10 @@ func (s *Session) Channel() string          { return s.channel.ID }
 func (s *Session) Identity() Identity       { return s.identity }
 func (s *Session) Encoding() Encoding       { return s.encoding }
 func (s *Session) Context() context.Context { return s.ctx }
+
+// Restored reports whether this server took the session over from another
+// instance through Server.Store (OnSessionStart runs for it as well).
+func (s *Session) Restored() bool { return s.restored }
 
 // Connected reports whether a transport is currently attached.
 func (s *Session) Connected() bool {
@@ -197,7 +210,7 @@ func (s *Session) sendReliable(f *outFrame) error {
 		maxBytes = 8 << 20
 	}
 	s.mu.Lock()
-	if s.ended {
+	if s.ended || s.frozen {
 		s.mu.Unlock()
 		return ErrSessionClosed
 	}
@@ -228,7 +241,7 @@ func (s *Session) sendVolatile(kind Kind, message uint32, payload []byte) error 
 		return ErrSessionClosed
 	}
 	c := s.conn
-	if c == nil || c.volatile >= maxVolatileQueued {
+	if c == nil || s.frozen || c.volatile >= maxVolatileQueued {
 		return ErrDropped
 	}
 	c.volatile++
@@ -281,6 +294,7 @@ func (s *Session) attach(c *connection, peerAck uint64, resumed bool) error {
 		s.expiry.Stop()
 		s.expiry = nil
 	}
+	s.expiresAt = time.Time{}
 	welcome := &Welcome{SessionID: s.id, ResumeToken: s.resumeToken, Resumed: resumed, HeartbeatMS: uint32(s.channel.Heartbeat), ResumeWindowMS: uint32(s.channel.Resume)}
 	c.queue = append(make([]*outFrame, 0, len(s.outbox)+1), &outFrame{kind: KindWelcome, welcome: welcome})
 	c.queue = append(c.queue, s.outbox...)
@@ -304,6 +318,7 @@ func (s *Session) detach(c *connection) {
 	s.conn = nil
 	window := time.Duration(s.channel.Resume) * time.Millisecond
 	if window > 0 {
+		s.expiresAt = time.Now().Add(window)
 		s.expiry = time.AfterFunc(window, func() {
 			s.endIf(&Error{Code: CodeSessionExpired, Message: "resume window elapsed", Retryable: true}, func() bool { return s.conn == nil })
 		})
@@ -318,7 +333,12 @@ func (s *Session) detach(c *connection) {
 func (s *Session) end(e *Error) { s.endIf(e, nil) }
 
 // endIf ends the session when condition (checked under the lock) holds.
-func (s *Session) endIf(e *Error, condition func() bool) {
+func (s *Session) endIf(e *Error, condition func() bool) { s.endWithIf(e, e, condition) }
+
+// endWith reports e to the application and sends client to the client.
+func (s *Session) endWith(e, client *Error) { s.endWithIf(e, client, nil) }
+
+func (s *Session) endWithIf(e, client *Error, condition func() bool) {
 	s.mu.Lock()
 	if s.ended || (condition != nil && !condition()) {
 		s.mu.Unlock()
@@ -340,7 +360,7 @@ func (s *Session) endIf(e *Error, condition func() bool) {
 	s.cancel()
 	s.srv.remove(s, e)
 	if c != nil {
-		go c.closeWith(s.encoding, e, time.Second)
+		go c.closeWith(s.encoding, client, time.Second)
 	}
 	for _, callback := range callbacks {
 		callback(e)
@@ -477,11 +497,18 @@ func (s *Session) receive(c *connection, f *Frame) (stop bool, _ *Error) {
 		if (f.Seq == 0) != m.Volatile {
 			return false, &Error{Code: CodeProtocolError, Message: fmt.Sprintf("message %s must be %s", m.Name, map[bool]string{true: "volatile", false: "sequenced"}[m.Volatile])}
 		}
+		if s.draining {
+			// Handing off: neither run nor acknowledge it. A sequenced frame
+			// is retransmitted to the next server after the client resumes.
+			return false, nil
+		}
 		in := inbound{message: m, seq: f.Seq, payload: f.Payload}
 		if m.Volatile {
+			s.pending.Add(1)
 			select {
 			case s.inbound <- in:
 			default: // Volatile input is dropped under load.
+				s.pending.Done()
 			}
 			return false, nil
 		}
@@ -492,9 +519,11 @@ func (s *Session) receive(c *connection, f *Frame) (stop bool, _ *Error) {
 		if f.Seq != s.received+1 {
 			return false, &Error{Code: CodeProtocolError, Message: "sequence gap"}
 		}
+		s.pending.Add(1)
 		select {
 		case s.inbound <- in:
 		default:
+			s.pending.Done()
 			return false, &Error{Code: CodeOverloaded, Message: "too many queued messages", Retryable: true}
 		}
 		s.received = f.Seq
@@ -537,6 +566,7 @@ func (s *Session) dispatch() {
 	for {
 		select {
 		case <-s.ctx.Done():
+			s.discardInbound()
 			return
 		case in := <-s.inbound:
 			if concurrency == 1 {
@@ -546,6 +576,8 @@ func (s *Session) dispatch() {
 			select {
 			case slots <- struct{}{}:
 			case <-s.ctx.Done():
+				s.pending.Done() // in is dropped with the session.
+				s.discardInbound()
 				return
 			}
 			s.running.Add(1)
@@ -558,7 +590,52 @@ func (s *Session) dispatch() {
 	}
 }
 
+// discardInbound releases messages left in the queue of an ended session.
+// Nothing is enqueued after the session ends, so this empties it for good.
+func (s *Session) discardInbound() {
+	for {
+		select {
+		case <-s.inbound:
+			s.pending.Done()
+		default:
+			return
+		}
+	}
+}
+
+// startDrain stops taking new requests and notifies (see receive). It
+// reports false if the session has already ended.
+func (s *Session) startDrain() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ended {
+		return false
+	}
+	s.draining = true
+	return true
+}
+
+// waitDrained waits until every queued message has been processed, so
+// their responses are in the outbox. It reports false if the session ended
+// or ctx expired first.
+func (s *Session) waitDrained(ctx context.Context) bool {
+	done := make(chan struct{})
+	go func() {
+		s.pending.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return s.ctx.Err() == nil
+	case <-s.ctx.Done():
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
 func (s *Session) process(in inbound) {
+	defer s.pending.Done()
 	started := time.Now()
 	event := Event{Type: in.message.Kind, Channel: s.channel.ID, SessionID: s.id, UserID: s.identity.UserID, Message: in.message.Name}
 	defer func() {

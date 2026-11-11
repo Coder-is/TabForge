@@ -85,6 +85,17 @@ type Server struct {
 	OnSessionEnd   func(*Session, *Error)
 	Observe        func(Event)
 
+	// Store hands sessions to the next server on Shutdown (rolling deploys,
+	// load balancers without session affinity); see SessionStore. nil keeps
+	// sessions in this process only.
+	Store SessionStore
+	// ExportSession and ImportSession carry application state (Values,
+	// Identity.Data) with a handed-off session. Export runs after the
+	// session's handlers have finished; Import runs before OnSessionStart
+	// on the server that continues it and may fill in identity.Data.
+	ExportSession func(*Session) ([]byte, error)
+	ImportSession func(s *Session, identity *Identity, state []byte) error
+
 	codec      *payloadCodec
 	schemaHash string
 	mu         sync.RWMutex
@@ -268,7 +279,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	for _, session := range s.sessions {
 		sessions = append(sessions, session)
 	}
+	ended := make(map[string]tombstone, len(s.ended))
+	for id, t := range s.ended {
+		ended[id] = t
+	}
 	s.mu.Unlock()
+	if s.Store != nil {
+		sessions = s.handOff(ctx, sessions, ended)
+	}
 	for _, session := range sessions {
 		session.end(&Error{Code: CodeServerShutdown, Message: "server is shutting down", Retryable: true})
 	}
@@ -410,7 +428,7 @@ func (s *Server) serveConn(ctx context.Context, ch *channelState, ws *websocket.
 		return
 	}
 	var session *Session
-	resumed := false
+	resumed, restored := false, false
 	if h.SessionID != "" {
 		s.mu.RLock()
 		candidate := s.sessions[h.SessionID]
@@ -420,6 +438,14 @@ func (s *Server) serveConn(ctx context.Context, ch *channelState, ws *websocket.
 			// The close frame was lost with the connection: repeat the real reason.
 			s.reject(ws, enc, ended.err)
 			return
+		}
+		if candidate == nil && !hasEnded && s.Store != nil {
+			fromStore, e := s.takeFromStore(ctx, ch, enc, h.SessionID, h.ResumeToken)
+			if e != nil {
+				s.reject(ws, enc, e)
+				return
+			}
+			candidate, restored = fromStore, fromStore != nil
 		}
 		if candidate == nil || candidate.channel != ch || candidate.encoding != enc || subtle.ConstantTimeCompare([]byte(candidate.resumeToken), []byte(h.ResumeToken)) != 1 {
 			s.reject(ws, enc, &Error{Code: CodeSessionExpired, Message: "session cannot be resumed; start a new session", Retryable: true})
@@ -457,10 +483,14 @@ func (s *Server) serveConn(ctx context.Context, ch *channelState, ws *websocket.
 		s.reject(ws, enc, err.(*Error))
 		return
 	}
-	if resumed {
+	if resumed && !restored {
 		s.observe(Event{Type: "session_resume", Channel: ch.ID, SessionID: session.id, UserID: session.identity.UserID})
 	} else {
-		s.observe(Event{Type: "session_start", Channel: ch.ID, SessionID: session.id, UserID: session.identity.UserID})
+		eventType := "session_start"
+		if restored {
+			eventType = "session_restore"
+		}
+		s.observe(Event{Type: eventType, Channel: ch.ID, SessionID: session.id, UserID: session.identity.UserID})
 		if s.OnSessionStart != nil {
 			s.OnSessionStart(session)
 		}
@@ -483,12 +513,8 @@ func (s *Server) newSession(ch *channelState, enc Encoding, identity Identity) (
 	if err != nil {
 		return nil, &Error{Code: CodeInternal, Message: "could not create session"}
 	}
-	queue := s.MaxQueuedMessages
-	if queue <= 0 {
-		queue = 1024
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	session := &Session{srv: s, channel: ch, id: id, resumeToken: token, identity: identity, encoding: enc, ctx: ctx, cancel: cancel, inbound: make(chan inbound, queue)}
+	session := s.buildSession(ch, enc, id, token, identity)
+	cancel := session.cancel
 	var replaced []*Session
 	s.mu.Lock()
 	if s.closing {
@@ -511,6 +537,17 @@ func (s *Server) newSession(ch *channelState, enc Encoding, identity Identity) (
 	}
 	go session.dispatch()
 	return session, nil
+}
+
+// buildSession creates an unregistered session; the caller registers it
+// and starts dispatch.
+func (s *Server) buildSession(ch *channelState, enc Encoding, id, token string, identity Identity) *Session {
+	queue := s.MaxQueuedMessages
+	if queue <= 0 {
+		queue = 1024
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Session{srv: s, channel: ch, id: id, resumeToken: token, identity: identity, encoding: enc, ctx: ctx, cancel: cancel, inbound: make(chan inbound, queue)}
 }
 
 type tombstone struct {

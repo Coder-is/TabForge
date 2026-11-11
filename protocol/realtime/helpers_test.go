@@ -75,6 +75,13 @@ func newProxy(t testing.TB, target string) *proxy {
 
 func (p *proxy) addr() string { return p.listener.Addr().String() }
 
+// retarget sends new connections to another server; open ones stay.
+func (p *proxy) retarget(target string) {
+	p.mu.Lock()
+	p.target = target
+	p.mu.Unlock()
+}
+
 func (p *proxy) serve() {
 	for {
 		down, err := p.listener.Accept()
@@ -85,7 +92,10 @@ func (p *proxy) serve() {
 			down.Close()
 			continue
 		}
-		up, err := net.Dial("tcp", p.target)
+		p.mu.Lock()
+		target := p.target
+		p.mu.Unlock()
+		up, err := net.Dial("tcp", target)
 		if err != nil {
 			down.Close()
 			continue

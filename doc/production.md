@@ -125,4 +125,14 @@ CI 配置见 [test.yml](../.github/workflows/test.yml)：主任务在 Linux/macO
 
 远程执行结果以 [GitHub Actions](https://github.com/Coder-is/TabForge/actions) 为准。本地通过记录不代表远程 CI 结果已核实。
 
-上线项目还需根据自身目标流数量和消息大小做容量测试，配置 TLS、鉴权/配额、代理禁用 SSE 缓冲与合适的流超时，并测试滚动部署期间的旧客户端。这里没有内置自动重连、回放、幂等重试、WebSocket 或供应商转换；配置依然由原有 V3 导表入口导出。
+上线项目还需根据自身目标流数量和消息大小做容量测试，配置 TLS、鉴权/配额、代理禁用 SSE 缓冲与合适的流超时，并测试滚动部署期间的旧客户端。HTTP/SSE 接口没有内置自动重连、回放、幂等重试或供应商转换（需要推送与断线恢复时使用下文的实时长连接）；配置依然由原有 V3 导表入口导出。
+
+## 实时长连接部署
+
+实时通道（[实时长连接](realtime.md)）上线时：
+
+- 客户端使用 `wss://`；网关/负载均衡放开 WebSocket 升级（`Upgrade`、`Connection` 头），空闲超时大于心跳间隔的 3 倍，`http.Server` 不设置 `WriteTimeout`。
+- 浏览器跨域访问时在 `OriginPatterns` 中列出页面来源。
+- 多实例部署二选一：按 `session_id` 做会话粘性；或设置 `server.Store`（例如 Redis 6.2+ 的 `SET PX` / `GETDEL`），停机时把会话交给其他实例。
+- 进程收到 SIGTERM 后先从负载均衡摘除，再调用 `server.Shutdown(ctx)`。ctx 的期限应覆盖最慢的请求处理时间，期限内未处理完的会话不会交接。
+- 需要压缩时设置 `server.Compression`，先用真实消息做基准测试。`MaxFrameBytes` 按解压后大小检查。
