@@ -46,3 +46,17 @@ func TestCSharpRealtimeClient(t *testing.T) {
 		})
 	}
 }
+
+// TestCSharpWebGLBranchCompiles builds the UNITY_WEBGL-only code of the Unity
+// transports (the jslib P/Invoke bridge) against stubs of the Unity types it
+// uses. It cannot run outside a WebGL player; the jslib itself is exercised
+// by TestUnityWebGLBridgeUnderChaos.
+func TestCSharpWebGLBranchCompiles(t *testing.T) {
+	dotnet := os.Getenv("DOTNET_BIN")
+	if dotnet == "" {
+		t.Skip("DOTNET_BIN is not set")
+	}
+	if out, err := exec.Command(dotnet, "build", "-nologo", "-v", "q", "-o", t.TempDir(), "../../sdk/unity/Tests/WebGL/WebGLCompile.csproj").CombinedOutput(); err != nil {
+		t.Fatalf("dotnet build: %v\n%s", err, out)
+	}
+}

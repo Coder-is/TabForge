@@ -9,8 +9,8 @@ namespace TabForge.Protocol
 {
     /// <summary>
     /// Default realtime socket on System.Net.WebSockets.ClientWebSocket
-    /// (Unity standalone, Android and iOS; .NET). WebGL has no ClientWebSocket:
-    /// supply a RealtimeSocketFactory that bridges to the browser WebSocket.
+    /// (Unity standalone, Android and iOS; .NET). WebGL players have no
+    /// ClientWebSocket: there Factory returns WebGLWebSocketTransport instead.
     /// </summary>
     public sealed class ClientWebSocketTransport : IRealtimeSocket
     {
@@ -22,7 +22,7 @@ namespace TabForge.Protocol
         public static readonly RealtimeSocketFactory Factory = (url, subprotocol, events) =>
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            throw new PlatformNotSupportedException("ClientWebSocket is not available on WebGL; provide RealtimeOptions.Socket");
+            return WebGLWebSocketTransport.Factory(url, subprotocol, events);
 #else
             var transport = new ClientWebSocketTransport(events);
             transport.Start(new Uri(url), subprotocol);

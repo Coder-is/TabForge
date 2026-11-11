@@ -1,0 +1,11 @@
+/src/sdk/unity/Tests/WebGL/obj/Debug/netstandard2.1/WebGLCompile.csproj.AssemblyReference.cache
+/src/sdk/unity/Tests/WebGL/obj/Debug/netstandard2.1/WebGLCompile.GeneratedMSBuildEditorConfig.editorconfig
+/src/sdk/unity/Tests/WebGL/obj/Debug/netstandard2.1/WebGLCompile.AssemblyInfoInputs.cache
+/src/sdk/unity/Tests/WebGL/obj/Debug/netstandard2.1/WebGLCompile.AssemblyInfo.cs
+/src/sdk/unity/Tests/WebGL/obj/Debug/netstandard2.1/WebGLCompile.csproj.CoreCompileInputs.cache
+/src/sdk/unity/Tests/WebGL/obj/Debug/netstandard2.1/WebGLCompile.sourcelink.json
+/tmp/TestCSharpWebGLBranchCompiles3134615503/001/WebGLCompile.deps.json
+/tmp/TestCSharpWebGLBranchCompiles3134615503/001/WebGLCompile.dll
+/tmp/TestCSharpWebGLBranchCompiles3134615503/001/WebGLCompile.pdb
+/src/sdk/unity/Tests/WebGL/obj/Debug/netstandard2.1/WebGLCompile.dll
+/src/sdk/unity/Tests/WebGL/obj/Debug/netstandard2.1/WebGLCompile.pdb

@@ -94,7 +94,9 @@ client.Notify("move", new JObject { ["tick"] = 1 }); // volatile：掉线时返�
 
 - `TabForgeRealtime` 在 `Update` 中调用 `Tick()`，所有回调（状态、推送、请求结果）都在主线程执行；GameObject 销毁或退出游戏时关闭会话。不使用组件时自行在一个线程上定期调用 `Tick()`。公开方法可以跨线程调用。
 - 消息是 ProtoJSON 形态的 `JObject`：64 位整数为十进制字符串，枚举为名称，时间戳为 RFC 3339 字符串。发送前按 runtime.json 校验并规范化，不合法的消息直接抛出 `invalid_message`。注意 `JObject.Parse` 默认会把时间戳字符串转成 `DateTime`，构造消息时请用 `Json.Parse` 或 `new JObject`。
-- 默认传输为 `ClientWebSocketTransport`（`System.Net.WebSockets.ClientWebSocket`），适用于 Standalone、Android、iOS；可通过 `ClientWebSocketTransport.Configure` 设置代理或证书。**WebGL 没有 ClientWebSocket**，需要实现 `RealtimeSocketFactory` 桥接到浏览器 WebSocket（尚未提供）。
+- 默认传输为 `ClientWebSocketTransport`（`System.Net.WebSockets.ClientWebSocket`），适用于 Standalone、Android、iOS；可通过 `ClientWebSocketTransport.Configure` 设置代理或证书。
+- **WebGL**：WebGL 播放器没有 ClientWebSocket，默认工厂自动改用 `WebGLWebSocketTransport`，经 `Runtime/Plugins/WebGL/TabForgeWebSocket.jslib` 桥接到浏览器 WebSocket，代码无需改动（`RealtimeOptions.Socket` 保持 null）。浏览器事件进入队列，仍在 `Tick` 中回调。浏览器 WebSocket 不能设置请求头，令牌照常放在 `hello` 中；跨域部署需在服务器 `OriginPatterns` 中允许页面来源。
 - `Encoding = RealtimeEncoding.Json` 使用 JSON 帧，便于抓包调试。
 
 验证：`go test ./protocol/realtime` 在设置 `DOTNET_BIN` 后构建 [RealtimeTests](Tests/Realtime/RealtimeTests.csproj)，运行模拟服务器单元测试、与 Go 对 2800 条随机消息的编解码一致性检查，以及在随机断线代理下连接 Go 服务端的压测（每个请求恰好执行一次、推送不丢不重不乱序、踢人在断线时也能送达），两种编码各一次。2026-11-09 在 Docker（Linux，.NET 8）中通过。这是普通 .NET 运行时，不是 Unity 引擎：编辑器 PlayMode、IL2CPP、Android/iOS 构建尚未实测。
+WebGL 桥的验证：`TestUnityWebGLBridgeUnderChaos`（需要 node）在 Node 中以模拟的 Emscripten 堆加载 jslib，代替 C# 侧调用它，让 TypeScript 客户端的全部帧经过该桥，在随机断线代理下跑与上面相同的恰好一次与顺序校验，两种编码；堆在每次调用后写入垃圾数据，桥若保留堆引用会立即失败。C# 路由（按 id 分发、关闭只通知一次、关闭后丢弃事件）由 `unit` 用伪造的 jslib 覆盖；`TestCSharpWebGLBranchCompiles` 以 `UNITY_WEBGL` 编译 P/Invoke 分支。真实 Unity WebGL 构建与浏览器运行尚未实测。

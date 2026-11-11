@@ -71,3 +71,17 @@ func TestTypeScriptClientUnderChaos(t *testing.T) {
 		})
 	}
 }
+
+// TestUnityWebGLBridgeUnderChaos routes every frame of the TypeScript client
+// through the Unity WebGL jslib (sdk/unity/Runtime/Plugins/WebGL), loaded in
+// Node with an Emscripten-like heap, while the proxy drops connections.
+func TestUnityWebGLBridgeUnderChaos(t *testing.T) {
+	node := nodeOrSkip(t)
+	for _, encoding := range []string{"proto", "json"} {
+		t.Run(encoding, func(t *testing.T) {
+			t.Log(chaos(t, func(url string) *exec.Cmd {
+				return exec.Command(node, "../../sdk/typescript/realtime.integration.mjs", url, encoding, "2", "unity-webgl")
+			}))
+		})
+	}
+}

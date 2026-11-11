@@ -220,13 +220,101 @@ internal static class RealtimeTests
         var welcome = RealtimeFrame.DecodeBinary(new byte[] { 0x08, 0x02, 0x4a, 0x09, 0x0a, 0x01, 0x73, 0x12, 0x01, 0x74, 0x20, 0x88, 0x27 });
         welcome.ValidateFromServer();
         Check(welcome.Kind == RealtimeFrame.Welcome && welcome.WelcomeSessionId == "s" && welcome.WelcomeHeartbeatMS == 5000, "binary welcome");
+        WebGLBridge(runtime);
         Console.WriteLine("C# realtime units passed");
     }
+
+    // ---- WebGL bridge routing with a fake jslib ----
+
+    private sealed class FakeBrowser : WebGLWebSocketTransport.INative
+    {
+        public int Inits, Next = 100;
+        public readonly List<(string Url, string Protocol, int Max)> Opened = new List<(string, string, int)>();
+        public readonly List<(int Id, string Data, bool Text)> Sent = new List<(int, string, bool)>();
+        public readonly List<int> Closed = new List<int>();
+        public bool Accept = true;
+        public void Init() => Inits++;
+        public int Open(string url, string protocol, int max) { Opened.Add((url, protocol, max)); return Next++; }
+        public bool Send(int id, byte[] data, bool text) { if (Accept) Sent.Add((id, Encoding.UTF8.GetString(data), text)); return Accept; }
+        public void Close(int id) => Closed.Add(id);
+    }
+
+    private sealed class Recorder : IRealtimeSocketEvents
+    {
+        public readonly List<string> Events = new List<string>();
+        public void Opened(string protocol) => Events.Add("open:" + protocol);
+        public void Received(byte[] data, bool text) => Events.Add((text ? "text:" : "binary:") + Encoding.UTF8.GetString(data));
+        public void Closed() => Events.Add("closed");
+    }
+
+    private static void WebGLBridge(string runtime)
+    {
+        var browser = new FakeBrowser();
+        var previous = WebGLWebSocketTransport.Native;
+        WebGLWebSocketTransport.Native = browser;
+        try
+        {
+            var a = new Recorder();
+            var b = new Recorder();
+            var sa = WebGLWebSocketTransport.Factory("ws://x/a", "p", a);
+            var sb = WebGLWebSocketTransport.Factory("ws://x/b", "p", b);
+            Check(browser.Inits == 1 && browser.Opened.Count == 2 && browser.Opened[0].Max == WebGLWebSocketTransport.MaxMessageBytes, "open");
+            WebGLWebSocketTransport.OnOpen(100, "p");
+            WebGLWebSocketTransport.OnMessage(101, Encoding.UTF8.GetBytes("to-b"), true);
+            WebGLWebSocketTransport.OnMessage(100, Encoding.UTF8.GetBytes("bin"), false);
+            WebGLWebSocketTransport.OnMessage(999, new byte[1], false); // unknown socket: ignored
+            Check(string.Join(",", a.Events) == "open:p,binary:bin" && string.Join(",", b.Events) == "text:to-b", "routing " + string.Join(",", a.Events));
+            sa.Send(Encoding.UTF8.GetBytes("hi"), true);
+            Check(browser.Sent.Count == 1 && browser.Sent[0] == (100, "hi", true), "send");
+            browser.Accept = false;
+            Check(ThrowsIO(() => sa.Send(new byte[1], false)), "send on a socket the browser has not opened");
+            browser.Accept = true;
+            // Close: native close once, no events after it, Closed exactly once.
+            sa.Close();
+            sa.Close();
+            Check(browser.Closed.Count == 1 && browser.Closed[0] == 100, "close once");
+            Check(ThrowsIO(() => sa.Send(new byte[1], false)), "send after close");
+            WebGLWebSocketTransport.OnMessage(100, new byte[1], false);
+            WebGLWebSocketTransport.OnClose(100);
+            WebGLWebSocketTransport.OnClose(100);
+            Check(string.Join(",", a.Events) == "open:p,binary:bin,closed", "after close " + string.Join(",", a.Events));
+            // A browser-side drop closes without a Close() call.
+            WebGLWebSocketTransport.OnClose(101);
+            sb.Close();
+            Check(string.Join(",", b.Events) == "text:to-b,closed" && browser.Closed.Count == 1, "remote close");
+
+            // The default factory drives a RealtimeClient through the bridge.
+            var client = new RealtimeClient(runtime, new RealtimeOptions { Url = "ws://x/ws/game", Channel = "game", Encoding = RealtimeEncoding.Json, Token = () => "user-1", Socket = WebGLWebSocketTransport.Factory, MinBackoffMS = 1, MaxBackoffMS = 2 });
+            client.Connect();
+            Until(client, () => browser.Opened.Count == 3, "bridge open");
+            var socket = browser.Next - 1;
+            Check(browser.Opened[2].Protocol == RealtimeClient.SubprotocolJson, "client subprotocol");
+            WebGLWebSocketTransport.OnOpen(socket, RealtimeClient.SubprotocolJson);
+            Until(client, () => browser.Sent.Count == 2, "hello");
+            Check((string)JObject.Parse(browser.Sent[1].Data)["kind"] == "hello" && browser.Sent[1].Text, "hello frame");
+            WebGLWebSocketTransport.OnMessage(socket, Encoding.UTF8.GetBytes("{\"kind\":\"welcome\",\"welcome\":{\"sessionId\":\"s\",\"resumeToken\":\"t\",\"heartbeatMS\":5000}}"), true);
+            Until(client, () => client.State == RealtimeState.Connected, "welcome through bridge");
+            WebGLWebSocketTransport.OnClose(socket);
+            Until(client, () => browser.Opened.Count == 4, "reconnect after browser close");
+            client.Close();
+        }
+        finally
+        {
+            WebGLWebSocketTransport.Native = previous;
+        }
+    }
+
 
     private static ProtocolException Catch(Action action)
     {
         try { action(); } catch (ProtocolException error) { return error; }
         throw new Exception("expected ProtocolException");
+    }
+
+    private static bool ThrowsIO(Action action)
+    {
+        try { action(); } catch (IOException) { return true; }
+        return false;
     }
 
     private static bool CatchAny(Action action)

@@ -48,7 +48,7 @@ namespace TabForge.Protocol
         public RealtimeEncoding Encoding = RealtimeEncoding.Proto;
         /// <summary>Bearer token for a new session; resumes do not send it again.</summary>
         public Func<string> Token;
-        /// <summary>Defaults to ClientWebSocket (not available on WebGL).</summary>
+        /// <summary>Defaults to ClientWebSocket, or the browser WebSocket bridge in WebGL players.</summary>
         public RealtimeSocketFactory Socket;
         public int MinBackoffMS = 200;
         public int MaxBackoffMS = 10000;

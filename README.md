@@ -38,7 +38,7 @@ go run ./cmd/package-backend -out=outputs/releases/v3 # 构建四种语言的后
 | 接入端 | SDK | 当前验证范围 |
 | --- | --- | --- |
 | Go 后端 | [HTTP/SSE 服务](doc/protocol-integration.md) | Go 竞态回归与跨语言 HTTP 联调 |
-| Go 实时服务 / TS、微信、Unity 与 Godot 客户端 | [WebSocket 通道](doc/realtime.md) | 随机断线代理下的恰好一次与顺序校验、Go↔TS 编解码一致性、Linux 竞态；Unity C# 客户端（.NET 8）与 Godot 客户端（4.5.1 headless）通过同样的断线与编解码校验；浏览器/微信/引擎编辑器与真机长连接待测；Unreal/Lua 长连接客户端未实现 |
+| Go 实时服务 / TS、微信、Unity 与 Godot 客户端 | [WebSocket 通道](doc/realtime.md) | 随机断线代理下的恰好一次与顺序校验、Go↔TS 编解码一致性、Linux 竞态；Unity C# 客户端（.NET 8）、Unity WebGL jslib 桥（Node 模拟堆）与 Godot 客户端（4.5.1 headless）通过同样的断线与编解码校验；浏览器/微信/引擎编辑器与真机长连接待测；Unreal/Lua 长连接客户端未实现 |
 | 网页 / Node | [TypeScript Fetch](sdk/typescript/README.md) | Node 24、Chromium Fetch/XHR |
 | 微信小程序 | [wx.request 分块](sdk/wechat/README.md) | 开发者工具真实网络 12 项；真机与小游戏构建待测 |
 | Cocos Creator 3.8 目标 | [Fetch/XHR/微信](sdk/cocos/README.md) | Web 网络后端通过；Creator/JSB/移动构建待测 |

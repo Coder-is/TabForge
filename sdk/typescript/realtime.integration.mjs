@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import { RealtimeClient } from "./realtime.ts";
 import { channels, codecSchema, protocolVersion, schemaHash, wireSchema } from "../../examples/realtime/Generated/protocol/types.ts";
 
-const [url, encoding, seconds] = process.argv.slice(2);
+const [url, encoding, seconds, transport] = process.argv.slice(2);
+// "unity-webgl" routes every frame through the Unity WebGL jslib bridge.
+const socket = transport === "unity-webgl" ? (await import("../unity/Tests/WebGL/jslib-harness.mjs")).jslibSocketFactory() : undefined;
 const states = [];
 const client = new RealtimeClient({
-    url, encoding, channel: channels.game, protocolVersion, schemaHash, wireSchema, codecSchema,
+    url, encoding, socket, channel: channels.game, protocolVersion, schemaHash, wireSchema, codecSchema,
     token: async () => "user-31", minBackoffMS: 5, maxBackoffMS: 50,
     onState: (state, error) => states.push(error ? `${state}:${error.code}` : state)
 });
@@ -63,4 +65,12 @@ while (client.state !== "closed" && Date.now() < end)
     await new Promise(r => setTimeout(r, 10));
 assert.equal(states.at(-1), "closed:kicked", JSON.stringify(states.slice(-12)));
 await assert.rejects(client.api.chat({ text: "x" }), e => e.code === "kicked");
+if (socket) {
+    // Every socket delivered its close, and the bridge released all heap memory.
+    const drained = Date.now() + 3000;
+    while (socket.openSockets() > 0 && Date.now() < drained)
+        await new Promise(r => setTimeout(r, 10));
+    assert.equal(socket.openSockets(), 0, "bridge sockets left open");
+    assert.equal(socket.heap.live.size, 0, "bridge leaked heap allocations");
+}
 console.log(JSON.stringify({ requests: golds.length, resumes }));
