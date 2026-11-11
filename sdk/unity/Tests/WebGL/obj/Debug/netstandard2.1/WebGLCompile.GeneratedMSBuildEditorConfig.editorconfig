@@ -1,5 +1,0 @@
-is_global = true
-build_property.RootNamespace = WebGLCompile
-build_property.ProjectDir = /src/sdk/unity/Tests/WebGL/
-build_property.EnableComHosting = 
-build_property.EnableGeneratedComInterfaceComImportInterop = 
