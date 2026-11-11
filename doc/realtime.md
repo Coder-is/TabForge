@@ -143,13 +143,23 @@ server.Shutdown(ctx) // 通知所有客户端 server_shutdown 并等待处理函
 | --- | --- | --- |
 | `OriginPatterns` | 空（只允许同源） | 浏览器跨域来源白名单；非浏览器客户端不受影响 |
 | `RequireSchemaHash` | true | 握手必须携带一致的 schema hash |
-| `MaxFrameBytes` | 1 MiB | 单帧上限，双向 |
+| `MaxFrameBytes` | 1 MiB | 单帧上限，双向；启用压缩时按解压后大小计算 |
+| `Compression` / `CompressionThreshold` | 关闭 / 库默认（128 或 512 字节） | permessage-deflate，见下文“消息压缩” |
 | `MaxUnackedFrames` / `MaxUnackedBytes` | 4096 / 8 MiB | 每会话待确认缓存；超出以 `overloaded` 关闭慢客户端 |
 | `MaxQueuedMessages` | 1024 | 每会话待处理的 request/notify |
 | `MaxFramesPerSecond` | 0（不限） | 单连接读帧速率，超出以 `rate_limited` 关闭 |
 | `Concurrency` | 1 | 同一会话同时处理的请求数；大于 1 时响应可能乱序完成（仍按 `replyTo` 对应） |
 | `HandshakeTimeout` / `WriteTimeout` | 10 s | 握手与单次写入超时 |
 | `OnSessionStart` / `OnSessionEnd` / `Observe` | — | 会话生命周期和每条消息的结果（不含令牌和载荷），用于日志与指标 |
+
+**消息压缩。** `server.Compression = realtime.CompressionContextTakeover`（或 `CompressionNoContextTakeover`）开启 permessage-deflate（RFC 7692），只对超过 `CompressionThreshold` 的消息生效。压缩由握手协商：客户端不支持时自动不压缩，开启后不会影响任何已有客户端。
+
+| 模式 | 压缩率 | 每连接内存 | 适用 |
+| --- | --- | --- | --- |
+| `CompressionContextTakeover` | 高（跨消息复用 32 KiB 窗口，JSON 编码收益最大） | 固定约 1.2 MB 写缓冲 | 连接数适中、消息重复度高 |
+| `CompressionNoContextTakeover` | 较低（每条消息独立压缩） | 写缓冲取自共享池 | 大量空闲长连接 |
+
+客户端支持情况：浏览器（Safari 除外）、Node 22+、Go 客户端（`Client.Compression`）会协商压缩；微信需 `wechatSocketFactory(wx, { perMessageDeflate: true })`；Unity `ClientWebSocket`、Godot `WebSocketPeer` 不协商，保持原样。二进制 Protobuf 编码本身已很紧凑，开启前请用实际消息做基准测试；`MaxFrameBytes` 按解压后大小检查，解压后超限的消息会被拒绝并断开连接。
 
 会话保存在单个进程的内存中。多实例部署时，负载均衡需要按会话把恢复请求路由回同一实例（例如按 `session_id` 粘性），否则恢复会得到 `session_expired` 并新建会话。
 
@@ -205,4 +215,4 @@ Godot（GDScript）使用 `realtime_client.gd` 节点，消息为 ProtoJSON Dict
 ## 8. 尚未实现
 
 - Unreal（C++）、Lua 的长连接客户端，以及 Unity WebGL 的 WebSocket 桥；这些平台目前可使用 HTTP/SSE 客户端，或按本文第 2–3 节自行实现。
-- 跨进程会话迁移（会话保存在单实例内存中）、TCP/KCP 传输、消息压缩（permessage-deflate 默认关闭）。
+- 跨进程会话迁移（会话保存在单实例内存中）、TCP/KCP 传输。

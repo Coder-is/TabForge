@@ -33,4 +33,4 @@ API 依据：[微信官方 request 类型定义](https://github.com/wechat-minip
 
 ## 实时长连接
 
-`realtime.ts` 的 `wechatSocketFactory(wx)` 基于 `wx.connectSocket`，作为 `RealtimeClient` 的 `socket` 选项使用，二进制帧以 ArrayBuffer 发送。用法见 [实时长连接](../../doc/realtime.md)。目前只有模拟 `wx` 的单元测试，开发者工具与真机尚未实测。
+`realtime.ts` 的 `wechatSocketFactory(wx)` 基于 `wx.connectSocket`，作为 `RealtimeClient` 的 `socket` 选项使用，二进制帧以 ArrayBuffer 发送；第二个参数可传握手超时毫秒数，或 `{ connectTimeoutMS, perMessageDeflate }`（服务器开启压缩时生效）。用法见 [实时长连接](../../doc/realtime.md)。目前只有模拟 `wx` 的单元测试，开发者工具与真机尚未实测。

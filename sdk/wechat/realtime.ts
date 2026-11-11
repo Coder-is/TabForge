@@ -10,15 +10,24 @@ export interface WxSocketTask {
     onError(listener: (result: unknown) => void): void;
 }
 export interface WxSocketAPI {
-    connectSocket(options: { url: string; protocols: string[]; timeout?: number; fail?(error: { errMsg?: string }): void }): WxSocketTask;
+    connectSocket(options: { url: string; protocols: string[]; timeout?: number; perMessageDeflate?: boolean; fail?(error: { errMsg?: string }): void }): WxSocketTask;
+}
+
+export interface WechatSocketOptions {
+    /** Handshake timeout in milliseconds (default 10000). */
+    connectTimeoutMS?: number;
+    /** Offer permessage-deflate; used only if the server enables Compression. */
+    perMessageDeflate?: boolean;
 }
 
 /**
  * Uses wx.connectSocket. Pass it as the `socket` option of RealtimeClient.
  * Each client owns its SocketTask, so several channels can be open at once
  * (the base library limits concurrent sockets; check your target version).
+ * The second argument may also be the handshake timeout in milliseconds.
  */
-export function wechatSocketFactory(wx: WxSocketAPI, connectTimeoutMS = 10000): SocketFactory {
+export function wechatSocketFactory(wx: WxSocketAPI, options: number | WechatSocketOptions = {}): SocketFactory {
+    const { connectTimeoutMS = 10000, perMessageDeflate = false } = typeof options === "number" ? { connectTimeoutMS: options } : options;
     return (url, protocols, events) => {
         let closed = false;
         const done = () => {
@@ -27,7 +36,7 @@ export function wechatSocketFactory(wx: WxSocketAPI, connectTimeoutMS = 10000): 
                 events.close();
             }
         };
-        const task = wx.connectSocket({ url, protocols, timeout: connectTimeoutMS, fail: done });
+        const task = wx.connectSocket({ url, protocols, timeout: connectTimeoutMS, perMessageDeflate, fail: done });
         task.onOpen(result => {
             const header = result?.header ?? {};
             const key = Object.keys(header).find(name => name.toLowerCase() === "sec-websocket-protocol");

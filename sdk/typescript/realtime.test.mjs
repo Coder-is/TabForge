@@ -217,6 +217,8 @@ test("wechat socket adapter drives the client with wx.connectSocket", async () =
     const connected = c.connect();
     await until(() => tasks.length === 1, "connectSocket");
     assert.deepEqual(tasks[0].options.protocols, ["tabforge.realtime.v1.proto"]);
+    assert.equal(tasks[0].options.timeout, 10000);
+    assert.equal(tasks[0].options.perMessageDeflate, false);
     tasks[0].listeners.open({ header: { "Sec-WebSocket-Protocol": "tabforge.realtime.v1.proto" } });
     assert.ok(tasks[0].sent[0] instanceof ArrayBuffer, "binary frames are sent as ArrayBuffer");
     // welcome: kind=2, welcome{sessionId "s", resumeToken "t", heartbeatMS 5000}
@@ -227,4 +229,17 @@ test("wechat socket adapter drives the client with wx.connectSocket", async () =
     tasks[0].listeners.error({ errMsg: "network" });
     await until(() => tasks.length === 2, "reconnect");
     c.close();
+});
+
+test("wechat socket adapter forwards timeout and permessage-deflate options", async () => {
+    const { wechatSocketFactory } = await import("../wechat/realtime.ts");
+    const seen = [];
+    const wx = { connectSocket(options) {
+        seen.push(options);
+        return { send() {}, close() {}, onOpen() {}, onMessage() {}, onClose() {}, onError() {} };
+    } };
+    const noop = { open() {}, message() {}, close() {} };
+    wechatSocketFactory(wx, 2500)("wss://x", ["p"], noop);
+    wechatSocketFactory(wx, { perMessageDeflate: true })("wss://x", ["p"], noop);
+    assert.deepEqual(seen.map(o => [o.timeout, o.perMessageDeflate]), [[2500, false], [10000, true]]);
 });

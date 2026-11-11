@@ -17,6 +17,11 @@ func chaos(t *testing.T, command func(url string) *exec.Cmd) string {
 	t.Helper()
 	f := newFixture(t, testContract(t, nil), func(s *Server) {
 		registerGame(t, s)
+		// Node's WebSocket negotiates permessage-deflate, so the TS client
+		// runs compressed (almost every frame, given the low threshold);
+		// the .NET and Godot clients do not offer it and fall back.
+		s.Compression = CompressionContextTakeover
+		s.CompressionThreshold = 16
 		s.Observe = func(e Event) {
 			if e.Type == "handshake_reject" && e.Code == CodeProtocolError {
 				t.Errorf("server rejected a handshake: %s", e.Reason)

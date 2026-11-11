@@ -41,6 +41,9 @@ type Client struct {
 	MaxBackoff       time.Duration
 	MaxUnackedFrames int
 	DialTimeout      time.Duration
+	// Compression offers permessage-deflate; used only if the server agrees.
+	Compression          Compression
+	CompressionThreshold int
 	// OnState is called from the client's goroutine; do not block.
 	OnState func(State, *Error)
 
@@ -400,7 +403,13 @@ func (c *Client) connectOnce() (retryNow bool, permanent *Error) {
 		case <-ctx.Done():
 		}
 	}()
-	ws, _, err := websocket.Dial(ctx, c.URL, &websocket.DialOptions{Subprotocols: []string{c.Encoding.Subprotocol()}, HTTPHeader: c.HTTPHeader, HTTPClient: c.HTTPClient})
+	ws, _, err := websocket.Dial(ctx, c.URL, &websocket.DialOptions{
+		Subprotocols:         []string{c.Encoding.Subprotocol()},
+		HTTPHeader:           c.HTTPHeader,
+		HTTPClient:           c.HTTPClient,
+		CompressionMode:      c.Compression.mode(),
+		CompressionThreshold: c.CompressionThreshold,
+	})
 	if err != nil {
 		return false, nil
 	}

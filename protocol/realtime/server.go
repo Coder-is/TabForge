@@ -55,8 +55,14 @@ type Server struct {
 	// SingleSessionPerUser closes older sessions of the same UserID with
 	// duplicate_login when a new session starts.
 	SingleSessionPerUser bool
-	// MaxFrameBytes bounds a single WebSocket message in either direction.
+	// MaxFrameBytes bounds a single WebSocket message in either direction,
+	// measured after decompression.
 	MaxFrameBytes int
+	// Compression enables permessage-deflate for clients that offer it.
+	// CompressionThreshold is the smallest message that gets compressed
+	// (0 uses the library default: 128 or 512 bytes depending on the mode).
+	Compression          Compression
+	CompressionThreshold int
 	// MaxUnackedFrames and MaxUnackedBytes bound what a session retains for
 	// retransmission. A client that stops acknowledging (or stays offline
 	// while pushes accumulate) is closed with overloaded.
@@ -313,9 +319,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		Subprotocols:    []string{SubprotocolProto, SubprotocolJSON},
-		OriginPatterns:  s.OriginPatterns,
-		CompressionMode: websocket.CompressionDisabled,
+		Subprotocols:         []string{SubprotocolProto, SubprotocolJSON},
+		OriginPatterns:       s.OriginPatterns,
+		CompressionMode:      s.Compression.mode(),
+		CompressionThreshold: s.CompressionThreshold,
 	})
 	if err != nil {
 		return // Accept already wrote the HTTP error.
