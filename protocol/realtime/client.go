@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -91,7 +92,7 @@ type call struct {
 }
 
 type clientConn struct {
-	ws    *websocket.Conn
+	ws    wireConn
 	queue []*clientFrame
 	wake  chan struct{}
 	done  chan struct{}
@@ -112,7 +113,8 @@ func (c *clientConn) close() {
 	})
 }
 
-// NewClient creates a client for channel at url (ws:// or wss:// including the channel path).
+// NewClient creates a client for channel at url: ws:// or wss:// including
+// the channel path, or kcp://host:port/path for the KCP transport.
 func NewClient(c *protocol.Contract, channel, url string) (*Client, error) {
 	ch, ok := c.Channel(channel)
 	if !ok {
@@ -403,21 +405,13 @@ func (c *Client) connectOnce() (retryNow bool, permanent *Error) {
 		case <-ctx.Done():
 		}
 	}()
-	ws, _, err := websocket.Dial(ctx, c.URL, &websocket.DialOptions{
-		Subprotocols:         []string{c.Encoding.Subprotocol()},
-		HTTPHeader:           c.HTTPHeader,
-		HTTPClient:           c.HTTPClient,
-		CompressionMode:      c.Compression.mode(),
-		CompressionThreshold: c.CompressionThreshold,
-	})
+	ws, err := c.dial(ctx)
 	if err != nil {
 		return false, nil
 	}
-	if ws.Subprotocol() != c.Encoding.Subprotocol() {
-		ws.CloseNow()
+	if ws == nil {
 		return false, &Error{Code: CodeProtocolError, Message: "server did not accept " + c.Encoding.Subprotocol()}
 	}
-	ws.SetReadLimit(1 << 20)
 	typ := messageType(c.Encoding)
 	c.mu.Lock()
 	hello := &Frame{Kind: KindHello, Ack: c.received, Hello: &Hello{ProtocolVersion: c.contract.Manifest.Version, SchemaHash: c.schemaHash, SessionID: c.sessionID, ResumeToken: c.resumeToken}}
@@ -765,4 +759,38 @@ func NewMessage(c *protocol.Contract, fullName string) (proto.Message, error) {
 		return nil, fmt.Errorf("%s is not a message", fullName)
 	}
 	return dynamicpb.NewMessage(m), nil
+}
+
+// dial opens the transport for c.URL: ws:// or wss:// (WebSocket), or
+// kcp://host:port/path (KCP over UDP, see Server.ServeKCP). It returns
+// (nil, nil) if the server refused the encoding, and an error for network
+// failures (retried with backoff).
+func (c *Client) dial(ctx context.Context) (wireConn, error) {
+	if strings.HasPrefix(c.URL, "kcp://") {
+		conn, err := dialKCP(ctx, c.URL, c.Encoding.Subprotocol(), 1<<20)
+		if err != nil {
+			var ce websocket.CloseError
+			if errors.As(err, &ce) && strings.HasPrefix(ce.Reason, "offer ") {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return conn, nil
+	}
+	ws, _, err := websocket.Dial(ctx, c.URL, &websocket.DialOptions{
+		Subprotocols:         []string{c.Encoding.Subprotocol()},
+		HTTPHeader:           c.HTTPHeader,
+		HTTPClient:           c.HTTPClient,
+		CompressionMode:      c.Compression.mode(),
+		CompressionThreshold: c.CompressionThreshold,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if ws.Subprotocol() != c.Encoding.Subprotocol() {
+		ws.CloseNow()
+		return nil, nil
+	}
+	ws.SetReadLimit(1 << 20)
+	return ws, nil
 }

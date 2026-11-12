@@ -375,7 +375,7 @@ func (s *Server) writeTimeout() time.Duration {
 }
 
 // reject sends a close frame on a connection that has no session yet.
-func (s *Server) reject(ws *websocket.Conn, enc Encoding, e *Error) {
+func (s *Server) reject(ws wireConn, enc Encoding, e *Error) {
 	s.observe(Event{Type: "handshake_reject", Code: e.Code, Reason: e.Message})
 	data, _ := (&Frame{Kind: KindClose, Error: e}).Encode(enc)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -391,7 +391,7 @@ func messageType(enc Encoding) websocket.MessageType {
 	return websocket.MessageBinary
 }
 
-func (s *Server) serveConn(ctx context.Context, ch *channelState, ws *websocket.Conn, enc Encoding) {
+func (s *Server) serveConn(ctx context.Context, ch *channelState, ws wireConn, enc Encoding) {
 	readCtx, cancel := context.WithTimeout(ctx, s.handshakeTimeout())
 	defer cancel()
 	var typ websocket.MessageType

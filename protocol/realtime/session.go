@@ -37,7 +37,7 @@ type outFrame struct {
 }
 
 type connection struct {
-	ws       *websocket.Conn
+	ws       wireConn
 	queue    []*outFrame // guarded by Session.mu
 	volatile int         // queued volatile frames, guarded by Session.mu
 	wake     chan struct{}
@@ -47,7 +47,7 @@ type connection struct {
 	last     time.Time
 }
 
-func newConnection(ws *websocket.Conn) *connection {
+func newConnection(ws wireConn) *connection {
 	return &connection{ws: ws, wake: make(chan struct{}, 1), done: make(chan struct{})}
 }
 

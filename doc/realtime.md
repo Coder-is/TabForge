@@ -8,7 +8,7 @@ HTTP 端点适合登录、商城、邮件这类一问一答的业务；房间、
 | `push` | 服务器 → 客户端 | 无 | 战斗开始、聊天消息、红点、公告 |
 | `notify` | 客户端 → 服务器 | 无 | 移动同步、表情、心跳外的轻量上报 |
 
-已实现：Go 服务端 `protocol/realtime`、Go 客户端（机器人/压测/服务间）、TypeScript 客户端（浏览器、Node、Cocos/Laya 的标准 WebSocket，以及微信 `wx.connectSocket`）、Unity C# 客户端（`ClientWebSocket`：Standalone/Android/iOS；WebGL 经 jslib 桥接浏览器 WebSocket）、Godot 客户端（`WebSocketPeer`）。Unreal、Lua 的长连接客户端尚未实现，见文末。
+已实现：Go 服务端 `protocol/realtime`（WebSocket，以及可选的 KCP/UDP 传输，见第 4 节）、Go 客户端（机器人/压测/服务间）、TypeScript 客户端（浏览器、Node、Cocos/Laya 的标准 WebSocket，以及微信 `wx.connectSocket`）、Unity C# 客户端（`ClientWebSocket`：Standalone/Android/iOS；WebGL 经 jslib 桥接浏览器 WebSocket）、Godot 客户端（`WebSocketPeer`）。Unreal、Lua 的长连接客户端尚未实现，见文末。
 
 ## 1. 在清单中声明通道
 
@@ -194,6 +194,24 @@ func (r redisStore) Take(ctx context.Context, key string) ([]byte, error) {
 - `Values`、`Identity.Data` 和房间（`Group`）成员关系只存在于本进程，需要通过 `ExportSession`/`ImportSession` 携带，或在 `OnSessionStart` 中重建。交接后旧实例对该会话调用 `OnSessionEnd`，原因码为 `handed_off`。快照完成后在旧实例上的 `Push` 返回 `ErrSessionClosed`。
 - 交接只用于同一契约（同一 schema hash）的实例之间，例如发布服务端代码。契约变化时新实例会拒绝旧快照，客户端握手本身也会因 `schema_mismatch` 失败，需要随新客户端一起发布。
 
+**KCP（UDP）传输。** 弱网（移动网络丢包、高延迟）下，TCP 的队头阻塞会让一次丢包拖住后面所有消息。`ServeKCP` 在 UDP 上用 KCP 承载同样的帧，可与 WebSocket 同时运行：
+
+```go
+pc, _ := net.ListenPacket("udp", ":7001")
+go server.ServeKCP(pc)                     // 与 mux.Handle("/ws/", server) 共用会话
+// 停机：先 server.Shutdown(ctx)（发送 server_shutdown 并交接），再 pc.Close()
+
+client, _ := realtime.NewClient(contract, "game", "kcp://game.example.com:7001/ws/game") // Go 客户端
+```
+
+- 第 2–3 节的帧、握手、序号、恢复和关闭原因完全相同，只是换了承载层；会话在两种传输间共享，同一编码下客户端可以通过任一传输恢复会话。`MaxFrameBytes` 同样生效；不做 permessage-deflate 压缩，`OriginPatterns` 不适用。
+- 线上格式（版本 1）：标准 KCP（与 ikcp.c 2.1.1 兼容；nodelay、10 ms 间隔、快速重传 2、关闭拥塞控制、窗口 256、MTU 1200、死链 40 次重传），conv 由客户端随机生成。每条 KCP 消息首字节低 7 位是类型（0 open、1 二进制、2 文本、3 close），`0x80` 表示同一消息还有后续分片（每片最多 16 KiB）。客户端先发 open `路径\n子协议`，服务器回 open `子协议` 或 close `原因`。
+- 5 字节数据报 `conv + 0xFF` 是重置：服务器收到未知会话（NAT 换了端口、服务器重启）的数据时回复它，客户端立即重连并恢复会话，不必等超时。客户端空闲 1 秒发送 `conv + 0xFE` 保活，NAT 映射变化在空闲时也能被发现。
+- 负载均衡需按 UDP 四元组（或 conv）把数据报路由到同一实例；NAT 重绑定后的新地址会被重置，客户端通过恢复回到原会话，不会重复执行请求。
+- **不加密。** 令牌、恢复令牌和载荷都是明文，能看到流量的人可以冒用会话；不同于 `wss://`，不要在公网上直接承载登录凭据或敏感数据，可在内网、VPN/专线或游戏加速器隧道内使用，或只对不敏感的高频玩法使用 KCP、登录与支付仍走 `wss://`。
+- 每个 `ServeKCP` 最多 `MaxKCPConversations`（100000）个会话。未认证的 open 在 `HandshakeTimeout` 内占用一个名额，伪造源地址的洪泛可以占满它，需要在网络层限速。重置只回复给至少 5 字节的数据报，不会放大反射流量。
+- 目前只有 Go 客户端支持 `kcp://`；TypeScript（浏览器无 UDP）、Unity、Godot 客户端仍使用 WebSocket。
+
 ## 5. TypeScript 客户端
 
 ```ts
@@ -235,6 +253,8 @@ Godot（GDScript）使用 `realtime_client.gd` 节点，消息为 ProtoJSON Dict
 | 检查 | 内容 |
 | --- | --- |
 | `go test ./protocol/realtime` | 两种编码下的请求/推送/通知；随机切断 TCP 的代理下持续 2 秒并发购买（每轮约 1–3 万请求、40+ 次断线），校验每个请求恰好执行一次、推送不丢不重不乱序、会话不被替换；会话过期后的 `session_lost` 与未发出请求的转移；踢人、顶号、踢人帧丢失；握手拒绝；8 类协议违规；慢消费者；心跳超时；停机；房间广播；类型不匹配；跨实例交接：A→B→C 两次替换服务器并持续随机断线下购买仍恰好一次、计数经 Export/Import 延续、推送有序且会话不重建，运行中的处理函数结果经快照送达，排空期间提前到达新实例的恢复被要求重试，伪造令牌无法取走或删除快照，异构 schema、存储失败与踢人原因的处理 |
+| 同上（KCP） | 两种编码下经 KCP 的请求/推送/通知与超过单个分片的大请求；经丢包 10%、重复 3%、0–15 ms 随机延迟（乱序）并随机重绑定客户端端口的 UDP 代理，持续 2 秒并发购买，校验恰好一次、推送有序、会话经重置后恢复而不重建；未知路径与子协议被拒绝（客户端视为永久失败），未知会话收到重置，不足 5 字节的数据报不回复。2026-11-11 在本机（Windows）连续 3 轮通过 |
+| `go test ./protocol/realtime/internal/kcp` | 虚拟时钟下两端最高 40% 丢包、10% 重复、乱序与 3 秒中断；设置 `IKCP_SRC` 与 `CC_BIN` 时与上游 ikcp.c 经 UDP 互通 |
 | 同上（需要 node） | TS 编解码与 Go 对 2800 条随机消息逐条一致（64 位极值、NaN/Inf、中文与 emoji、map、oneof、时间戳、未知枚举值），重新编码后 Go `proto.Equal`；Node 客户端在全程随机断线的代理下同样校验（含最后的 volatile 与踢人），两种编码 |
 | 同上（设置 `DOTNET_BIN`） | Unity C# 核心（普通 .NET 8，不是 Unity 引擎）：模拟服务器单元测试、与 Go 的 2800 条编解码一致性、全程随机断线下的同样校验，两种编码；2026-11-09 在 Docker（Linux）中连续 5 轮通过 |
 | 同上（需要 node） | Unity WebGL jslib 桥：在模拟的 Emscripten 堆中加载，TS 客户端全部帧经过它，全程随机断线下同样校验，两种编码；另以 `UNITY_WEBGL` 编译 C# P/Invoke 分支（设置 `DOTNET_BIN`）。2026-11-11 在本机（Windows，Node 24）与 Docker（Linux，.NET 8）中通过；Unity WebGL 构建与浏览器尚未实测 |
@@ -247,4 +267,4 @@ Godot（GDScript）使用 `realtime_client.gd` 节点，消息为 ProtoJSON Dict
 ## 8. 尚未实现
 
 - Unreal（C++）、Lua 的长连接客户端；这些平台目前可使用 HTTP/SSE 客户端，或按本文第 2–3 节自行实现。
-- 进程崩溃后的会话恢复（只有 `Shutdown` 交接的会话可跨实例继续）、TCP/KCP 传输。
+- 进程崩溃后的会话恢复（只有 `Shutdown` 交接的会话可跨实例继续）、TCP 传输；KCP 传输的非 Go 客户端与加密。
