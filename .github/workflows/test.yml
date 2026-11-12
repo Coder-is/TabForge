@@ -144,7 +144,7 @@ jobs:
       - name: C++ realtime core (Unreal client) against the Go server
         env:
           CXX_BIN: clang++
-        run: go test -race -count=1 -run 'NativeRealtime|NativeKCP' ./protocol/realtime
+        run: python scripts/run_ci_check.py go test -race -count=1 -v -run 'NativeRealtime|NativeKCP' ./protocol/realtime
       - name: Go HTTP to TS callback adapters, C# core and C# realtime client
         env:
           DOTNET_BIN: dotnet
