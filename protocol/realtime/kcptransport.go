@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Coder-is/TabForge/protocol/realtime/internal/kcp"
@@ -94,6 +95,9 @@ type kcpConn struct {
 	// welcome to answer a repeated hello whose welcome was lost.
 	raw            func([]byte)
 	hello, welcome []byte
+	// established is set once a sealed datagram from the peer opened: the
+	// handshake is complete and the hello can no longer be replaced.
+	established atomic.Bool
 }
 
 // newKCPConn starts a conversation that sends datagrams with raw; with
@@ -180,7 +184,11 @@ func (c *kcpConn) receive(data []byte) {
 		return
 	}
 	plain, ok := c.crypt.open(data)
-	if !ok || len(plain) == 0 { // Empty: keepalive.
+	if !ok {
+		return
+	}
+	c.established.Store(true)
+	if len(plain) == 0 { // Keepalive.
 		return
 	}
 	c.input(plain)
@@ -455,7 +463,14 @@ func (l *kcpListener) find(addr net.Addr, conv uint32, data []byte) *kcpConn {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if c := l.conns[key]; c != nil {
-		return c
+		// A different hello before the handshake completed: the first was
+		// damaged on the way, so the client cannot use its welcome and
+		// keeps repeating the real one. Start over with it.
+		if c.crypt == nil || c.established.Load() || !isKCPHello(data) || bytes.Equal(data, c.hello) {
+			return c
+		}
+		delete(l.conns, key)
+		go c.CloseNow() // Not here: onClose takes l.mu.
 	}
 	var crypt *kcpCipher
 	var welcome []byte
@@ -648,10 +663,16 @@ func dialKCP(ctx context.Context, rawURL, subprotocol string, maxMessage int, se
 // repeating its hello.
 const kcpHelloRetry = 250 * time.Millisecond
 
+// kcpHandshakeResets is how many resets, each answering a repeat of the
+// hello, mean the server does not encrypt. One is not enough: a hello
+// damaged on the way, or a forged reset, must not stop the client.
+const kcpHandshakeResets = 3
+
 // kcpHandshake runs the client's side of the encrypted handshake on udp
 // before any KCP traffic. Datagrams that are not a genuine welcome (from a
-// wrong key or a forger) are ignored; a reset means the server does not
-// encrypt, since an encrypting server answers every hello.
+// wrong key or a forger) are ignored. A server that does not encrypt
+// resets every hello, so the hello is repeated at once after a reset and
+// kcpHandshakeResets of them end the handshake.
 func kcpHandshake(ctx context.Context, udp net.Conn, conv uint32, server *ecdh.PublicKey) (*kcpCipher, error) {
 	h, err := newKCPClientHandshake(conv, server)
 	if err != nil {
@@ -661,6 +682,7 @@ func kcpHandshake(ctx context.Context, udp net.Conn, conv uint32, server *ecdh.P
 	defer stop()
 	defer udp.SetReadDeadline(time.Time{})
 	buf := make([]byte, 2048)
+	resets := 0
 	for {
 		if _, err := udp.Write(h.hello); err != nil {
 			return nil, err
@@ -680,7 +702,10 @@ func kcpHandshake(ctx context.Context, udp net.Conn, conv uint32, server *ecdh.P
 			}
 			data := buf[:n]
 			if n == 5 && binary.LittleEndian.Uint32(data) == conv && data[4] == kcpReset {
-				return nil, ErrKCPEncryptionUnsupported
+				if resets++; resets >= kcpHandshakeResets {
+					return nil, ErrKCPEncryptionUnsupported
+				}
+				break // Repeat the hello at once.
 			}
 			if k := h.finish(data); k != nil {
 				return k, nil

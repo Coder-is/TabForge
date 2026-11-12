@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ecdh"
 	cryptorand "crypto/rand"
+	"encoding/binary"
 	"errors"
 	"math/rand"
 	"net"
@@ -274,8 +275,12 @@ func TestKCPExactlyOnceUnderLossAndRebinds(t *testing.T) {
 		})
 		connect(t, c)
 		session := c.SessionID()
+		resumed := func() int64 { return int64(states.count(string(StateResumed))) }
 		stop := make(chan struct{})
 		go func() {
+			// One rebind at a time: the next waits until the client has
+			// resumed after the last, so a slow machine cannot fold two
+			// rebinds into one reconnect.
 			r := rand.New(rand.NewSource(17))
 			for {
 				select {
@@ -284,9 +289,21 @@ func TestKCPExactlyOnceUnderLossAndRebinds(t *testing.T) {
 				case <-time.After(time.Duration(300+r.Intn(400)) * time.Millisecond):
 					proxy.rebind()
 				}
+				for resumed() < proxy.rebinds.Load() {
+					select {
+					case <-stop:
+						return
+					case <-time.After(5 * time.Millisecond):
+					}
+				}
 			}
 		}()
-		deadline := time.Now().Add(2 * time.Second)
+		// At least 2 s and 3 rebinds; the hard limit only bounds a broken run.
+		deadline, limit := time.Now().Add(2*time.Second), time.Now().Add(30*time.Second)
+		busy := func() bool {
+			now := time.Now()
+			return now.Before(limit) && (now.Before(deadline) || proxy.rebinds.Load() < 3)
+		}
 		results := make(chan int64, 1<<20)
 		var wg sync.WaitGroup
 		var failures atomic.Int64
@@ -294,7 +311,7 @@ func TestKCPExactlyOnceUnderLossAndRebinds(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for time.Now().Before(deadline) {
+				for busy() {
 					reply, err := Call[*gamepb.BuyReply](context.Background(), c, "buy", &gamepb.BuyRequest{ItemId: 1, Count: 1})
 					if err != nil {
 						failures.Add(1)
@@ -339,8 +356,11 @@ func TestKCPExactlyOnceUnderLossAndRebinds(t *testing.T) {
 		if c.SessionID() != session || states.count(string(StateConnected)) != 1 {
 			t.Fatalf("session restarted: %v", states.states)
 		}
-		resumes := states.count(string(StateResumed))
-		if proxy.rebinds.Load() < 2 || resumes < 2 {
+		// Every rebind resets the conversation once; the last may come when
+		// the workers have stopped, and the idle keepalive notices it.
+		eventually(t, "a resume per rebind", func() bool { return resumed() >= proxy.rebinds.Load() })
+		resumes := resumed()
+		if proxy.rebinds.Load() < 3 {
 			t.Fatalf("%d rebinds, %d resumes", proxy.rebinds.Load(), resumes)
 		}
 		if proxy.watched.Load() != (key == nil) {
@@ -470,5 +490,79 @@ func TestKCPEncryptionHandshake(t *testing.T) {
 	}
 	if err := (&Server{KCPKey: p256}).ServeKCP(nil); !errors.Is(err, errKCPKeyCurve) {
 		t.Fatalf("ServeKCP with a P-256 key: %v", err)
+	}
+}
+
+// TestKCPHandshakeSurvivesDamage covers handshakes whose datagrams were
+// damaged on the way: a corrupted hello must not leave the server holding
+// a conversation the client can never complete, and a reset or two (a
+// damaged hello, or a forged reset) must not make the client give up.
+func TestKCPHandshakeSurvivesDamage(t *testing.T) {
+	key := newKCPKey(t)
+	f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s); s.KCPKey = key })
+	addr := serveKCP(t, f)
+	conn, err := net.Dial("udp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	read := func() []byte {
+		t.Helper()
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, 256)
+		n, err := conn.Read(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return buf[:n]
+	}
+	h, err := newKCPClientHandshake(91, key.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	damaged := append([]byte(nil), h.hello...)
+	damaged[10] ^= 0x5A // inside the client's key
+	conn.Write(damaged)
+	if h.finish(read()) != nil {
+		t.Fatal("the welcome to a damaged hello completed the handshake")
+	}
+	conn.Write(h.hello)
+	if h.finish(read()) == nil {
+		t.Fatal("the repeated hello did not replace the damaged one")
+	}
+
+	// A fake server resets the first two hellos, then welcomes.
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	go func() {
+		buf := make([]byte, 256)
+		for i := 0; ; i++ {
+			n, from, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			conv := binary.LittleEndian.Uint32(buf)
+			if i < kcpHandshakeResets-1 {
+				pc.WriteTo(kcpResetDatagram(conv), from)
+				continue
+			}
+			_, welcome, err := kcpAccept(key, conv, buf[:n])
+			if err == nil {
+				pc.WriteTo(welcome, from)
+			}
+		}
+	}()
+	udp, err := net.Dial("udp", pc.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := kcpHandshake(ctx, udp, 92, key.PublicKey()); err != nil {
+		t.Fatalf("handshake after %d resets: %v", kcpHandshakeResets-1, err)
 	}
 }
