@@ -9,6 +9,7 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/golang/protobuf v1.5.4
 	github.com/tealeg/xlsx v1.0.5
+	golang.org/x/crypto v0.57.0
 	golang.org/x/text v0.42.0
 	google.golang.org/protobuf v1.36.12
 )
@@ -16,5 +17,6 @@ require (
 require (
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 )

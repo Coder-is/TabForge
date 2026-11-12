@@ -1,7 +1,6 @@
 package realtime
 
 import (
-	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
 	"crypto/hkdf"
@@ -10,6 +9,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"sync/atomic"
+
+	"golang.org/x/crypto/chacha20poly1305"
 )
 
 // Encrypted KCP, version 1. The server has a long-term X25519 key; clients
@@ -17,8 +18,8 @@ import (
 // which authenticates the server the way a pinned certificate would.
 //
 //	hello    conv | 0xFD | version 1 | client ephemeral key (32) | zero padding to 64 bytes
-//	welcome  conv | 0xFC | server ephemeral key (32) | GCM tag of nothing (16)
-//	sealed   conv | 0xFB | counter (8, little endian) | AES-256-GCM(KCP datagram)
+//	welcome  conv | 0xFC | server ephemeral key (32) | AEAD tag of nothing (16)
+//	sealed   conv | 0xFB | counter (8, little endian) | ChaCha20-Poly1305(KCP datagram)
 //
 // Both sides derive the keys from DH(client ephemeral, server ephemeral)
 // and DH(client ephemeral, server static) with HKDF-SHA256 over the whole
@@ -28,6 +29,12 @@ import (
 // Hellos are padded so a welcome is never larger than the hello that
 // caused it; the client repeats its hello until a welcome arrives and the
 // server answers repeats with the same welcome.
+//
+// The AEAD is ChaCha20-Poly1305 (RFC 8439): clients without a native one
+// (Unity's netstandard2.1, Godot) can carry a constant-time implementation
+// in plain code, which AES-GCM does not allow. Nonces are 4 zero bytes and
+// the counter (little endian); the associated data is the datagram header.
+// testdata/kcp_crypto_vectors.json has fixed-key vectors for other clients.
 //
 // Every datagram after the handshake is sealed, KCP headers included, so
 // forged acknowledgements or window updates are dropped like noise. A
@@ -68,21 +75,20 @@ type kcpCipher struct {
 // kcpTranscriptKeys derives the per-direction ciphers. clientEph and
 // serverEph are the public ephemeral keys; ee and es the two DH results.
 func kcpTranscriptKeys(conv uint32, clientEph, serverEph, serverStatic, ee, es []byte, client bool) (*kcpCipher, error) {
-	h := sha256.New()
-	h.Write([]byte("tabforge-kcp-v1"))
-	binary.Write(h, binary.LittleEndian, conv)
-	h.Write(clientEph)
-	h.Write(serverEph)
-	h.Write(serverStatic)
-	keys, err := hkdf.Key(sha256.New, append(append([]byte(nil), ee...), es...), h.Sum(nil), "keys", 2*kcpKeySize)
+	keys, err := kcpKeyMaterial(conv, clientEph, serverEph, serverStatic, ee, es)
 	if err != nil {
 		return nil, err
 	}
-	c2s, err := newGCM(keys[:kcpKeySize])
+	return kcpCipherFromKeys(conv, keys, client)
+}
+
+// kcpCipherFromKeys builds the ciphers from kcpKeyMaterial's output.
+func kcpCipherFromKeys(conv uint32, keys []byte, client bool) (*kcpCipher, error) {
+	c2s, err := chacha20poly1305.New(keys[:kcpKeySize])
 	if err != nil {
 		return nil, err
 	}
-	s2c, err := newGCM(keys[kcpKeySize:])
+	s2c, err := chacha20poly1305.New(keys[kcpKeySize:])
 	if err != nil {
 		return nil, err
 	}
@@ -92,12 +98,18 @@ func kcpTranscriptKeys(conv uint32, clientEph, serverEph, serverStatic, ee, es [
 	return &kcpCipher{conv: conv, send: s2c, recv: c2s}, nil
 }
 
-func newGCM(key []byte) (cipher.AEAD, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(block)
+// kcpKeyMaterial returns the client-to-server key followed by the
+// server-to-client key: HKDF-SHA256 with ikm = ee || es, salt =
+// SHA-256("tabforge-kcp-v1" || conv (LE) || client eph || server eph ||
+// server static), info "keys", 64 bytes.
+func kcpKeyMaterial(conv uint32, clientEph, serverEph, serverStatic, ee, es []byte) ([]byte, error) {
+	h := sha256.New()
+	h.Write([]byte("tabforge-kcp-v1"))
+	binary.Write(h, binary.LittleEndian, conv)
+	h.Write(clientEph)
+	h.Write(serverEph)
+	h.Write(serverStatic)
+	return hkdf.Key(sha256.New, append(append([]byte(nil), ee...), es...), h.Sum(nil), "keys", 2*kcpKeySize)
 }
 
 func kcpNonce(counter uint64) []byte {
@@ -144,12 +156,16 @@ func isKCPHello(data []byte) bool {
 // kcpAccept answers a hello: it returns the cipher and the welcome to send
 // (and to repeat if the hello is repeated).
 func kcpAccept(key *ecdh.PrivateKey, conv uint32, hello []byte) (*kcpCipher, []byte, error) {
-	curve := ecdh.X25519()
-	clientEph, err := curve.NewPublicKey(hello[6 : 6+kcpKeySize])
+	eph, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
-	eph, err := curve.GenerateKey(rand.Reader)
+	return kcpAcceptWith(key, eph, conv, hello)
+}
+
+// kcpAcceptWith is kcpAccept with a given ephemeral key (for test vectors).
+func kcpAcceptWith(key, eph *ecdh.PrivateKey, conv uint32, hello []byte) (*kcpCipher, []byte, error) {
+	clientEph, err := ecdh.X25519().NewPublicKey(hello[6 : 6+kcpKeySize])
 	if err != nil {
 		return nil, nil, err
 	}
