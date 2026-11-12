@@ -294,7 +294,7 @@ func TestHandOffNeedsTheResumeToken(t *testing.T) {
 	store := NewMemoryStore()
 	contract := testContract(t, nil)
 	a := newFixture(t, contract, migratable(t, store, nil))
-	b := newFixture(t, contract, migratable(t, store, nil))
+	b := newFixture(t, contract, func(s *Server) { migratable(t, store, nil)(s); s.HandoffGrace = -1 }) // expects session_expired at once
 	c := a.client(EncodingJSON, "7", false)
 	states := &stateLog{}
 	c.OnState = states.record
@@ -404,7 +404,7 @@ func TestFailedHandOffStartsNewSession(t *testing.T) {
 	events := &eventLog{}
 	store := &failingStore{MemoryStore: NewMemoryStore()}
 	a := newFixture(t, contract, migratable(t, store, events))
-	b := newFixture(t, contract, migratable(t, store, nil))
+	b := newFixture(t, contract, func(s *Server) { migratable(t, store, nil)(s); s.HandoffGrace = -1 }) // expects session_expired at once
 	c := a.client(EncodingProto, "7", false)
 	states := &stateLog{}
 	c.OnState = states.record
@@ -459,5 +459,75 @@ func TestResumeDuringHandOffIsRetried(t *testing.T) {
 	}
 	if events.count("session_restore") != 1 {
 		t.Fatalf("restores %d", events.count("session_restore"))
+	}
+}
+
+// TestHandoffGraceCoversLateShutdown: traffic moves to B before A starts
+// handing off, and the client reconnects in between. Within HandoffGrace B
+// tells it to retry instead of expiring the session; once A shuts down, B
+// restores the session and the request sent meanwhile completes once.
+func TestHandoffGraceCoversLateShutdown(t *testing.T) {
+	store := NewMemoryStore()
+	contract := testContract(t, nil)
+	a := newFixture(t, contract, migratable(t, store, nil))
+	b := newFixture(t, contract, migratable(t, store, nil))
+	c := a.client(EncodingProto, "8", false)
+	states := &stateLog{}
+	c.OnState = states.record
+	connect(t, c)
+	session := c.SessionID()
+	if reply, err := Call[*gamepb.BuyReply](context.Background(), c, "buy", &gamepb.BuyRequest{ItemId: 1, Count: 1}); err != nil || reply.GetGold() != 1 {
+		t.Fatalf("first purchase: %v %v", reply, err)
+	}
+	a.proxy.retarget(addr(b))
+	a.proxy.cut()
+	a.proxy.cut()
+	done := make(chan error, 1)
+	var gold int64
+	go func() {
+		reply, err := Call[*gamepb.BuyReply](context.Background(), c, "buy", &gamepb.BuyRequest{ItemId: 1, Count: 1})
+		gold = reply.GetGold()
+		done <- err
+	}()
+	time.Sleep(300 * time.Millisecond) // the client keeps reaching B, which has nothing yet
+	shutdown(t, a.server)
+	select {
+	case err := <-done:
+		if err != nil || gold != 2 {
+			t.Fatalf("purchase across the late hand-off: gold %d, %v (states %v)", gold, err, states.states)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("purchase never completed (states %v)", states.states)
+	}
+	if c.SessionID() != session || states.count(string(StateConnected)) != 1 {
+		t.Fatalf("session restarted: %v", states.states)
+	}
+}
+
+// TestHandoffGraceExpires: if no hand-off comes, the session expires once
+// the grace has passed, and the client starts a new one.
+func TestHandoffGraceExpires(t *testing.T) {
+	store := NewMemoryStore()
+	contract := testContract(t, nil)
+	a := newFixture(t, contract, migratable(t, store, nil))
+	b := newFixture(t, contract, func(s *Server) { migratable(t, store, nil)(s); s.HandoffGrace = 400 * time.Millisecond })
+	c := a.client(EncodingProto, "9", false)
+	states := &stateLog{}
+	c.OnState = states.record
+	connect(t, c)
+	session := c.SessionID()
+	// B serves something first, so its grace starts now.
+	warm := b.client(EncodingProto, "10", true)
+	connect(t, warm)
+	start := time.Now()
+	a.proxy.retarget(addr(b))
+	a.proxy.cut()
+	a.proxy.cut()
+	eventually(t, "a new session on B", func() bool { return c.SessionID() != session && c.SessionID() != "" })
+	if elapsed := time.Since(start); elapsed < 300*time.Millisecond {
+		t.Fatalf("session expired after %v, within the grace", elapsed)
+	}
+	if states.count(string(StateConnected)) != 2 {
+		t.Fatalf("states %v", states.states)
 	}
 }

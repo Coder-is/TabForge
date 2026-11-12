@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Coder-is/TabForge/protocol"
@@ -90,6 +91,16 @@ type Server struct {
 	// load balancers without session affinity); see SessionStore. nil keeps
 	// sessions in this process only.
 	Store SessionStore
+	// HandoffGrace covers rolling deploys where clients reach this server
+	// before the old one starts handing off (load balancers often switch
+	// traffic and signal the old server at the same time). For this long
+	// after this server first serves, a resume for a session that is
+	// neither here nor in Store is answered with a retryable
+	// server_shutdown instead of session_expired, so the client keeps the
+	// session and retries until the snapshot arrives. After a crash, it
+	// delays session_expired (and the new session) by up to this long.
+	// Only with Store; 0 uses 10 seconds, negative disables it.
+	HandoffGrace time.Duration
 	// ExportSession and ImportSession carry application state (Values,
 	// Identity.Data) with a handed-off session. Export runs after the
 	// session's handlers have finished; Import runs before OnSessionStart
@@ -119,6 +130,8 @@ type Server struct {
 	ended   map[string]tombstone
 	closing bool
 	wg      sync.WaitGroup
+	// serving is when this server first read a handshake (UnixNano), for HandoffGrace.
+	serving atomic.Int64
 }
 
 type channelState struct {
@@ -373,6 +386,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.serveConn(r.Context(), ch, ws, enc)
 }
 
+// inHandoffGrace reports whether an unknown session may still be on its
+// way from a server that has not started handing off yet (HandoffGrace).
+func (s *Server) inHandoffGrace() bool {
+	grace := s.HandoffGrace
+	if grace == 0 {
+		grace = 10 * time.Second
+	}
+	return grace > 0 && time.Since(time.Unix(0, s.serving.Load())) < grace
+}
+
 func (s *Server) handshakeTimeout() time.Duration {
 	if s.HandshakeTimeout > 0 {
 		return s.HandshakeTimeout
@@ -405,6 +428,7 @@ func messageType(enc Encoding) websocket.MessageType {
 }
 
 func (s *Server) serveConn(ctx context.Context, ch *channelState, ws wireConn, enc Encoding) {
+	s.serving.CompareAndSwap(0, time.Now().UnixNano())
 	readCtx, cancel := context.WithTimeout(ctx, s.handshakeTimeout())
 	defer cancel()
 	var typ websocket.MessageType
@@ -459,6 +483,10 @@ func (s *Server) serveConn(ctx context.Context, ch *channelState, ws wireConn, e
 				return
 			}
 			candidate, restored = fromStore, fromStore != nil
+			if candidate == nil && s.inHandoffGrace() {
+				s.reject(ws, enc, &Error{Code: CodeServerShutdown, Message: "this server just started; the session may still be moving here, retry", Retryable: true})
+				return
+			}
 		}
 		if candidate == nil || candidate.channel != ch || candidate.encoding != enc || subtle.ConstantTimeCompare([]byte(candidate.resumeToken), []byte(h.ResumeToken)) != 1 {
 			s.reject(ws, enc, &Error{Code: CodeSessionExpired, Message: "session cannot be resumed; start a new session", Retryable: true})

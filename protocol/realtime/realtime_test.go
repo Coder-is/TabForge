@@ -443,6 +443,9 @@ func TestProtocolViolationsCloseTheSession(t *testing.T) {
 				raw.send(frame)
 			}
 			got := raw.read()
+			for got.Kind == KindPush { // "volatile reliable": the move may be echoed before the close
+				got = raw.read()
+			}
 			if got.Kind != KindClose || got.Error.Code != CodeProtocolError {
 				t.Fatalf("got %+v %+v", got, got.Error)
 			}
