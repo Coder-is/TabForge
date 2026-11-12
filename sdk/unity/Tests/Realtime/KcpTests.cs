@@ -29,11 +29,34 @@ internal static class KcpTests
     public static void Run(string casesPath, string vectorsPath)
     {
         var cases = JObject.Parse(File.ReadAllText(casesPath));
+        Sha256AndHmac();
         X25519((JArray)cases["x25519"]);
         Aead((JArray)cases["aead"]);
         Vectors(JObject.Parse(File.ReadAllText(vectorsPath)));
         CoreUnderLoss();
         Console.WriteLine("kcp: core and crypto match Go");
+    }
+
+    /// <summary>The written-out SHA-256 and HMAC against .NET's, across block boundaries and long keys.</summary>
+    private static void Sha256AndHmac()
+    {
+        Check(Hex(KcpCrypto.Sha256(System.Text.Encoding.ASCII.GetBytes("abc"))) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "SHA-256 of abc (FIPS 180-4)");
+        var r = new Random(11);
+        var hmac = typeof(KcpCrypto).GetMethod("Hmac", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        using (var sha = SHA256.Create())
+        {
+            for (var n = 0; n < 300; n++)
+            {
+                var data = new byte[n];
+                r.NextBytes(data);
+                Check(Hex(KcpCrypto.Sha256(data)) == Hex(sha.ComputeHash(data)), "SHA-256 of " + n + " bytes");
+                var key = new byte[r.Next(0, 150)];
+                r.NextBytes(key);
+                using (var reference = new HMACSHA256(key))
+                    Check(Hex((byte[])hmac.Invoke(null, new object[] { key, data })) == Hex(reference.ComputeHash(data)), "HMAC with a " + key.Length + "-byte key");
+            }
+        }
+        Console.WriteLine("sha256, hmac: 300 lengths match .NET");
     }
 
     private static void X25519(JArray cases)

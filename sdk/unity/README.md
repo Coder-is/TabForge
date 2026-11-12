@@ -100,7 +100,14 @@ client.Notify("move", new JObject { ["tick"] = 1 }); // volatile：掉线时返�
 - 默认传输为 `ClientWebSocketTransport`（`System.Net.WebSockets.ClientWebSocket`），适用于 Standalone、Android、iOS；可通过 `ClientWebSocketTransport.Configure` 设置代理或证书。
 - **WebGL**：WebGL 播放器没有 ClientWebSocket，默认工厂自动改用 `WebGLWebSocketTransport`，经 `Runtime/Plugins/WebGL/TabForgeWebSocket.jslib` 桥接到浏览器 WebSocket，代码无需改动（`RealtimeOptions.Socket` 保持 null）。浏览器事件进入队列，仍在 `Tick` 中回调。浏览器 WebSocket 不能设置请求头，令牌照常放在 `hello` 中；跨域部署需在服务器 `OriginPatterns` 中允许页面来源。
 - `Encoding = RealtimeEncoding.Json` 使用 JSON 帧，便于抓包调试。
-- **KCP（UDP）**：`Url` 写成 `kcp://host:7001/ws/game` 即连接 Go 服务端的 `ServeKCP`（见 [KCP 传输](../../doc/realtime.md)），弱网下没有 TCP 的队头阻塞，其余用法不变。服务器设置了 `KCPKey` 时，把它的 32 字节 X25519 公钥填入 `RealtimeOptions.KcpServerKey`（例如 `Convert.FromBase64String("...")`），所有数据报都会加密并认证服务器；不填则为明文 KCP，令牌可被抓包看到。两端加密配置不一致时客户端以 `protocol_error` 停止，不会反复重连。适用于 Standalone、Android、iOS；WebGL 没有 UDP，构造客户端时即报错，请改用 `wss://`。KCP 和加密都用纯 C# 实现，不依赖原生插件；KCP 在后台线程收发，事件仍在 `Tick` 中回调。
+- **KCP（UDP）**：`Url` 写成 `kcp://host:7001/ws/game` 即连接 Go 服务端的 `ServeKCP`（见 [KCP 传输](../../doc/realtime.md)），弱网下没有 TCP 的队头阻塞，其余用法不变。服务器设置了 `KCPKey` 时，把它的 32 字节 X25519 公钥填入 `RealtimeOptions.KcpServerKey`（例如 `Convert.FromBase64String("...")`），所有数据报都会加密并认证服务器；不填则为明文 KCP，令牌可被抓包看到。两端加密配置不一致时客户端以 `protocol_error` 停止，不会反复重连。适用于 Standalone、Android、iOS；WebGL 没有 UDP，构造客户端时即报错，请改用 `wss://`。KCP 和加密都用纯 C# 实现，不依赖原生插件；KCP 在后台线程收发，事件仍在 `Tick` 中回调。为适应 IL2CPP 代码裁剪，SHA-256/HMAC 也自带实现，不经过按名称反射查找实现的 `SHA256.Create()`/`HMACSHA256`，随机数直接使用 `RNGCryptoServiceProvider`。每次重连按系统 DNS 顺序轮换服务器地址，纯 IPv6（NAT64）网络下请使用域名而非 IPv4 地址。
+
+**KCP 的编辑器、IL2CPP 与真机验收**（`Tests/Engine/RealtimeKcpTests.cs`，尚未在 Unity 中运行过）：
+
+1. 启动服务端：`go run ./examples/realtime/server -kcp 0.0.0.0:18091 -kcp-key generate`，记下日志中的公钥；真机需与电脑在同一网络，并放行 UDP 18091。
+2. 编辑器 PlayMode：设置 `TABFORGE_KCP_URL=kcp://127.0.0.1:18091/ws/game`、`TABFORGE_KCP_KEY=<公钥>`、`TABFORGE_REALTIME_RUNTIME_JSON=<仓库>/examples/realtime/Generated/protocol/runtime.json`，在 Test Runner 中运行 `TabForgeRealtimeKcpTests`。
+3. IL2CPP / 真机：把 runtime.json 复制为 `Assets/Resources/tabforge-realtime-runtime.json`，新建 `Assets/Resources/tabforge-kcp.txt`，内容为一行 `kcp://<电脑 IP>:18091/ws/game <公钥>`；Scripting Backend 选 IL2CPP、Managed Stripping Level 选 High，在 Test Runner 中选 Run All In Player（Android/iOS/Standalone）。
+4. 用例覆盖：加密握手、登录、进房、超过 16 KiB 分片的中文与 emoji 聊天及其推送、连续购买的金币扣减。缺少配置时显示 ignored，不算通过。
 
 验证：`go test ./protocol/realtime` 在设置 `DOTNET_BIN` 后构建 [RealtimeTests](Tests/Realtime/RealtimeTests.csproj)，运行模拟服务器单元测试、与 Go 对 2800 条随机消息的编解码一致性检查，以及在随机断线代理下连接 Go 服务端的压测（每个请求恰好执行一次、推送不丢不重不乱序、踢人在断线时也能送达），两种编码各一次。2026-11-09 在 Docker（Linux，.NET 8）中通过。这是普通 .NET 运行时，不是 Unity 引擎：编辑器 PlayMode、IL2CPP、Android/iOS 构建尚未实测。
 WebGL 桥的验证：`TestUnityWebGLBridgeUnderChaos`（需要 node）在 Node 中以模拟的 Emscripten 堆加载 jslib，代替 C# 侧调用它，让 TypeScript 客户端的全部帧经过该桥，在随机断线代理下跑与上面相同的恰好一次与顺序校验，两种编码；堆在每次调用后写入垃圾数据，桥若保留堆引用会立即失败。C# 路由（按 id 分发、关闭只通知一次、关闭后丢弃事件）由 `unit` 用伪造的 jslib 覆盖；`TestCSharpWebGLBranchCompiles` 以 `UNITY_WEBGL` 编译 P/Invoke 分支。真实 Unity WebGL 构建与浏览器运行尚未实测。

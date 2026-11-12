@@ -18,6 +18,10 @@ go run . -project=examples/realtime
 # 启动服务端：ws://127.0.0.1:18090/ws/game
 go run ./examples/realtime/server
 
+# 同时提供 KCP（UDP）：kcp://127.0.0.1:18091/ws/game。-kcp-key=generate 生成密钥并开启加密，
+# 日志打印客户端需要的公钥和可复用的私钥（下次用 -kcp-key=<私钥> 保持不变）；省略 -kcp-key 为明文
+go run ./examples/realtime/server -kcp 127.0.0.1:18091 -kcp-key generate
+
 # 另一个终端运行客户端（Node 22.6+ 可直接运行 .ts）
 node examples/realtime/client.ts
 ```

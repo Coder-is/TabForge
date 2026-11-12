@@ -23,6 +23,7 @@ namespace TabForge.Protocol
         public const int MaxMessageBytes = 1 << 20;
 
         private readonly IRealtimeSocketEvents events;
+        private static int attempts = -1;
         private readonly string path, subprotocol;
         private readonly byte[] serverKey;
         private readonly object gate = new object();
@@ -73,7 +74,11 @@ namespace TabForge.Protocol
                 var addresses = Dns.GetHostAddresses(host);
                 if (addresses.Length == 0)
                     throw new IOException("no address for " + host);
-                var address = Array.Find(addresses, a => a.AddressFamily == AddressFamily.InterNetwork) ?? addresses[0];
+                // In the system's preference order, a different address on each
+                // attempt: UDP "connects" without a handshake, so an address
+                // that does not route (IPv4 on an IPv6-only NAT64 network, or
+                // the reverse) is only noticed when the handshake times out.
+                var address = addresses[(int)((uint)Interlocked.Increment(ref attempts) % (uint)addresses.Length)];
                 var socket = new Socket(address.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
                 socket.Connect(new IPEndPoint(address, port));
                 lock (gate)

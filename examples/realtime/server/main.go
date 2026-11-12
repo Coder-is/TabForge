@@ -7,8 +7,12 @@ package main
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -37,6 +41,8 @@ type player struct {
 func main() {
 	contractPath := flag.String("contract", "examples/realtime/Generated/protocol/contract.json", "generated realtime contract")
 	address := flag.String("listen", "127.0.0.1:18090", "listen address")
+	kcpAddress := flag.String("kcp", "", "also serve KCP over UDP on this address, e.g. 127.0.0.1:18091")
+	kcpKey := flag.String("kcp-key", "", "base64 X25519 private key for encrypted KCP (with -kcp); \"generate\" makes one, \"\" keeps KCP in clear text")
 	flag.Parse()
 	c, err := protocol.Load(*contractPath)
 	if err != nil {
@@ -132,6 +138,41 @@ func main() {
 		return &gamepb.BuyReply{Gold: p.gold, Inventory: inventory}, nil
 	}))
 
+	var udp net.PacketConn
+	if *kcpAddress != "" {
+		if *kcpKey != "" {
+			raw, err := base64.StdEncoding.DecodeString(*kcpKey)
+			if *kcpKey == "generate" {
+				var key *ecdh.PrivateKey
+				key, err = ecdh.X25519().GenerateKey(rand.Reader)
+				if err == nil {
+					raw = key.Bytes()
+					log.Printf("generated KCP key (pass -kcp-key=%s to keep it)", base64.StdEncoding.EncodeToString(raw))
+				}
+			}
+			if err != nil {
+				log.Fatal("kcp-key: ", err)
+			}
+			if server.KCPKey, err = ecdh.X25519().NewPrivateKey(raw); err != nil {
+				log.Fatal("kcp-key: ", err)
+			}
+		}
+		var err error
+		if udp, err = net.ListenPacket("udp", *kcpAddress); err != nil {
+			log.Fatal(err)
+		}
+		if server.KCPKey != nil {
+			log.Printf("realtime game server: kcp://%s/ws/game, encrypted; clients need the public key %s", *kcpAddress, base64.StdEncoding.EncodeToString(server.KCPKey.PublicKey().Bytes()))
+		} else {
+			log.Printf("realtime game server: kcp://%s/ws/game (clear text)", *kcpAddress)
+		}
+		go func() {
+			if err := server.ServeKCP(udp); err != nil {
+				log.Fatal(err)
+			}
+		}()
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/ws/", server)
 	// No WriteTimeout: realtime connections are long-lived.
@@ -143,6 +184,9 @@ func main() {
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		server.Shutdown(shutdown)
+		if udp != nil {
+			udp.Close() // after Shutdown, so KCP sessions are told and handed off first
+		}
 		httpServer.Shutdown(shutdown)
 	}()
 	log.Printf("realtime game server: ws://%s/ws/game", *address)
