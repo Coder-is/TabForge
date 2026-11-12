@@ -1,7 +1,9 @@
 package realtime
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -84,17 +86,32 @@ type kcpConn struct {
 	keepalive func()
 	lastRecv  time.Time
 	lastAlive time.Time
+	// client is set on dialed conversations; only clients act on plain refusals.
+	client bool
+	// crypt seals and opens every datagram when the conversation is encrypted.
+	crypt *kcpCipher
+	// raw sends a datagram as is. Servers keep the client's hello and their
+	// welcome to answer a repeated hello whose welcome was lost.
+	raw            func([]byte)
+	hello, welcome []byte
 }
 
-func newKCPConn(conv uint32, maxMessage int, output func([]byte)) *kcpConn {
+// newKCPConn starts a conversation that sends datagrams with raw; with
+// crypt they are sealed first (and KCP segments shrink to fit the MTU).
+func newKCPConn(conv uint32, maxMessage int, crypt *kcpCipher, raw func([]byte)) *kcpConn {
 	c := &kcpConn{
 		start: time.Now(), maxMessage: maxMessage, opened: make(chan kcpMessage, 1),
 		readable: make(chan struct{}, 1), writable: make(chan struct{}, 1), closed: make(chan struct{}),
+		crypt: crypt, raw: raw,
+	}
+	output, mtu := raw, kcpMTU
+	if crypt != nil {
+		output, mtu = func(b []byte) { raw(crypt.seal(b)) }, kcpMTU-kcpSealOverhead
 	}
 	c.kcp = kcp.New(conv, output)
 	c.kcp.NoDelay(1, int(kcpInterval/time.Millisecond), 2, true)
 	c.kcp.WndSize(kcpWindow, kcpWindow)
-	c.kcp.SetMTU(kcpMTU)
+	c.kcp.SetMTU(mtu)
 	c.kcp.SetDeadLink(40)
 	c.kcp.Update(0)
 	go c.tick()
@@ -139,15 +156,38 @@ func (c *kcpConn) tick() {
 	}
 }
 
-// input feeds one datagram; a reset datagram closes the conversation.
-func (c *kcpConn) input(data []byte) {
-	if len(data) == 5 && data[4] == kcpKeepalive {
-		return // Proves the address is current; nothing else to do.
-	}
+// receive handles one datagram from the peer; it does not retain data.
+// A reset closes the conversation; on encrypted conversations everything
+// else must be sealed, and what fails to open is dropped like noise.
+func (c *kcpConn) receive(data []byte) {
 	if len(data) == 5 && data[4] == kcpReset {
 		c.fail(ErrKCPReset)
 		return
 	}
+	if c.crypt == nil {
+		switch {
+		case len(data) == 5 && data[4] == kcpKeepalive:
+			return // Proves the address is current; nothing else to do.
+		case len(data) == 5 && data[4] == kcpPlainRefuse && c.client:
+			c.fail(ErrKCPEncryptionRequired)
+			return
+		}
+		c.input(append([]byte(nil), data...))
+		return
+	}
+	if c.welcome != nil && bytes.Equal(data, c.hello) {
+		c.raw(c.welcome) // The client did not get the welcome yet.
+		return
+	}
+	plain, ok := c.crypt.open(data)
+	if !ok || len(plain) == 0 { // Empty: keepalive.
+		return
+	}
+	c.input(plain)
+}
+
+// input feeds one KCP datagram.
+func (c *kcpConn) input(data []byte) {
 	c.mu.Lock()
 	c.lastRecv = time.Now()
 	ok := c.kcp.Input(data)
@@ -354,10 +394,14 @@ func kcpResetDatagram(conv uint32) []byte {
 // WebSocket handler; sessions are shared, so a client may resume a session
 // over either transport with the same encoding.
 //
-// KCP datagrams are not encrypted: tokens and payloads travel in clear
-// text, unlike wss://. See doc/realtime.md before using it on the Internet.
+// Without Server.KCPKey, KCP datagrams are not encrypted: tokens and
+// payloads travel in clear text, unlike wss://. With it, ServeKCP accepts
+// only encrypted conversations. See doc/realtime.md.
 func (s *Server) ServeKCP(pc net.PacketConn) error {
-	l := &kcpListener{srv: s, pc: pc, conns: map[string]*kcpConn{}}
+	if s.KCPKey != nil && s.KCPKey.Curve() != ecdh.X25519() {
+		return errKCPKeyCurve
+	}
+	l := &kcpListener{srv: s, pc: pc, key: s.KCPKey, conns: map[string]*kcpConn{}}
 	buf := make([]byte, 64<<10)
 	failures := 0
 	for {
@@ -386,7 +430,7 @@ func (s *Server) ServeKCP(pc net.PacketConn) error {
 		// conversations it does not know.
 		conv := binary.LittleEndian.Uint32(data)
 		if c := l.find(addr, conv, data); c != nil {
-			c.input(append([]byte(nil), data...))
+			c.receive(data)
 		}
 	}
 }
@@ -397,10 +441,15 @@ const MaxKCPConversations = 100000
 type kcpListener struct {
 	srv   *Server
 	pc    net.PacketConn
+	key   *ecdh.PrivateKey
 	mu    sync.Mutex
 	conns map[string]*kcpConn
 }
 
+// find returns the conversation a datagram belongs to, starting one for a
+// plain open segment (or a hello, when encrypted). It answers datagrams
+// for unknown conversations with a reset, or with a plain refusal when a
+// plain client meets an encrypting server, but never answers those two.
 func (l *kcpListener) find(addr net.Addr, conv uint32, data []byte) *kcpConn {
 	key := fmt.Sprintf("%s/%d", addr, conv)
 	l.mu.Lock()
@@ -408,10 +457,27 @@ func (l *kcpListener) find(addr net.Addr, conv uint32, data []byte) *kcpConn {
 	if c := l.conns[key]; c != nil {
 		return c
 	}
-	if !isOpenSegment(data) {
-		if !(len(data) == 5 && data[4] == kcpReset) { // Never answer a reset.
-			l.pc.WriteTo(kcpResetDatagram(conv), addr)
+	var crypt *kcpCipher
+	var welcome []byte
+	switch {
+	case len(data) == 5 && (data[4] == kcpReset || data[4] == kcpPlainRefuse):
+		return nil
+	case l.key == nil && isOpenSegment(data):
+	case l.key != nil && isOpenSegment(data):
+		refuse := kcpResetDatagram(conv)
+		refuse[4] = kcpPlainRefuse
+		l.pc.WriteTo(refuse, addr)
+		return nil
+	case l.key != nil && isKCPHello(data):
+		if len(l.conns) >= MaxKCPConversations {
+			return nil
 		}
+		var err error
+		if crypt, welcome, err = kcpAccept(l.key, conv, data); err != nil {
+			return nil
+		}
+	default:
+		l.pc.WriteTo(kcpResetDatagram(conv), addr)
 		return nil
 	}
 	if len(l.conns) >= MaxKCPConversations {
@@ -421,7 +487,11 @@ func (l *kcpListener) find(addr net.Addr, conv uint32, data []byte) *kcpConn {
 	if limit <= 0 {
 		limit = 1 << 20
 	}
-	c := newKCPConn(conv, limit, func(b []byte) { l.pc.WriteTo(b, addr) })
+	c := newKCPConn(conv, limit, crypt, func(b []byte) { l.pc.WriteTo(b, addr) })
+	if crypt != nil {
+		// receive answers this hello, and repeats of it, with the welcome.
+		c.hello, c.welcome = append([]byte(nil), data...), welcome
+	}
 	c.onClose = func() {
 		l.mu.Lock()
 		if l.conns[key] == c {
@@ -493,8 +563,9 @@ func (s *Server) serveKCPConn(c *kcpConn) {
 	s.serveConn(context.Background(), ch, c, enc)
 }
 
-// dialKCP opens a KCP conversation to kcp://host:port/path.
-func dialKCP(ctx context.Context, rawURL, subprotocol string, maxMessage int) (*kcpConn, error) {
+// dialKCP opens a KCP conversation to kcp://host:port/path, encrypted when
+// serverKey is set.
+func dialKCP(ctx context.Context, rawURL, subprotocol string, maxMessage int, serverKey *ecdh.PublicKey) (*kcpConn, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
@@ -513,11 +584,22 @@ func dialKCP(ctx context.Context, rawURL, subprotocol string, maxMessage int) (*
 		}
 		conv = binary.LittleEndian.Uint32(b[:])
 	}
-	c := newKCPConn(conv, maxMessage, func(p []byte) { udp.Write(p) })
+	var crypt *kcpCipher
+	if serverKey != nil {
+		if crypt, err = kcpHandshake(ctx, udp, conv, serverKey); err != nil {
+			udp.Close()
+			return nil, err
+		}
+	}
+	c := newKCPConn(conv, maxMessage, crypt, func(p []byte) { udp.Write(p) })
 	alive := kcpResetDatagram(conv)
 	alive[4] = kcpKeepalive
+	keepalive := func() { udp.Write(alive) }
+	if crypt != nil {
+		keepalive = func() { udp.Write(crypt.seal(nil)) }
+	}
 	c.mu.Lock()
-	c.lastRecv, c.keepalive = time.Now(), func() { udp.Write(alive) }
+	c.client, c.lastRecv, c.keepalive = true, time.Now(), keepalive
 	c.mu.Unlock()
 	c.onClose = func() { udp.Close() }
 	go func() {
@@ -528,8 +610,8 @@ func dialKCP(ctx context.Context, rawURL, subprotocol string, maxMessage int) (*
 				c.fail(err)
 				return
 			}
-			if n >= 4 && binary.LittleEndian.Uint32(buf) == conv { // data or a 5-byte reset
-				c.input(append([]byte(nil), buf[:n]...))
+			if n >= 5 && binary.LittleEndian.Uint32(buf) == conv {
+				c.receive(buf[:n])
 			}
 		}
 	}()
@@ -559,5 +641,50 @@ func dialKCP(ctx context.Context, rawURL, subprotocol string, maxMessage int) (*
 	case <-ctx.Done():
 		c.CloseNow()
 		return nil, ctx.Err()
+	}
+}
+
+// kcpHelloRetry is how long the client waits for a welcome before
+// repeating its hello.
+const kcpHelloRetry = 250 * time.Millisecond
+
+// kcpHandshake runs the client's side of the encrypted handshake on udp
+// before any KCP traffic. Datagrams that are not a genuine welcome (from a
+// wrong key or a forger) are ignored; a reset means the server does not
+// encrypt, since an encrypting server answers every hello.
+func kcpHandshake(ctx context.Context, udp net.Conn, conv uint32, server *ecdh.PublicKey) (*kcpCipher, error) {
+	h, err := newKCPClientHandshake(conv, server)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { udp.SetReadDeadline(time.Now()) })
+	defer stop()
+	defer udp.SetReadDeadline(time.Time{})
+	buf := make([]byte, 2048)
+	for {
+		if _, err := udp.Write(h.hello); err != nil {
+			return nil, err
+		}
+		udp.SetReadDeadline(time.Now().Add(kcpHelloRetry))
+		for {
+			n, err := udp.Read(buf)
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				break // Repeat the hello.
+			}
+			if err != nil {
+				return nil, err
+			}
+			data := buf[:n]
+			if n == 5 && binary.LittleEndian.Uint32(data) == conv && data[4] == kcpReset {
+				return nil, ErrKCPEncryptionUnsupported
+			}
+			if k := h.finish(data); k != nil {
+				return k, nil
+			}
+		}
 	}
 }

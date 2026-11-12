@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -95,6 +96,12 @@ type Server struct {
 	// on the server that continues it and may fill in identity.Data.
 	ExportSession func(*Session) ([]byte, error)
 	ImportSession func(s *Session, identity *Identity, state []byte) error
+
+	// KCPKey is the server's long-term X25519 key for ServeKCP. When set,
+	// ServeKCP accepts only encrypted conversations from clients that know
+	// its public key (Client.KCPServerKey); nil keeps KCP in clear text.
+	// Create one with ecdh.X25519().GenerateKey and keep it secret.
+	KCPKey *ecdh.PrivateKey
 
 	codec      *payloadCodec
 	schemaHash string

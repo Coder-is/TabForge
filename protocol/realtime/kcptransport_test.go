@@ -1,7 +1,10 @@
 package realtime
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdh"
+	cryptorand "crypto/rand"
 	"errors"
 	"math/rand"
 	"net"
@@ -47,6 +50,11 @@ type udpProxy struct {
 	maxDelay           time.Duration
 	upstream           map[string]*net.UDPConn
 	rebinds, forwarded atomic.Int64
+	// corrupt flips one byte in this share of datagrams; watch records
+	// whether any datagram contained it (guarded by mu).
+	corrupt float64
+	watch   []byte
+	watched atomic.Bool
 }
 
 func newUDPProxy(t testing.TB, target string, loss, dup float64, maxDelay time.Duration) *udpProxy {
@@ -84,9 +92,19 @@ func (p *udpProxy) forward(write func([]byte)) func([]byte) {
 				delays = append(delays, time.Duration(p.r.Int63n(int64(p.maxDelay)+1)))
 			}
 		}
+		if p.watch != nil && bytes.Contains(data, p.watch) {
+			p.watched.Store(true)
+		}
+		flip := -1
+		if p.r.Float64() < p.corrupt {
+			flip = p.r.Intn(len(data))
+		}
 		p.mu.Unlock()
 		for _, d := range delays {
 			b := append([]byte(nil), data...)
+			if flip >= 0 {
+				b[flip] ^= 0x5A
+			}
 			time.AfterFunc(d, func() { p.forwarded.Add(1); write(b) })
 		}
 	}
@@ -154,6 +172,9 @@ func kcpClient(t testing.TB, f *fixture, enc Encoding, user, addr string) *Clien
 	if err != nil {
 		t.Fatal(err)
 	}
+	if f.server.KCPKey != nil {
+		c.KCPServerKey = f.server.KCPKey.PublicKey()
+	}
 	c.Encoding = enc
 	c.Token = func() string { return "user-" + user }
 	c.MinBackoff, c.MaxBackoff = 5*time.Millisecond, 50*time.Millisecond
@@ -161,9 +182,31 @@ func kcpClient(t testing.TB, f *fixture, enc Encoding, user, addr string) *Clien
 	return c
 }
 
+// kcpModes runs a test over clear-text and encrypted KCP, in both encodings.
+func kcpModes(t *testing.T, run func(t *testing.T, enc Encoding, key *ecdh.PrivateKey)) {
+	for _, encrypted := range []bool{false, true} {
+		name := "plain"
+		var key *ecdh.PrivateKey
+		if encrypted {
+			name, key = "encrypted", newKCPKey(t)
+		}
+		t.Run(name, func(t *testing.T) {
+			encodings(t, func(t *testing.T, enc Encoding) { run(t, enc, key) })
+		})
+	}
+}
+
+func newKCPKey(t testing.TB) *ecdh.PrivateKey {
+	key, err := ecdh.X25519().GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
 func TestKCPRequestPushNotify(t *testing.T) {
-	encodings(t, func(t *testing.T, enc Encoding) {
-		f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s) })
+	kcpModes(t, func(t *testing.T, enc Encoding, key *ecdh.PrivateKey) {
+		f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s); s.KCPKey = key })
 		c := kcpClient(t, f, enc, "42", serveKCP(t, f))
 		chats := make(chan *gamepb.ChatMessage, 1)
 		moved := make(chan *gamepb.PlayerMoved, 8)
@@ -206,11 +249,19 @@ func TestKCPRequestPushNotify(t *testing.T) {
 // TestKCPExactlyOnceUnderLossAndRebinds runs concurrent purchases through
 // a proxy that drops, duplicates and reorders datagrams and rebinds the
 // client's address at random. KCP repairs the losses; rebinds reset the
-// conversation and the session resumes on a new one.
+// conversation and the session resumes on a new one. Encrypted, the proxy
+// also corrupts datagrams, which must fail authentication and count as
+// lost, and the token must never appear on the wire.
 func TestKCPExactlyOnceUnderLossAndRebinds(t *testing.T) {
-	encodings(t, func(t *testing.T, enc Encoding) {
-		f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s) })
+	kcpModes(t, func(t *testing.T, enc Encoding, key *ecdh.PrivateKey) {
+		f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s); s.KCPKey = key })
 		proxy := newUDPProxy(t, serveKCP(t, f), 0.1, 0.03, 15*time.Millisecond)
+		proxy.mu.Lock()
+		proxy.watch = []byte("user-7")
+		if key != nil {
+			proxy.corrupt = 0.02
+		}
+		proxy.mu.Unlock()
 		c := kcpClient(t, f, enc, "7", proxy.addr())
 		states := &stateLog{}
 		c.OnState = states.record
@@ -292,6 +343,9 @@ func TestKCPExactlyOnceUnderLossAndRebinds(t *testing.T) {
 		if proxy.rebinds.Load() < 2 || resumes < 2 {
 			t.Fatalf("%d rebinds, %d resumes", proxy.rebinds.Load(), resumes)
 		}
+		if proxy.watched.Load() != (key == nil) {
+			t.Fatalf("token on the wire: %v, encrypted: %v", proxy.watched.Load(), key != nil)
+		}
 		t.Logf("%d purchases, %d rebinds, %d resumes, %d datagrams forwarded", len(golds), proxy.rebinds.Load(), resumes, proxy.forwarded.Load())
 	})
 }
@@ -301,12 +355,12 @@ func TestKCPRefusals(t *testing.T) {
 	addr := serveKCP(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := dialKCP(ctx, "kcp://"+addr+"/nowhere", SubprotocolProto, 1<<20); err == nil || !strings.Contains(err.Error(), "not_found") {
+	if _, err := dialKCP(ctx, "kcp://"+addr+"/nowhere", SubprotocolProto, 1<<20, nil); err == nil || !strings.Contains(err.Error(), "not_found") {
 		t.Fatalf("unknown path: %v", err)
 	}
 	// Client.dial relies on a CloseError to treat a refusal as permanent.
 	for i := 0; i < 20; i++ {
-		_, err := dialKCP(ctx, "kcp://"+addr+"/ws/game", "chat.v2", 1<<20)
+		_, err := dialKCP(ctx, "kcp://"+addr+"/ws/game", "chat.v2", 1<<20, nil)
 		var ce websocket.CloseError
 		if !errors.As(err, &ce) || !strings.HasPrefix(ce.Reason, "offer ") {
 			t.Fatalf("unknown subprotocol: %v", err)
@@ -333,5 +387,88 @@ func TestKCPRefusals(t *testing.T) {
 	conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	if n, err := conn.Read(buf); err == nil {
 		t.Fatalf("answered a 4-byte datagram: % x", buf[:n])
+	}
+}
+
+func TestKCPEncryptionHandshake(t *testing.T) {
+	key := newKCPKey(t)
+	encrypted := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s); s.KCPKey = key })
+	encryptedAddr := serveKCP(t, encrypted)
+	plain := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s) })
+	plainAddr := serveKCP(t, plain)
+
+	// A client pinned to another key never accepts the welcome.
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+	if _, err := dialKCP(ctx, "kcp://"+encryptedAddr+"/ws/game", SubprotocolProto, 1<<20, newKCPKey(t).PublicKey()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("wrong server key: %v", err)
+	}
+
+	// Mismatched configurations stop the client instead of retrying.
+	for _, tc := range []struct {
+		name, addr string
+		key        *ecdh.PublicKey
+		want       error
+	}{
+		{"plain client", encryptedAddr, nil, ErrKCPEncryptionRequired},
+		{"encrypting client", plainAddr, key.PublicKey(), ErrKCPEncryptionUnsupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := kcpClient(t, plain, EncodingProto, "1", tc.addr)
+			c.KCPServerKey = tc.key
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := c.Connect(ctx)
+			var e *Error
+			if !errors.As(err, &e) || e.Code != CodeProtocolError || e.Message != tc.want.Error() {
+				t.Fatalf("Connect: %v", err)
+			}
+		})
+	}
+
+	// A repeated hello (its welcome was lost) gets the same welcome, which
+	// is never larger than the hello; a P-256 key is refused up front.
+	conn, err := net.Dial("udp", encryptedAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	h, err := newKCPClientHandshake(77, key.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var welcomes [2][]byte
+	for i := range welcomes {
+		conn.Write(h.hello)
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, 256)
+		n, err := conn.Read(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		welcomes[i] = buf[:n]
+	}
+	if !bytes.Equal(welcomes[0], welcomes[1]) || len(welcomes[0]) > len(h.hello) || h.finish(welcomes[0]) == nil {
+		t.Fatalf("welcomes % x / % x", welcomes[0], welcomes[1])
+	}
+	// The welcome's tag binds it to the server key: a client pinned to
+	// another key rejects it outright instead of timing out on data later.
+	wrong, err := newKCPClientHandshake(77, newKCPKey(t).PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong.eph = h.eph
+	if wrong.finish(welcomes[0]) != nil {
+		t.Fatal("accepted a welcome from a server without the pinned key")
+	}
+	p256, err := ecdh.P256().GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newKCPClientHandshake(1, p256.PublicKey()); !errors.Is(err, errKCPKeyCurve) {
+		t.Fatalf("P-256 key: %v", err)
+	}
+	if err := (&Server{KCPKey: p256}).ServeKCP(nil); !errors.Is(err, errKCPKeyCurve) {
+		t.Fatalf("ServeKCP with a P-256 key: %v", err)
 	}
 }

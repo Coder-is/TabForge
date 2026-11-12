@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"crypto/ecdh"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -45,6 +46,9 @@ type Client struct {
 	// Compression offers permessage-deflate; used only if the server agrees.
 	Compression          Compression
 	CompressionThreshold int
+	// KCPServerKey is the server's X25519 public key (Server.KCPKey) for
+	// encrypted kcp:// URLs; nil talks clear-text KCP.
+	KCPServerKey *ecdh.PublicKey
 	// OnState is called from the client's goroutine; do not block.
 	OnState func(State, *Error)
 
@@ -405,12 +409,12 @@ func (c *Client) connectOnce() (retryNow bool, permanent *Error) {
 		case <-ctx.Done():
 		}
 	}()
-	ws, err := c.dial(ctx)
+	ws, permanent, err := c.dial(ctx)
 	if err != nil {
 		return false, nil
 	}
-	if ws == nil {
-		return false, &Error{Code: CodeProtocolError, Message: "server did not accept " + c.Encoding.Subprotocol()}
+	if permanent != nil {
+		return false, permanent
 	}
 	typ := messageType(c.Encoding)
 	c.mu.Lock()
@@ -762,20 +766,23 @@ func NewMessage(c *protocol.Contract, fullName string) (proto.Message, error) {
 }
 
 // dial opens the transport for c.URL: ws:// or wss:// (WebSocket), or
-// kcp://host:port/path (KCP over UDP, see Server.ServeKCP). It returns
-// (nil, nil) if the server refused the encoding, and an error for network
-// failures (retried with backoff).
-func (c *Client) dial(ctx context.Context) (wireConn, error) {
+// kcp://host:port/path (KCP over UDP, see Server.ServeKCP). permanent
+// reports a refusal that retrying cannot fix (the encoding, or a KCP
+// encryption mismatch); err is a network failure, retried with backoff.
+func (c *Client) dial(ctx context.Context) (conn wireConn, permanent *Error, err error) {
+	refused := &Error{Code: CodeProtocolError, Message: "server did not accept " + c.Encoding.Subprotocol()}
 	if strings.HasPrefix(c.URL, "kcp://") {
-		conn, err := dialKCP(ctx, c.URL, c.Encoding.Subprotocol(), 1<<20)
-		if err != nil {
-			var ce websocket.CloseError
-			if errors.As(err, &ce) && strings.HasPrefix(ce.Reason, "offer ") {
-				return nil, nil
-			}
-			return nil, err
+		conn, err := dialKCP(ctx, c.URL, c.Encoding.Subprotocol(), 1<<20, c.KCPServerKey)
+		var ce websocket.CloseError
+		switch {
+		case err == nil:
+			return conn, nil, nil
+		case errors.As(err, &ce) && strings.HasPrefix(ce.Reason, "offer "):
+			return nil, refused, nil
+		case errors.Is(err, ErrKCPEncryptionRequired), errors.Is(err, ErrKCPEncryptionUnsupported), errors.Is(err, errKCPKeyCurve):
+			return nil, &Error{Code: CodeProtocolError, Message: err.Error()}, nil
 		}
-		return conn, nil
+		return nil, nil, err
 	}
 	ws, _, err := websocket.Dial(ctx, c.URL, &websocket.DialOptions{
 		Subprotocols:         []string{c.Encoding.Subprotocol()},
@@ -785,12 +792,12 @@ func (c *Client) dial(ctx context.Context) (wireConn, error) {
 		CompressionThreshold: c.CompressionThreshold,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if ws.Subprotocol() != c.Encoding.Subprotocol() {
 		ws.CloseNow()
-		return nil, nil
+		return nil, refused, nil
 	}
 	ws.SetReadLimit(1 << 20)
-	return ws, nil
+	return ws, nil, nil
 }
