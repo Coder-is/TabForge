@@ -190,7 +190,7 @@ func (r redisStore) Take(ctx context.Context, key string) ([]byte, error) {
 
 - `Take` 必须是原子的“取出并删除”，保证一个会话只会在一个实例上继续，请求不会被执行两次。存储的键由会话 id 和恢复令牌的 SHA-256 生成：没有令牌既读不到快照，也无法删除它。
 - 如果客户端在旧实例排空期间自己断线并先连上新实例，新实例会看到“交接中”标记，回复可重试的 `server_shutdown`，客户端退避后再恢复；标记带有固定截止时间（最长 30 秒，不超过 `Shutdown` 的 ctx），旧实例中途崩溃时也不会让客户端无限重试。
-- 负载均衡常常在通知旧实例停机的同时就把流量切到新实例（例如 Kubernetes 摘除端点与发送 SIGTERM 并发），这时断线的客户端可能先连上新实例，而旧实例还没开始交接。为此，设置了 `Store` 的实例在首次处理握手后的 `HandoffGrace`（默认 10 秒，负值关闭）内，遇到本机和存储中都没有的会话时回复可重试的 `server_shutdown`，客户端保留会话、退避重试，等旧实例写入快照后在新实例上恢复。代价是进程崩溃重启后，客户端要多等最长 `HandoffGrace` 才会得到 `session_expired` 并新建会话。
+- 负载均衡常常在通知旧实例停机的同时就把流量切到新实例（例如 Kubernetes 摘除端点与发送 SIGTERM 并发），这时断线的客户端可能先连上新实例，而旧实例还没开始交接。为此，设置了 `Store` 的实例在首次处理握手后的 `HandoffGrace`（默认 10 秒，负值关闭）内，遇到本机和存储中都没有的会话时回复可重试的 `server_shutdown`，客户端保留会话、退避重试，等旧实例写入快照后在新实例上恢复。旧实例交接失败（例如处理函数超过 `Shutdown` 的 ctx）时会在存储中记下会话已结束，新实例立即回复 `session_expired`，不会让客户端白等。代价是进程崩溃重启或存储整体不可用时，客户端要多等最长 `HandoffGrace` 才会得到 `session_expired` 并新建会话。
 - 只有通过 `Shutdown` 交接的会话可以跨实例继续。进程崩溃时内存中的会话无法保存，客户端会得到 `session_expired`（与没有 `Store` 时相同）。存储写入失败时也按原方式结束，并记录 `handoff_failed` 事件。
 - 被踢下线、关闭帧又随断线丢失的会话，结束原因也会一并写入存储，客户端在新实例上恢复时仍会收到 `kicked`。
 - `Values`、`Identity.Data` 和房间（`Group`）成员关系只存在于本进程，需要通过 `ExportSession`/`ImportSession` 携带，或在 `OnSessionStart` 中重建。交接后旧实例对该会话调用 `OnSessionEnd`，原因码为 `handed_off`。快照完成后在旧实例上的 `Push` 返回 `ErrSessionClosed`。

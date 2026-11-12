@@ -531,3 +531,40 @@ func TestHandoffGraceExpires(t *testing.T) {
 		t.Fatalf("states %v", states.states)
 	}
 }
+
+// TestHandoffTimeoutSkipsGrace: a handler outlives Shutdown's deadline, so
+// the session is not handed off. The old server records that, and the next
+// server expires the session at once instead of waiting out HandoffGrace.
+func TestHandoffTimeoutSkipsGrace(t *testing.T) {
+	store := NewMemoryStore()
+	contract := testContract(t, nil)
+	a := newFixture(t, contract, migratable(t, store, nil))
+	b := newFixture(t, contract, migratable(t, store, nil)) // default 10 s grace
+	c := a.client(EncodingProto, "11", false)
+	states := &stateLog{}
+	c.OnState = states.record
+	connect(t, c)
+	session := c.SessionID()
+	go Call[*gamepb.ChatAck](context.Background(), c, "chat", &gamepb.ChatSend{Text: "slow"}) // 300 ms
+	eventually(t, "request running", func() bool {
+		s, ok := a.server.Session(session)
+		if !ok {
+			return false
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.received > 0
+	})
+	a.proxy.retarget(addr(b))
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	a.server.Shutdown(ctx)
+	cancel()
+	start := time.Now()
+	eventually(t, "new session", func() bool { return states.count(string(StateConnected)) == 2 })
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("new session after %v: the grace was not skipped", elapsed)
+	}
+	if c.SessionID() == session {
+		t.Fatal("session kept")
+	}
+}

@@ -223,6 +223,19 @@ func (s *Server) handOff(ctx context.Context, sessions []*Session, ended map[str
 			s.Store.Put(ctx, storeKey(endedKeyPrefix, id, t.resumeToken), data, ttl)
 		}
 	}
+	// Sessions that could not be handed off end here. Saying so lets the
+	// next server answer their resumes with session_expired at once instead
+	// of waiting out HandoffGrace for a snapshot that will never come. The
+	// hand-off usually failed because ctx expired, so this gets its own.
+	if len(rest) > 0 {
+		put, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		data, _ := json.Marshal(&Error{Code: CodeSessionExpired, Message: "session could not be handed off; start a new session", Retryable: true})
+		for _, session := range rest {
+			ttl := max(time.Duration(session.channel.Resume)*time.Millisecond, time.Minute)
+			s.Store.Put(put, storeKey(endedKeyPrefix, session.id, session.resumeToken), data, ttl)
+		}
+		cancel()
+	}
 	return rest
 }
 
