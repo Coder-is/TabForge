@@ -2,11 +2,16 @@ extends SceneTree
 ## Realtime client tests (Godot headless), driven by protocol/realtime tests:
 ##   unit <protocol.gd>                         scripted fake server
 ##   codec <protocol.gd> <cases> <out>            Go/GDScript codec equivalence
-##   chaos <protocol.gd> <url> <proto|json> <s>   Go server behind a cutting proxy
+##   chaos <protocol.gd> <url> <proto|json> <s> [key]   Go server behind a cutting proxy
+##                                   (ws:// or kcp://; key: base64 KCP server key or -)
+##   kcp <protocol.gd> <cases> <vectors>          KCP core and crypto against Go-generated cases
+##   kcprefuse <protocol.gd> <url> <key> <text>   expects closed:protocol_error mentioning text
 
 const Client = preload("../realtime_client.gd")
 const Codec = preload("../realtime_codec.gd")
 const Wire = preload("../wire_validator.gd")
+const KcpCore = preload("../kcp_core.gd")
+const KcpCrypto = preload("../kcp_crypto.gd")
 
 var failures := 0
 var contract: Dictionary
@@ -26,7 +31,9 @@ func _run() -> void:
 	match args[0]:
 		"unit": await unit()
 		"codec": codec(args[2], args[3])
-		"chaos": await chaos(args[2], args[3], int(args[4]))
+		"chaos": await chaos(args[2], args[3], int(args[4]), key_arg(args[5]) if args.size() > 5 else PackedByteArray())
+		"kcp": kcp(args[2], args[3])
+		"kcprefuse": await kcp_refuse(args[2], key_arg(args[3]), args[4])
 	print("realtime %s: %d failures" % [args[0], failures])
 	quit(1 if failures > 0 else 0)
 
@@ -242,11 +249,11 @@ func pump(client: Node) -> void:
 		OS.delay_usec(250)
 	await process_frame
 
-func chaos(url: String, encoding: String, seconds: int) -> void:
+func chaos(url: String, encoding: String, seconds: int, kcp_key: PackedByteArray = PackedByteArray()) -> void:
 	var states: Array = []
 	var client: Node = Client.new()
 	root.add_child(client)
-	client.configure(url, contract, "game", {"encoding": encoding, "token": func(): return "user-31", "min_backoff_ms": 5, "max_backoff_ms": 50})
+	client.configure(url, contract, "game", {"encoding": encoding, "token": func(): return "user-31", "min_backoff_ms": 5, "max_backoff_ms": 50, "kcp_server_key": kcp_key})
 	client.state_changed.connect(func(s: String, e: Dictionary) -> void: states.append(s if e.is_empty() else s + ":" + e.code))
 	var pushes: Array = []
 	client.on_push("chatMessage", func(m: Dictionary) -> void: pushes.append(int(m.messageId)))
@@ -305,3 +312,132 @@ func chaos(url: String, encoding: String, seconds: int) -> void:
 	check(states[-1] == "closed:kicked", "kick: " + str(states.slice(-10)))
 	print(JSON.stringify({"requests": golds.size(), "resumes": states.count("resumed")}))
 	client.queue_free()
+
+# ---- KCP ----
+
+func key_arg(arg: String) -> PackedByteArray:
+	return PackedByteArray() if arg == "-" else Marshalls.base64_to_raw(arg)
+
+func kcp_refuse(url: String, key: PackedByteArray, text: String) -> void:
+	var states: Array = []
+	var last: Dictionary = {}
+	var client: Node = Client.new()
+	root.add_child(client)
+	client.configure(url, contract, "game", {"token": func(): return "user-5", "min_backoff_ms": 5, "max_backoff_ms": 50, "kcp_server_key": key})
+	client.state_changed.connect(func(s: String, e: Dictionary) -> void:
+		states.append(s if e.is_empty() else s + ":" + e.code)
+		if not e.is_empty(): last.merge(e, true))
+	client.start()
+	var deadline := Time.get_ticks_msec() + 10000
+	while client.state != "closed" and Time.get_ticks_msec() < deadline:
+		await pump(client)
+	check(client.state == "closed" and states[-1] == "closed:protocol_error" and str(last.get("message", "")).contains(text), "refusal: " + str(states) + " " + str(last))
+	check(states.count("connecting") == 1, "retried a permanent refusal: " + str(states))
+	client.queue_free()
+
+func kcp(cases_path: String, vectors_path: String) -> void:
+	var cases: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(cases_path))
+	# X25519 in GDScript takes ~40 ms; 40 random cases cover it well enough.
+	var xs: Array = cases.x25519.slice(0, 40)
+	for c in xs:
+		check(KcpCrypto.x25519(c.scalar.hex_decode(), c.point.hex_decode()).hex_encode() == c.out, "x25519 " + str(c))
+	var zero := PackedByteArray()
+	zero.resize(32)
+	check(KcpCrypto.x25519(KcpCrypto.random_bytes(32), zero).is_empty(), "x25519 accepted a low-order point")
+	for c in cases.aead:
+		var key: PackedByteArray = c.key.hex_decode()
+		var nonce: PackedByteArray = c.nonce.hex_decode()
+		var aad: PackedByteArray = c.aad.hex_decode()
+		var sealed := KcpCrypto.seal(key, nonce, aad, c.plain.hex_decode())
+		check(sealed.hex_encode() == c.sealed, "seal " + str(c))
+		var opened := KcpCrypto.open(key, nonce, aad, sealed)
+		check(not opened.is_empty() and opened[0].hex_encode() == c.plain, "open " + str(c))
+		var step := maxi(1, sealed.size() / 7)
+		for i in range(0, sealed.size(), step):
+			var bad := sealed.duplicate()
+			bad[i] ^= 1
+			check(KcpCrypto.open(key, nonce, aad, bad).is_empty(), "opened a damaged datagram at byte %d" % i)
+	print("kcp crypto: %d x25519, %d aead cases" % [xs.size(), cases.aead.size()])
+	kcp_vectors(JSON.parse_string(FileAccess.get_file_as_string(vectors_path)))
+	kcp_core_under_loss()
+
+func kcp_vectors(v: Dictionary) -> void:
+	var conv := int(v.conv)
+	var server_public: PackedByteArray = v.server_static_public.hex_decode()
+	check(KcpCrypto.x25519_public(v.server_static_private.hex_decode()).hex_encode() == v.server_static_public, "server public key")
+	var h = KcpCrypto.ClientHandshake.new(conv, server_public, v.client_ephemeral_private.hex_decode())
+	check(h.hello.hex_encode() == v.hello, "hello " + h.hello.hex_encode())
+	var welcome: PackedByteArray = v.welcome.hex_decode()
+	var done: Array = h.finish(welcome)
+	check(not done.is_empty(), "the client rejected the genuine welcome")
+	if done.is_empty(): return
+	var client = done[0]
+	check(client.send_key.hex_encode() == v.client_to_server_key and client.recv_key.hex_encode() == v.server_to_client_key, "derived keys")
+	var wrong = KcpCrypto.ClientHandshake.new(conv, KcpCrypto.x25519_public(KcpCrypto.random_bytes(32)), v.client_ephemeral_private.hex_decode())
+	check(wrong.finish(welcome).is_empty(), "a client pinned to another key accepted the welcome")
+	var damaged := welcome.duplicate()
+	damaged[20] ^= 1
+	check(h.finish(damaged).is_empty(), "accepted a damaged welcome")
+	var keys: PackedByteArray = (v.client_to_server_key + v.server_to_client_key).hex_decode()
+	var server = KcpCrypto.Cipher.new(conv, keys, false)
+	for d in v.datagrams:
+		var from_client: bool = d.from == "client"
+		var sealed: PackedByteArray = (client if from_client else server).seal(d.plaintext.hex_decode())
+		check(sealed.hex_encode() == d.sealed, "sealed " + str(d))
+		var opened: Array = (server if from_client else client).open(sealed)
+		check(not opened.is_empty() and opened[0].hex_encode() == d.plaintext, "opened " + str(d))
+	var zero_counter: PackedByteArray = client.seal(PackedByteArray([1]))
+	for i in range(5, 13):
+		zero_counter[i] = 0
+	check(server.open(zero_counter).is_empty(), "opened a datagram with counter 0")
+	print("kcp vectors match Go")
+
+## Two cores over a link that drops, duplicates and reorders, on a virtual clock.
+func kcp_core_under_loss() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 7
+	var in_flight: Array = [] # [at, to_b, data]
+	var clock := [0]
+	var link := func(to_b: bool) -> Callable:
+		return func(data: PackedByteArray) -> void:
+			var copies := 2 if r.randf() < 0.05 else 1
+			for copy in copies:
+				if r.randf() >= 0.2:
+					in_flight.append([clock[0] + r.randi_range(5, 60), to_b, data.duplicate()])
+	var a := KcpCore.new(9, link.call(true))
+	var b := KcpCore.new(9, link.call(false))
+	for k in [a, b]:
+		k.no_delay(1, 10, 2, true)
+		k.wnd_size(256, 256)
+		k.set_mtu(1200)
+	var sent: Array = []
+	for i in 100:
+		var m := PackedByteArray()
+		m.resize(r.randi_range(1, 5000))
+		for j in m.size():
+			m[j] = r.randi() & 0xff
+		sent.append(m)
+		check(a.send(m), "send %d" % i)
+	var got: Array = []
+	while clock[0] < 600000 and got.size() < sent.size():
+		a.update(clock[0])
+		b.update(clock[0])
+		var due: Array = in_flight.filter(func(p: Array) -> bool: return p[0] <= clock[0])
+		var rest: Array = in_flight.filter(func(p: Array) -> bool: return p[0] > clock[0])
+		in_flight.clear() # In place: the link closures hold this array.
+		in_flight.append_array(rest)
+		due.shuffle()
+		for p in due:
+			(b if p[1] else a).input(p[2])
+		while true:
+			var m: Array = b.recv()
+			if m.is_empty(): break
+			got.append(m[0])
+		clock[0] += 5
+	check(got.size() == sent.size(), "delivered %d of %d" % [got.size(), sent.size()])
+	for i in mini(got.size(), sent.size()):
+		if got[i] != sent[i]:
+			check(false, "message %d differs" % i)
+			break
+	check(not a.dead() and not b.dead(), "dead link under 20% loss")
+	print("kcp core: %d messages in order after %d virtual ms" % [sent.size(), clock[0]])

@@ -87,5 +87,6 @@ func _ready() -> void:
 - 消息是 ProtoJSON 形态的 Dictionary：64 位整数为十进制字符串，枚举为名称。发送前按 `wireSchema` 校验并规范化，失败的请求在下一帧以 `invalid_message` 触发 `failed`。
 - 节点离开场景树时关闭会话；需要跨场景保持会话时把它放在自动加载（Autoload）节点下。
 - 64 位整数在 GDScript 中按两个 32 位分量处理，`uint64` 最大值等极端值与 Go 一致。
+- **KCP（UDP）**：地址写成 `kcp://host:7001/ws/game` 即连接 Go 服务端的 `ServeKCP`（见 [KCP 传输](../../doc/realtime.md)），弱网下没有 TCP 的队头阻塞，其余用法不变。服务器设置了 `KCPKey` 时，在选项中传入 `"kcp_server_key": Marshalls.base64_to_raw("...")`（服务器的 32 字节 X25519 公钥），所有数据报加密并认证服务器；不传则为明文 KCP。两端加密配置不一致时以 `protocol_error` 关闭，不会反复重连。桌面与移动导出可用；Web 导出没有 UDP，`configure` 返回 `ERR_UNAVAILABLE`。实现为纯 GDScript（`kcp_core.gd`、`kcp_crypto.gd`、`kcp_socket.gd`），在 `_process` 中轮询，不开线程；握手中的 X25519（每次约 40 ms）放在 `WorkerThreadPool` 上，重连不会卡住主线程。加密由 GDScript 完成，满载数据报约 0.7 ms，适合游戏消息量，不适合大批量传输。
 
-验证：`go test ./protocol/realtime` 在设置 `GODOT_BIN` 后以 headless 方式运行 [tests/realtime.gd](tests/realtime.gd)：模拟服务器单元测试、与 Go 对 2800 条随机消息的编解码一致性，以及随机断线代理下连接 Go 服务端的压测（每个请求恰好执行一次、推送不丢不重不乱序、踢人在断线时也能送达），两种编码。2026-11-09 在 Docker（Linux）中用 Godot 4.5.1 连续 10 轮通过。移动导出、Web 导出与编辑器内运行尚未实测。
+验证：`go test ./protocol/realtime` 在设置 `GODOT_BIN` 后以 headless 方式运行 [tests/realtime.gd](tests/realtime.gd)：模拟服务器单元测试、与 Go 对 2800 条随机消息的编解码一致性，以及随机断线代理下连接 Go 服务端的压测（每个请求恰好执行一次、推送不丢不重不乱序、踢人在断线时也能送达），两种编码。2026-11-09 在 Docker（Linux）中用 Godot 4.5.1 连续 10 轮通过。KCP 由 `TestGodotKCPClient` 验证：加密原语与 Go 生成的用例和固定密钥向量逐字节一致、两个 GDScript KCP 在 20% 丢包的虚拟链路上按序送达、经丢包与换端口的 UDP 代理连接 `ServeKCP`（明文与加密、两种编码），以及加密配置不一致时停止；2026-11-12 在本机（Windows，Godot 4.5.1）连续 5 轮通过。移动导出、Web 导出与编辑器内运行尚未实测。

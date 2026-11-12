@@ -15,6 +15,7 @@ extends Node
 
 const Wire = preload("wire_validator.gd")
 const Codec = preload("realtime_codec.gd")
+const KcpSocket = preload("kcp_socket.gd")
 
 const SUBPROTOCOL_PROTO := "tabforge.realtime.v1.proto"
 const SUBPROTOCOL_JSON := "tabforge.realtime.v1.json"
@@ -102,6 +103,7 @@ var _by_id := {}
 var _handlers := {}
 var _token: Callable
 var _socket_factory: Callable
+var _kcp_server_key := PackedByteArray()
 var _min_backoff := 200
 var _max_backoff := 10000
 var _max_unacked := 1024
@@ -122,7 +124,10 @@ var _deferred: Array = []
 
 ## contract is the generated protocol.gd CONTRACT. options: encoding ("proto"
 ## or "json"), token (Callable returning String), min_backoff_ms,
-## max_backoff_ms, max_unacked, socket (Callable(url, protocol) -> socket).
+## max_backoff_ms, max_unacked, socket (Callable(url, protocol) -> socket),
+## kcp_server_key (PackedByteArray: the server's 32-byte X25519 public key
+## for encrypted kcp:// URLs; omit for clear-text KCP). A kcp://host:port/path
+## url connects to the Go server's ServeKCP over UDP (not on the Web).
 func configure(url: String, contract: Dictionary, channel: String, options: Dictionary = {}) -> Error:
 	if state != "idle" or not contract.has_all(["version", "schemaHash", "wireSchema", "channels"]) or not contract.channels.has(channel):
 		return ERR_INVALID_PARAMETER
@@ -143,6 +148,10 @@ func configure(url: String, contract: Dictionary, channel: String, options: Dict
 		_by_id[int(message.id)] = message
 	_token = options.get("token", Callable())
 	_socket_factory = options.get("socket", Callable())
+	_kcp_server_key = options.get("kcp_server_key", PackedByteArray())
+	if url.begins_with("kcp://") and not _socket_factory.is_valid():
+		if OS.has_feature("web"): return ERR_UNAVAILABLE # No UDP in browsers: use wss://.
+		if not _kcp_server_key.is_empty() and _kcp_server_key.size() != 32: return ERR_INVALID_PARAMETER
 	_min_backoff = int(options.get("min_backoff_ms", 200))
 	_max_backoff = int(options.get("max_backoff_ms", 10000))
 	_max_unacked = int(options.get("max_unacked", 1024))
@@ -277,7 +286,12 @@ func _open() -> void:
 	_set_state("connecting")
 	var c := Connection.new()
 	c.idle_deadline = Time.get_ticks_msec() + _heartbeat * 2 + 1000
-	c.socket = _socket_factory.call() if _socket_factory.is_valid() else PeerSocket.new()
+	if _socket_factory.is_valid():
+		c.socket = _socket_factory.call()
+	elif _url.begins_with("kcp://"):
+		c.socket = KcpSocket.new(_kcp_server_key)
+	else:
+		c.socket = PeerSocket.new()
 	_conn = c
 	if c.socket.open(_url, SUBPROTOCOL_PROTO if _codec != null else SUBPROTOCOL_JSON) != OK:
 		_conn = null
@@ -311,6 +325,10 @@ func tick() -> void:
 ## right after it. The server also puts the error code in the WebSocket close
 ## reason, so a lost close frame still stops the client correctly.
 func _closed_by_peer(c: Connection) -> void:
+	var refusal: String = c.socket.refusal() if c.socket.has_method("refusal") else ""
+	if not refusal.is_empty():
+		_drop(c, {"code": "protocol_error", "message": refusal, "retryable": false})
+		return
 	var reason: String = c.socket.close_reason() if c.socket.has_method("close_reason") else ""
 	if c.opened and RegEx.create_from_string("^[a-z][a-z0-9_]{0,63}$").search(reason) != null:
 		_server_closed(c, {"code": reason, "message": "Closed by server", "retryable": reason in RETRYABLE_CLOSES})

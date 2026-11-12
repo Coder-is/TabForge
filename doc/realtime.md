@@ -228,7 +228,7 @@ kcpPublicKey, _ := ecdh.X25519().NewPublicKey(pub)
 - 重置帧（`0xFF`）和拒绝帧（`0xFA`）不加密：失去会话的一方已没有密钥。能看到流量的攻击者可以伪造它们迫使客户端重连，但会话会通过恢复继续，请求也不会重复执行；这与直接丢弃数据报的效果相同。
 - 不设置 `KCPKey` 时**不加密**：令牌、恢复令牌和载荷都是明文，能看到流量的人可以冒用会话，只适合内网、VPN/专线或游戏加速器隧道。
 - 每个 `ServeKCP` 最多 `MaxKCPConversations`（100000）个会话。未认证的 open（或 hello）在 `HandshakeTimeout` 内占用一个名额，伪造源地址的洪泛可以占满它；加密时每个新 hello 还要在服务器上做 3 次 X25519 运算，需要在网络层限速。所有回复都不比触发它的数据报大，不会放大反射流量。
-- 支持 `kcp://` 的客户端：Go 与 Unity（`RealtimeOptions.KcpServerKey`，见 [Unity 长连接](../sdk/unity/README.md)；WebGL 除外）。TypeScript（浏览器无 UDP）、Godot、Unreal 客户端仍使用 WebSocket。
+- 支持 `kcp://` 的客户端：Go、Unity（`RealtimeOptions.KcpServerKey`，见 [Unity 长连接](../sdk/unity/README.md)；WebGL 除外）与 Godot（`kcp_server_key` 选项，见 [Godot 长连接](../sdk/godot/README.md)；Web 导出除外）。TypeScript（浏览器无 UDP）与 Unreal 客户端仍使用 WebSocket。
 
 ## 5. TypeScript 客户端
 
@@ -280,6 +280,7 @@ Unreal（C++，UE 5.5+）使用 `FTabForgeRealtimeClient`（`TabForgeRealtime.h`
 | 同上（设置 `DOTNET_BIN`，KCP） | Unity C# 的 KCP 传输（普通 .NET 8）：X25519 与 ChaCha20-Poly1305 对 Go 生成的 300/200 个随机用例逐字节一致（AEAD 另与 .NET 自带实现核对，篡改任一字节或关联数据均被拒绝），固定密钥握手向量一致，低阶点被拒绝；两个 C# KCP 在 20% 丢包、重复、乱序的虚拟链路上按序送达 300 条消息；C# 客户端经丢包 10%、重复、乱序并随机重绑定端口的 UDP 代理连接 Go `ServeKCP`，明文与加密、两种编码下同样校验恰好一次、推送顺序、volatile 与踢人，加密时另篡改 2% 的数据报并确认令牌从未以明文出现；两种加密配置不一致都以 `protocol_error` 停止且不重连。2026-11-12 在本机（Windows，.NET 8.0.428）两组并行连续 6 次通过 |
 | 同上（需要 node） | Unity WebGL jslib 桥：在模拟的 Emscripten 堆中加载，TS 客户端全部帧经过它，全程随机断线下同样校验，两种编码；另以 `UNITY_WEBGL` 编译 C# P/Invoke 分支（设置 `DOTNET_BIN`）。2026-11-11 在本机（Windows，Node 24）与 Docker（Linux，.NET 8）中通过；Unity WebGL 构建与浏览器尚未实测 |
 | 同上（设置 `GODOT_BIN`） | Godot 4.5.1 headless：模拟服务器单元测试、与 Go 的 2800 条编解码一致性、全程随机断线下的同样校验，两种编码；2026-11-09 在 Docker（Linux）中连续 10 轮通过 |
+| 同上（设置 `GODOT_BIN`，KCP） | Godot 的 KCP 传输（纯 GDScript）：X25519（前 40 个）与 ChaCha20-Poly1305（200 个）对 Go 生成的用例逐字节一致、篡改即拒绝，固定密钥握手向量一致；两个 GDScript KCP 在 20% 丢包、重复、乱序的虚拟链路上按序送达 100 条消息；经丢包、重复、乱序并随机换端口的 UDP 代理连接 Go `ServeKCP`，明文与加密、两种编码下校验恰好一次、推送顺序与踢人，加密时另篡改 2% 的数据报并确认令牌不以明文出现；加密配置不一致时以 `protocol_error` 停止且不重连。2026-11-12 在本机（Windows，Godot 4.5.1）连续 5 轮通过 |
 | 同上（设置 `CXX_BIN`，如 `clang++`） | Unreal 客户端的 C++ 核心（`TabForgeRealtimeCore.h`，不含引擎），以 ASan/UBSan 构建：模拟服务器单元测试（握手、确认、重复与跳号、恢复与重发、会话过期时的转移与 `session_lost`、超时、过载、心跳与空闲重连、关闭帧与关闭原因、volatile）；与 Go 的 2800 条编解码一致性；WebSocket 层由 Go 测试经 stdin/stdout 桥接，全程随机断线下做同样校验（恰好一次、推送顺序、volatile、踢人）。2026-11-11 在 Docker（Linux，g++ 14）中连续 6 轮通过，clang 19 单元测试通过；`FTabForgeRealtimeClient` 的引擎编译和 IWebSocket 尚未实测 |
 | `npm test`（sdk/typescript） | 模拟服务器下的握手、校验、重复帧、恢复与过期、协议错误、永久关闭、超时/取消/背压、volatile 丢弃、微信适配 |
 | `go test -race` | 2026-11-09 在 Docker `golang:1.26`（Linux）中通过；含压缩与跨实例交接的版本 2026-11-11 连续 3 轮通过 |
@@ -289,4 +290,4 @@ Unreal（C++，UE 5.5+）使用 `FTabForgeRealtimeClient`（`TabForgeRealtime.h`
 ## 8. 尚未实现
 
 - Lua 的长连接客户端（可使用 HTTP/SSE 客户端，或按本文第 2–3 节自行实现）；Unreal 客户端只支持二进制子协议，不支持 JSON 帧。
-- 进程崩溃后的会话恢复（只有 `Shutdown` 交接的会话可跨实例继续）、TCP 传输；Godot 与 Unreal 的 KCP 传输。
+- 进程崩溃后的会话恢复（只有 `Shutdown` 交接的会话可跨实例继续）、TCP 传输；Unreal 的 KCP 传输。
