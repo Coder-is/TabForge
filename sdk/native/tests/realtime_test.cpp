@@ -16,6 +16,7 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+extern "C" __declspec(dllimport) unsigned __stdcall timeBeginPeriod(unsigned); // winmm
 #endif
 
 using namespace tabforge::realtime;
@@ -641,6 +642,9 @@ int main(int argc, char** argv) {
     // The chaos bridge is binary; text mode would translate newlines and stop at 0x1A.
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
+    // sleep_for(1ms) otherwise sleeps a whole 15.6 ms timer tick, too slow
+    // for a handshake between the chaos proxy's cuts.
+    timeBeginPeriod(1);
 #endif
     if (argc < 3) {
         std::cerr << "usage: realtime_test unit|codec|chaos <runtime.json> ..." << std::endl;

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +30,9 @@ func nativeOrSkip(t *testing.T) (string, string) {
 	out := filepath.Join(t.TempDir(), "realtime_test")
 	args := []string{"-std=c++17", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-Wshadow", "-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-pthread",
 		"-I", "../../sdk/unreal/Source/TabForgeProtocol/Public", "../../sdk/native/tests/realtime_test.cpp", "-o", out}
+	if goruntime.GOOS == "windows" {
+		args = append(args, "-lwinmm") // timeBeginPeriod
+	}
 	if output, err := exec.Command(cxx, args...).CombinedOutput(); err != nil {
 		t.Fatalf("%s: %v\n%s", cxx, err, output)
 	}
