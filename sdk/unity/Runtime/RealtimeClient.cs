@@ -25,6 +25,16 @@ namespace TabForge.Protocol
         void Closed();
     }
 
+    /// <summary>
+    /// Optionally implemented by IRealtimeSocketEvents: a transport reports a
+    /// refusal that reconnecting cannot fix (for example a KCP encryption
+    /// mismatch). The client stops with protocol_error instead of retrying.
+    /// </summary>
+    public interface IRealtimeSocketRefusal
+    {
+        void Refused(string message);
+    }
+
     public delegate IRealtimeSocket RealtimeSocketFactory(string url, string subprotocol, IRealtimeSocketEvents events);
 
     public enum RealtimeState
@@ -42,14 +52,22 @@ namespace TabForge.Protocol
 
     public sealed class RealtimeOptions
     {
-        /// <summary>Full WebSocket URL including the channel path, e.g. wss://host/ws/game.</summary>
+        /// <summary>
+        /// Full URL including the channel path: wss://host/ws/game, or
+        /// kcp://host:7001/ws/game for the server's KCP (UDP) transport.
+        /// </summary>
         public string Url;
         public string Channel;
         public RealtimeEncoding Encoding = RealtimeEncoding.Proto;
         /// <summary>Bearer token for a new session; resumes do not send it again.</summary>
         public Func<string> Token;
-        /// <summary>Defaults to ClientWebSocket, or the browser WebSocket bridge in WebGL players.</summary>
+        /// <summary>Defaults to ClientWebSocket, or the browser WebSocket bridge in WebGL players; KcpTransport for kcp:// URLs.</summary>
         public RealtimeSocketFactory Socket;
+        /// <summary>
+        /// The server's 32-byte X25519 public key (Server.KCPKey) for encrypted
+        /// kcp:// URLs; null talks clear-text KCP. Ignored for WebSocket URLs.
+        /// </summary>
+        public byte[] KcpServerKey;
         public int MinBackoffMS = 200;
         public int MaxBackoffMS = 10000;
         /// <summary>Frames kept until the server acknowledges them.</summary>
@@ -104,7 +122,7 @@ namespace TabForge.Protocol
             public RealtimeRequest Call;
         }
 
-        private sealed class Connection : IRealtimeSocketEvents
+        private sealed class Connection : IRealtimeSocketEvents, IRealtimeSocketRefusal
         {
             public RealtimeClient Client;
             public IRealtimeSocket Socket;
@@ -113,6 +131,7 @@ namespace TabForge.Protocol
             public void Opened(string protocol) => Client.inbox.Enqueue(() => Client.OnOpened(this, protocol));
             public void Received(byte[] data, bool text) => Client.inbox.Enqueue(() => Client.OnReceived(this, data, text));
             public void Closed() => Client.inbox.Enqueue(() => Client.Drop(this, null));
+            public void Refused(string message) => Client.inbox.Enqueue(() => Client.Drop(this, new ProtocolException("protocol_error", message)));
         }
 
         public event Action<RealtimeState, ProtocolException> StateChanged;
@@ -147,6 +166,15 @@ namespace TabForge.Protocol
         public RealtimeClient(string runtimeJson, RealtimeOptions options)
         {
             this.options = options ?? throw new ArgumentNullException(nameof(options));
+            if (options.Socket == null && IsKcp(options.Url))
+            {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                throw new ProtocolException("bad_request", "WebGL players have no UDP: use a ws:// or wss:// URL instead of kcp://");
+#else
+                if (options.KcpServerKey != null && options.KcpServerKey.Length != 32)
+                    throw new ProtocolException("bad_request", "KcpServerKey is the server's 32-byte X25519 public key");
+#endif
+            }
             var body = Json.Parse(runtimeJson) as JObject;
             if (body == null || body["version"]?.Type != JTokenType.String || body["schemaHash"]?.Type != JTokenType.String || !(body["wireSchema"] is JObject wire) || !(body["channels"]?[options.Channel ?? ""] is JObject channel))
                 throw new ProtocolException("bad_request", "Load the generated runtime.json of a contract with channel " + options.Channel);
@@ -165,6 +193,8 @@ namespace TabForge.Protocol
                 byId[spec.Id] = spec;
             }
         }
+
+        private static bool IsKcp(string url) => url != null && url.StartsWith("kcp://", StringComparison.OrdinalIgnoreCase);
 
         public RealtimeState State { get { lock (gate) return state; } }
         public string SessionId { get { lock (gate) return sessionId; } }
@@ -357,8 +387,11 @@ namespace TabForge.Protocol
             conn = c;
             try
             {
-                var factory = options.Socket ?? ClientWebSocketTransport.Factory;
-                c.Socket = factory(options.Url, codec != null ? SubprotocolProto : SubprotocolJson, c);
+                var subprotocol = codec != null ? SubprotocolProto : SubprotocolJson;
+                if (options.Socket == null && IsKcp(options.Url))
+                    c.Socket = KcpTransport.Connect(options.Url, subprotocol, options.KcpServerKey, c);
+                else
+                    c.Socket = (options.Socket ?? ClientWebSocketTransport.Factory)(options.Url, subprotocol, c);
             }
             catch (Exception)
             {

@@ -41,6 +41,9 @@ Completed 表示协议流已结束；`failed` 这类业务终止事件仍通过 
 | [RealtimeCodec.cs](Runtime/RealtimeCodec.cs) | 长连接帧格式与二进制 Protobuf ↔ ProtoJSON 编解码 |
 | [RealtimeClient.cs](Runtime/RealtimeClient.cs) | 长连接会话：握手、序号确认、重连恢复、请求/推送/通知 |
 | [ClientWebSocketTransport.cs](Runtime/ClientWebSocketTransport.cs) | 基于 ClientWebSocket 的默认传输 |
+| [KcpTransport.cs](Runtime/KcpTransport.cs) | `kcp://` 地址的 KCP（UDP）传输，可选加密 |
+| [KcpCore.cs](Runtime/KcpCore.cs) | KCP 协议（ikcp 2.1.1 线上格式，移植自 Go 服务端） |
+| [KcpCrypto.cs](Runtime/KcpCrypto.cs) | 加密 KCP：X25519、HKDF-SHA256、ChaCha20-Poly1305（纯 C#，常数时间） |
 | [TabForgeRealtime.cs](Runtime/TabForgeRealtime.cs) | 在 Update 中驱动长连接的组件 |
 
 UPM 自动编译 Runtime 目录。手工集成源码时应复制完整 Runtime 目录；单独引用 `ProtocolCore.cs` 无法编译。独立 .NET 核心测试显式包含前四个文件，不包含 Unity 网络层。
@@ -97,6 +100,7 @@ client.Notify("move", new JObject { ["tick"] = 1 }); // volatile：掉线时返�
 - 默认传输为 `ClientWebSocketTransport`（`System.Net.WebSockets.ClientWebSocket`），适用于 Standalone、Android、iOS；可通过 `ClientWebSocketTransport.Configure` 设置代理或证书。
 - **WebGL**：WebGL 播放器没有 ClientWebSocket，默认工厂自动改用 `WebGLWebSocketTransport`，经 `Runtime/Plugins/WebGL/TabForgeWebSocket.jslib` 桥接到浏览器 WebSocket，代码无需改动（`RealtimeOptions.Socket` 保持 null）。浏览器事件进入队列，仍在 `Tick` 中回调。浏览器 WebSocket 不能设置请求头，令牌照常放在 `hello` 中；跨域部署需在服务器 `OriginPatterns` 中允许页面来源。
 - `Encoding = RealtimeEncoding.Json` 使用 JSON 帧，便于抓包调试。
+- **KCP（UDP）**：`Url` 写成 `kcp://host:7001/ws/game` 即连接 Go 服务端的 `ServeKCP`（见 [KCP 传输](../../doc/realtime.md)），弱网下没有 TCP 的队头阻塞，其余用法不变。服务器设置了 `KCPKey` 时，把它的 32 字节 X25519 公钥填入 `RealtimeOptions.KcpServerKey`（例如 `Convert.FromBase64String("...")`），所有数据报都会加密并认证服务器；不填则为明文 KCP，令牌可被抓包看到。两端加密配置不一致时客户端以 `protocol_error` 停止，不会反复重连。适用于 Standalone、Android、iOS；WebGL 没有 UDP，构造客户端时即报错，请改用 `wss://`。KCP 和加密都用纯 C# 实现，不依赖原生插件；KCP 在后台线程收发，事件仍在 `Tick` 中回调。
 
 验证：`go test ./protocol/realtime` 在设置 `DOTNET_BIN` 后构建 [RealtimeTests](Tests/Realtime/RealtimeTests.csproj)，运行模拟服务器单元测试、与 Go 对 2800 条随机消息的编解码一致性检查，以及在随机断线代理下连接 Go 服务端的压测（每个请求恰好执行一次、推送不丢不重不乱序、踢人在断线时也能送达），两种编码各一次。2026-11-09 在 Docker（Linux，.NET 8）中通过。这是普通 .NET 运行时，不是 Unity 引擎：编辑器 PlayMode、IL2CPP、Android/iOS 构建尚未实测。
 WebGL 桥的验证：`TestUnityWebGLBridgeUnderChaos`（需要 node）在 Node 中以模拟的 Emscripten 堆加载 jslib，代替 C# 侧调用它，让 TypeScript 客户端的全部帧经过该桥，在随机断线代理下跑与上面相同的恰好一次与顺序校验，两种编码；堆在每次调用后写入垃圾数据，桥若保留堆引用会立即失败。C# 路由（按 id 分发、关闭只通知一次、关闭后丢弃事件）由 `unit` 用伪造的 jslib 覆盖；`TestCSharpWebGLBranchCompiles` 以 `UNITY_WEBGL` 编译 P/Invoke 分支。真实 Unity WebGL 构建与浏览器运行尚未实测。

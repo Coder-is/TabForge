@@ -14,7 +14,10 @@ using TabForge.Protocol;
 /// Realtime client tests in plain .NET (no Unity engine):
 ///   unit &lt;runtime.json&gt;                         scripted fake server
 ///   codec &lt;runtime.json&gt; &lt;cases&gt; &lt;out&gt;           Go/C# codec equivalence (driven by Go tests)
-///   chaos &lt;runtime.json&gt; &lt;url&gt; &lt;proto|json&gt; &lt;s&gt;   against a Go server behind a cutting proxy
+///   chaos &lt;runtime.json&gt; &lt;url&gt; &lt;proto|json&gt; &lt;s&gt; [key]   against a Go server behind a cutting proxy
+///                                                  (ws:// or kcp://; key: base64 KCP server key or -)
+///   kcp &lt;runtime.json&gt; &lt;cases&gt; &lt;vectors&gt;          KCP core and crypto against Go-generated cases
+///   kcprefuse &lt;runtime.json&gt; &lt;url&gt; &lt;key&gt; &lt;text&gt;  expects Closed:protocol_error mentioning text
 /// </summary>
 internal static class RealtimeTests
 {
@@ -27,7 +30,9 @@ internal static class RealtimeTests
         {
             case "unit": Unit(runtime); break;
             case "codec": Codec(runtime, args[2], args[3]); break;
-            case "chaos": Chaos(runtime, args[2], args[3] == "json" ? RealtimeEncoding.Json : RealtimeEncoding.Proto, int.Parse(args[4])).GetAwaiter().GetResult(); break;
+            case "chaos": Chaos(runtime, args[2], args[3] == "json" ? RealtimeEncoding.Json : RealtimeEncoding.Proto, int.Parse(args[4]), args.Length > 5 ? Key(args[5]) : null).GetAwaiter().GetResult(); break;
+            case "kcp": KcpTests.Run(args[2], args[3]); break;
+            case "kcprefuse": KcpRefuse(runtime, args[2], Key(args[3]), args[4]); break;
             default: throw new ArgumentException(args[0]);
         }
         return 0;
@@ -366,10 +371,30 @@ internal static class RealtimeTests
 
     // ---- against the Go server behind a cutting proxy ----
 
-    private static async Task Chaos(string runtime, string url, RealtimeEncoding encoding, int seconds)
+    private static byte[] Key(string arg) => arg == "-" ? null : Convert.FromBase64String(arg);
+
+    private static void KcpRefuse(string runtime, string url, byte[] key, string text)
     {
         var states = new List<string>();
-        var client = new RealtimeClient(runtime, new RealtimeOptions { Url = url, Channel = "game", Encoding = encoding, Token = () => "user-31", MinBackoffMS = 5, MaxBackoffMS = 50 });
+        ProtocolException last = null;
+        var client = new RealtimeClient(runtime, new RealtimeOptions { Url = url, Channel = "game", Token = () => "user-5", KcpServerKey = key, MinBackoffMS = 5, MaxBackoffMS = 50 });
+        client.StateChanged += (state, error) => { states.Add(error == null ? state.ToString() : state + ":" + error.Code); if (error != null) last = error; };
+        client.Connect();
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (client.State != RealtimeState.Closed && DateTime.UtcNow < deadline)
+        {
+            client.Tick();
+            Thread.Sleep(1);
+        }
+        Check(client.State == RealtimeState.Closed && states.Last() == "Closed:protocol_error" && last.Message.Contains(text), "refusal: " + string.Join(",", states) + " " + last?.Message);
+        Check(states.Count(s => s == "Connecting") == 1, "retried a permanent refusal: " + string.Join(",", states));
+        Console.WriteLine("refused: " + last.Message);
+    }
+
+    private static async Task Chaos(string runtime, string url, RealtimeEncoding encoding, int seconds, byte[] kcpKey = null)
+    {
+        var states = new List<string>();
+        var client = new RealtimeClient(runtime, new RealtimeOptions { Url = url, Channel = "game", Encoding = encoding, Token = () => "user-31", MinBackoffMS = 5, MaxBackoffMS = 50, KcpServerKey = kcpKey });
         client.StateChanged += (state, error) => { lock (states) states.Add(error == null ? state.ToString() : state + ":" + error.Code); };
         var pushes = new List<long>();
         client.On("chatMessage", m => pushes.Add(long.Parse((string)m["messageId"])));
@@ -418,7 +443,16 @@ internal static class RealtimeTests
                 await Task.Delay(20);
             }
             Check((int)moved["tick"] == 9 && (double)moved["position"]["x"] == 1.5, "moved " + moved);
-            await client.Request("chat", new JObject { ["text"] = "kick" }).Task;
+            // The server answers, then kicks 20 ms later. If the connection drops
+            // in between, the answer is never acknowledged and the resume only
+            // learns the kick, so the request fails with it instead.
+            try
+            {
+                await client.Request("chat", new JObject { ["text"] = "kick" }).Task;
+            }
+            catch (ProtocolException kicked) when (kicked.Code == "kicked")
+            {
+            }
             wait = DateTime.UtcNow.AddSeconds(5);
             while (client.State != RealtimeState.Closed && DateTime.UtcNow < wait)
                 await Task.Delay(10);

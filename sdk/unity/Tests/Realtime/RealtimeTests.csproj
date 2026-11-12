@@ -15,7 +15,11 @@
     <Compile Include="../../Runtime/RealtimeClient.cs" Link="RealtimeClient.cs" />
     <Compile Include="../../Runtime/ClientWebSocketTransport.cs" Link="ClientWebSocketTransport.cs" />
     <Compile Include="../../Runtime/WebGLWebSocketTransport.cs" Link="WebGLWebSocketTransport.cs" />
+    <Compile Include="../../Runtime/KcpCore.cs" Link="KcpCore.cs" />
+    <Compile Include="../../Runtime/KcpCrypto.cs" Link="KcpCrypto.cs" />
+    <Compile Include="../../Runtime/KcpTransport.cs" Link="KcpTransport.cs" />
     <Compile Include="RealtimeTests.cs" />
+    <Compile Include="KcpTests.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
   </ItemGroup>
 </Project>
