@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <functional>
@@ -1221,6 +1222,9 @@ public:
     void received(std::uint64_t id, std::string data, bool text) { post(Event{Event::Message, id, std::move(data), text}); }
     // reason is the WebSocket close reason ("" if none or not a normal close).
     void closed(std::uint64_t id, const std::string& reason) { post(Event{Event::Closed, id, reason, false}); }
+    // A refusal reconnecting cannot fix (for example a KCP encryption
+    // mismatch): the client stops with protocol_error. Implies closed.
+    void refused(std::uint64_t id, const std::string& message) { post(Event{Event::Refused, id, message, false}); }
 
     // Processes socket events, timers and callbacks.
     void tick() {
@@ -1235,6 +1239,7 @@ public:
             case Event::Opened: on_opened(*conn_, e.data); break;
             case Event::Message: on_received(*conn_, e.data, e.text); break;
             case Event::Closed: on_socket_closed(*conn_, e.data); break;
+            case Event::Refused: { const Error refusal{"protocol_error", e.data, false}; drop(*conn_, &refusal); break; }
             }
         }
         timers(now());
@@ -1261,7 +1266,7 @@ private:
         std::int64_t idle_deadline = 0, next_ping = 0;
     };
     struct Event {
-        enum Type { Opened, Message, Closed } type;
+        enum Type { Opened, Message, Closed, Refused } type;
         std::uint64_t id;
         std::string data;
         bool text;

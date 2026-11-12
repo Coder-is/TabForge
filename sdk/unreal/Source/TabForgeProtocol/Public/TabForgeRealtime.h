@@ -4,7 +4,8 @@
 #include "Dom/JsonValue.h"
 #include "TabForgeClient.h"
 
-// Realtime channel client (doc/realtime.md) on the engine WebSocket module:
+// Realtime channel client (doc/realtime.md) on the engine WebSocket module,
+// or on KCP over UDP (engine Sockets module) for kcp:// URLs:
 // requests, pushes and notifies over binary Protobuf frames
 // (tabforge.realtime.v1.proto), automatic reconnect and session resume with
 // retransmission, so a request runs at most once and pushes arrive once, in
@@ -24,10 +25,13 @@ enum class ETabForgeRealtimeState : uint8 {
 };
 
 struct FTabForgeRealtimeOptions {
-    FString Url;     // full WebSocket URL including the channel path, e.g. wss://host/ws/game
+    FString Url;     // full URL including the channel path: wss://host/ws/game, or kcp://host:7001/ws/game for the server's KCP (UDP) transport
     FString Channel; // channel id from contract.json
     TFunction<FString()> Token; // bearer token for a new session; resumes do not send it again
     TMap<FString, FString> UpgradeHeaders;
+    // The server's 32-byte X25519 public key (Server.KCPKey) for encrypted
+    // kcp:// URLs; empty talks clear-text KCP. Ignored for WebSocket URLs.
+    TArray<uint8> KcpServerKey;
     int32 MinBackoffMS = 200;
     int32 MaxBackoffMS = 10000;
     int32 MaxUnacked = 1024; // frames kept until the server acknowledges them

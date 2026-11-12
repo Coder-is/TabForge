@@ -113,7 +113,7 @@ data: {"protocolVersion":"1.0.0","schemaHash":"生成包的hash","requestId":"re
 ## 后续实施顺序
 
 1. **平台验证**：运行已提供的 Unity PlayMode、Unreal Automation、Cocos 场景组件及微信真机验收，补齐目标构建与版本矩阵；继续完善 WebGL 流桥与其他平台网络 API。
-2. **传输扩展**：WebSocket 通道已实现（请求/推送/通知、Protobuf 二进制帧、序号确认、心跳、背压、断线恢复与重发），见 [实时长连接](realtime.md)；Unity C#、Godot 与 Unreal C++ 长连接客户端已实现；通道还可经 KCP（UDP）承载，目前 Go、Unity 与 Godot 客户端支持；Lua 的长连接客户端、TCP 与 NDJSON 尚未实现。HTTP 端点的 `transport` 仍只接受 `http_json` 与 `http_sse`。
+2. **传输扩展**：WebSocket 通道已实现（请求/推送/通知、Protobuf 二进制帧、序号确认、心跳、背压、断线恢复与重发），见 [实时长连接](realtime.md)；Unity C#、Godot 与 Unreal C++ 长连接客户端已实现；通道还可经 KCP（UDP）承载，目前 Go、Unity、Godot 与 Unreal 客户端支持；Lua 的长连接客户端、TCP 与 NDJSON 尚未实现。HTTP 端点的 `transport` 仍只接受 `http_json` 与 `http_sse`。
 3. **协议演进**：继续扩大已实现的兼容性和字段验证覆盖，补版本协商、OpenAPI/JSON Schema、类型化服务端桩与发布包。
 4. **模型与多模态适配**：按供应商及接口版本映射普通/流式响应、工具调用、结束原因和错误；建立录制事件回归测试后再验证真实服务。
 

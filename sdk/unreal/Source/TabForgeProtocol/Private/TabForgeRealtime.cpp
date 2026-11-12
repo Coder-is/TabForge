@@ -1,5 +1,9 @@
 #include "TabForgeRealtime.h"
 #include "TabForgeRealtimeCore.h"
+#include "TabForgeKcp.h"
+#include "SocketSubsystem.h"
+#include "Sockets.h"
+#include <random>
 #include "TabForgeWire.h"
 #include "Containers/Ticker.h"
 #include "IWebSocket.h"
@@ -97,6 +101,102 @@ struct FTabForgeRealtimeClient::FState : public TSharedFromThis<FState, ESPMode:
     FTSTicker::FDelegateHandle Ticker;
     FTabForgeRealtimeClient* Owner = nullptr;
 
+    // KCP (kcp:// URLs): one UDP socket and conversation per connection
+    // attempt, polled from Tick on the game thread. The protocol, crypto and
+    // handshake are the engine-independent TabForgeKcp.h.
+    bool bKcp = false;
+    FString KcpHost;
+    int32 KcpPort = 0;
+    std::string KcpPath;
+    tabforge::kcp::Bytes KcpServerKey;
+    struct FKcpSocket {
+        FSocket* Socket = nullptr;
+        TSharedPtr<FInternetAddr> Address;
+        std::unique_ptr<tabforge::kcp::Conversation> Conversation;
+    };
+    TMap<uint64, TUniquePtr<FKcpSocket>> KcpSockets;
+    std::random_device Random;
+
+    ~FState() {
+        TArray<uint64> Ids;
+        KcpSockets.GetKeys(Ids);
+        for (uint64 Id : Ids) DestroyKcp(Id);
+    }
+
+    static int64 NowMS() { return static_cast<int64>(FPlatformTime::Seconds() * 1000.0); }
+
+    uint64 OpenKcp(const std::string& Subprotocol) {
+        ISocketSubsystem* Subsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+        if (!Subsystem) return 0;
+        // Resolves on the game thread; an IP address avoids a DNS stall.
+        FAddressInfoResult Resolved = Subsystem->GetAddressInfo(*KcpHost, nullptr, EAddressInfoFlags::Default, NAME_None, ESocketType::SOCKTYPE_Datagram);
+        if (Resolved.ReturnCode != SE_NO_ERROR || Resolved.Results.Num() == 0) return 0;
+        TSharedRef<FInternetAddr> Address = Resolved.Results[0].Address;
+        Address->SetPort(KcpPort);
+        FSocket* Socket = Subsystem->CreateSocket(NAME_DGram, TEXT("TabForge KCP"), Address->GetProtocolType());
+        if (!Socket) return 0;
+        Socket->SetNonBlocking(true);
+        int32 BufferSize = 0;
+        Socket->SetReceiveBufferSize(1 << 20, BufferSize);
+        const uint64 Id = NextSocket++;
+        auto Entry = MakeUnique<FKcpSocket>();
+        Entry->Socket = Socket;
+        Entry->Address = Address;
+        // Conversation events fire inside PollKcp/send/close on the game
+        // thread and are queued by the core like WebSocket events.
+        tabforge::kcp::Conversation::Events Events;
+        Events.opened = [this, Id](const std::string& Protocol) { Core->opened(Id, Protocol); };
+        Events.received = [this, Id](std::string Data, bool bText) { Core->received(Id, std::move(Data), bText); };
+        Events.refused = [this, Id](const std::string& Message) { Core->refused(Id, Message); };
+        Events.closed = [this, Id](const std::string& Reason) { Core->closed(Id, Reason); };
+        uint32 Conv = 0;
+        while (Conv == 0) Conv = Random();
+        tabforge::kcp::crypto::Key Ephemeral{};
+        for (auto& Byte : Ephemeral) Byte = static_cast<uint8>(Random());
+        FSocket* Raw = Socket;
+        TSharedPtr<FInternetAddr> To = Address;
+        Entry->Conversation = std::make_unique<tabforge::kcp::Conversation>(Conv, KcpPath, Subprotocol, KcpServerKey, Ephemeral,
+            [Raw, To](const std::uint8_t* Data, std::size_t Size) {
+                int32 Sent = 0;
+                Raw->SendTo(Data, static_cast<int32>(Size), Sent, *To); // a failed send is a lost datagram
+            }, Events);
+        tabforge::kcp::Conversation* Conversation = Entry->Conversation.get();
+        KcpSockets.Add(Id, MoveTemp(Entry));
+        Conversation->start(NowMS());
+        return Id;
+    }
+
+    void DestroyKcp(uint64 Id) {
+        TUniquePtr<FKcpSocket>* Found = KcpSockets.Find(Id);
+        if (!Found) return;
+        TUniquePtr<FKcpSocket> Entry = MoveTemp(*Found); // TUniquePtr cannot be copied out
+        KcpSockets.Remove(Id);
+        Entry->Socket->Close();
+        if (ISocketSubsystem* Subsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)) Subsystem->DestroySocket(Entry->Socket);
+    }
+
+    void PollKcp() {
+        const int64 Now = NowMS();
+        static uint8 Buffer[64 << 10];
+        ISocketSubsystem* Subsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+        TArray<uint64> Ids;
+        KcpSockets.GetKeys(Ids);
+        for (uint64 Id : Ids) {
+            const TUniquePtr<FKcpSocket>* Found = KcpSockets.Find(Id);
+            if (!Found) continue;
+            FKcpSocket* Entry = Found->Get();
+            TSharedRef<FInternetAddr> From = Subsystem->CreateInternetAddr();
+            uint32 Pending = 0;
+            while (!Entry->Conversation->closed() && Entry->Socket->HasPendingData(Pending)) {
+                int32 Read = 0;
+                if (!Entry->Socket->RecvFrom(Buffer, sizeof Buffer, Read, *From)) break;
+                if (*From == *Entry->Address) Entry->Conversation->input(Buffer, static_cast<std::size_t>(Read), Now);
+            }
+            Entry->Conversation->update(Now);
+            if (Entry->Conversation->closed()) DestroyKcp(Id);
+        }
+    }
+
     // Validates and normalizes a message, then encodes it as binary Protobuf.
     bool Encode(const RT::Spec& Spec, const TSharedPtr<FJsonValue>& Message, std::string& Payload, FTabForgeError& Error) {
         TabForgeWire::Validator Normalizer(WireSchema, TabForgeWire::JsonMaxDepth, TabForgeWire::ProtocolMaxNodes, true);
@@ -127,6 +227,7 @@ struct FTabForgeRealtimeClient::FState : public TSharedFromThis<FState, ESPMode:
     // ---- RT::Socket on IWebSocket ----
 
     uint64 open(const std::string& Subprotocol) override {
+        if (bKcp) return OpenKcp(Subprotocol);
         const uint64 Id = NextSocket++;
         TSharedPtr<IWebSocket> Socket = FWebSocketsModule::Get().CreateWebSocket(Url, FromUtf8(Subprotocol), UpgradeHeaders);
         TWeakPtr<FState, ESPMode::ThreadSafe> Weak = AsShared();
@@ -162,6 +263,10 @@ struct FTabForgeRealtimeClient::FState : public TSharedFromThis<FState, ESPMode:
     }
 
     bool send(uint64 Id, const std::string& Frame) override {
+        if (bKcp) {
+            const TUniquePtr<FKcpSocket>* Entry = KcpSockets.Find(Id);
+            return Entry && (*Entry)->Conversation->send(Frame, false);
+        }
         const TSharedPtr<IWebSocket>* Socket = Sockets.Find(Id);
         if (!Socket || !(*Socket)->IsConnected()) return false;
         (*Socket)->Send(Frame.data(), Frame.size(), true);
@@ -169,6 +274,13 @@ struct FTabForgeRealtimeClient::FState : public TSharedFromThis<FState, ESPMode:
     }
 
     void close(uint64 Id) override {
+        if (bKcp) {
+            // Sends the close message; PollKcp destroys the socket once it is
+            // acknowledged or after a second. Its events still reach the
+            // core, which ignores a connection it has dropped.
+            if (const TUniquePtr<FKcpSocket>* Entry = KcpSockets.Find(Id)) (*Entry)->Conversation->close(NowMS());
+            return;
+        }
         TSharedPtr<IWebSocket> Socket;
         if (!Sockets.RemoveAndCopyValue(Id, Socket)) return;
         // Stop delivering events, then close after what is already queued.
@@ -181,6 +293,7 @@ struct FTabForgeRealtimeClient::FState : public TSharedFromThis<FState, ESPMode:
     }
 
     bool Tick() {
+        if (bKcp) PollKcp();
         Core->tick();
         return true;
     }
@@ -188,8 +301,15 @@ struct FTabForgeRealtimeClient::FState : public TSharedFromThis<FState, ESPMode:
 
 TSharedPtr<FTabForgeRealtimeClient, ESPMode::ThreadSafe> FTabForgeRealtimeClient::Create(const FString& RuntimeJson, FTabForgeRealtimeOptions Options, FTabForgeError& Error) {
     check(IsInGameThread());
-    if (!TabForgeWire::Matches(TEXT("^wss?://[^/?#@]+(?:/[^?#]*)?$"), Options.Url) || Options.MinBackoffMS < 1 || Options.MaxBackoffMS < Options.MinBackoffMS || Options.MaxUnacked < 1) {
-        Error = { TEXT("bad_request"), TEXT("Create on the game thread with a ws(s):// URL and positive limits"), false };
+    const bool bKcp = Options.Url.StartsWith(TEXT("kcp://"));
+    std::string KcpHost, KcpPath;
+    int KcpPort = 0;
+    if ((bKcp ? !tabforge::kcp::parse_url(Utf8(Options.Url), KcpHost, KcpPort, KcpPath) : !TabForgeWire::Matches(TEXT("^wss?://[^/?#@]+(?:/[^?#]*)?$"), Options.Url)) || Options.MinBackoffMS < 1 || Options.MaxBackoffMS < Options.MinBackoffMS || Options.MaxUnacked < 1) {
+        Error = { TEXT("bad_request"), TEXT("Create on the game thread with a ws(s):// or kcp://host:port URL and positive limits"), false };
+        return nullptr;
+    }
+    if (bKcp && Options.KcpServerKey.Num() != 0 && Options.KcpServerKey.Num() != 32) {
+        Error = { TEXT("bad_request"), TEXT("KcpServerKey is the server's 32-byte X25519 public key"), false };
         return nullptr;
     }
     const std::string Text = Utf8(RuntimeJson);
@@ -210,6 +330,11 @@ TSharedPtr<FTabForgeRealtimeClient, ESPMode::ThreadSafe> FTabForgeRealtimeClient
     auto State = MakeShared<FState, ESPMode::ThreadSafe>();
     State->Url = Options.Url;
     State->UpgradeHeaders = Options.UpgradeHeaders;
+    State->bKcp = bKcp;
+    State->KcpHost = FromUtf8(KcpHost);
+    State->KcpPort = KcpPort;
+    State->KcpPath = KcpPath;
+    State->KcpServerKey.assign(Options.KcpServerKey.GetData(), Options.KcpServerKey.GetData() + Options.KcpServerKey.Num());
     State->WireSchema = WireSchema;
     State->Owner = Client.Get();
     std::string Why;
@@ -260,6 +385,10 @@ FTabForgeRealtimeClient::~FTabForgeRealtimeClient() {
     State->Core->close();
     TArray<uint64> Ids;
     State->Sockets.GetKeys(Ids);
+    for (uint64 Id : Ids) State->close(Id);
+    // KCP: close() sends the close messages now; the sockets go with the
+    // state (~FState), since nothing ticks them any more.
+    State->KcpSockets.GetKeys(Ids);
     for (uint64 Id : Ids) State->close(Id);
 }
 

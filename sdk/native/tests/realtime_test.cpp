@@ -5,12 +5,18 @@
 //   realtime_test chaos <runtime.json> <seconds>          real Go server; the socket
 //       layer is bridged over stdin/stdout by the Go test (see bridge protocol below)
 #include "TabForgeRealtimeCore.h"
+#include "TabForgeKcp.h"
+#include <random>
 #include <atomic>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <thread>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 using namespace tabforge::realtime;
 
@@ -505,9 +511,15 @@ void read_events(Client& client, std::atomic<bool>& eof) {
     eof = true;
 }
 
-void chaos(const Json& runtime, int seconds) {
+#include "kcp_tests.inc"
+
+// kcp_url empty: WebSocket frames over the bridge; else KCP datagrams.
+void chaos(const Json& runtime, int seconds, const std::string& kcp_url = "", const std::string& kcp_key = "-") {
     BridgeSocket socket;
-    Client client(socket);
+    std::unique_ptr<kcptest::KcpBridgeSocket> kcp;
+    if (!kcp_url.empty()) kcp = std::make_unique<kcptest::KcpBridgeSocket>(socket, kcp_url, kcptest::key_arg(kcp_key));
+    Client client(kcp ? static_cast<Socket&>(*kcp) : static_cast<Socket&>(socket));
+    if (kcp) kcp->client = &client;
     Codec codec;
     std::string error;
     ClientOptions options;
@@ -529,7 +541,7 @@ void chaos(const Json& runtime, int seconds) {
         if (s.name == "playerMoved") { moved = m; has_moved = true; }
     };
     std::atomic<bool> eof{false};
-    std::thread reader(read_events, std::ref(client), std::ref(eof));
+    std::thread reader = kcp ? std::thread(kcptest::read_datagrams, std::ref(*kcp), std::ref(eof)) : std::thread(read_events, std::ref(client), std::ref(eof));
     reader.detach();
     auto encode = [&](const std::string& type, const Json& value) {
         std::string out, why;
@@ -548,6 +560,7 @@ void chaos(const Json& runtime, int seconds) {
         while (!done()) {
             CHECK(!eof, "bridge closed while waiting for " + what);
             CHECK(steady::now() < deadline, "timed out waiting for " + what + " (states: " + (states.empty() ? "" : states.back()) + ")");
+            if (kcp) kcp->poll();
             client.tick();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -624,6 +637,11 @@ void chaos(const Json& runtime, int seconds) {
 } // namespace
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // The chaos bridge is binary; text mode would translate newlines and stop at 0x1A.
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     if (argc < 3) {
         std::cerr << "usage: realtime_test unit|codec|chaos <runtime.json> ..." << std::endl;
         return 2;
@@ -639,6 +657,10 @@ int main(int argc, char** argv) {
     }
     if (mode == "codec" && argc == 5) { codec_cases(runtime, argv[3], argv[4]); return 0; }
     if (mode == "chaos" && argc == 4) { chaos(runtime, std::atoi(argv[3])); return 0; }
+    if (mode == "kcpcrypto" && argc == 5) { kcptest::crypto_cases(argv[3], argv[4]); return 0; }
+    if (mode == "kcpcore") { kcptest::core_under_loss(); return 0; }
+    if (mode == "kcpchaos" && argc == 6) { chaos(runtime, std::atoi(argv[5]), argv[3], argv[4]); return 0; }
+    if (mode == "kcprefuse" && argc == 6) { kcptest::refuse(runtime, argv[3], argv[4], argv[5]); return 0; }
     std::cerr << "bad arguments" << std::endl;
     return 2;
 }

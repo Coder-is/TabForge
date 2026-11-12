@@ -6,6 +6,6 @@ public class TabForgeProtocol : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new[] { "Core", "HTTP", "Json" });
-        PrivateDependencyModuleNames.AddRange(new[] { "CoreUObject", "Engine", "WebSockets" });
+        PrivateDependencyModuleNames.AddRange(new[] { "CoreUObject", "Engine", "WebSockets", "Sockets" });
     }
 }
