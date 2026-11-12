@@ -17,7 +17,7 @@ import (
 // are configured with its public key (Server.KCPKey, Client.KCPServerKey),
 // which authenticates the server the way a pinned certificate would.
 //
-//	hello    conv | 0xFD | version 1 | client ephemeral key (32) | zero padding to 64 bytes
+//	hello    conv | 0xFD | version 1 | client ephemeral key (32) | server key id (8) | zero padding to 64 bytes
 //	welcome  conv | 0xFC | server ephemeral key (32) | AEAD tag of nothing (16)
 //	sealed   conv | 0xFB | counter (8, little endian) | ChaCha20-Poly1305(KCP datagram)
 //
@@ -29,6 +29,10 @@ import (
 // Hellos are padded so a welcome is never larger than the hello that
 // caused it; the client repeats its hello until a welcome arrives and the
 // server answers repeats with the same welcome.
+//
+// The key id is the first 8 bytes of SHA-256(server static public key):
+// a server accepting several keys while rotating (Server.KCPPreviousKeys)
+// answers with the one the client pinned, and stays silent for others.
 //
 // The AEAD is ChaCha20-Poly1305 (RFC 8439): clients without a native one
 // (Unity's netstandard2.1, Godot) can carry a constant-time implementation
@@ -50,6 +54,7 @@ const (
 	kcpCryptoVersion = 1
 	kcpKeySize       = 32
 	kcpHelloSize     = 64
+	kcpKeyIDSize     = 8
 	kcpWelcomeSize   = 5 + kcpKeySize + 16
 	kcpSealedHeader  = 5 + 8
 	kcpSealOverhead  = kcpSealedHeader + 16
@@ -141,13 +146,23 @@ func (k *kcpCipher) open(data []byte) ([]byte, bool) {
 	return plain, err == nil
 }
 
-func kcpHelloDatagram(conv uint32, eph []byte) []byte {
+func kcpHelloDatagram(conv uint32, eph []byte, server *ecdh.PublicKey) []byte {
 	b := make([]byte, kcpHelloSize)
 	binary.LittleEndian.PutUint32(b, conv)
 	b[4], b[5] = kcpHello, kcpCryptoVersion
 	copy(b[6:], eph)
+	copy(b[6+kcpKeySize:], kcpKeyID(server))
 	return b
 }
+
+// kcpKeyID identifies a server key in hellos.
+func kcpKeyID(server *ecdh.PublicKey) []byte {
+	sum := sha256.Sum256(server.Bytes())
+	return sum[:kcpKeyIDSize]
+}
+
+// kcpHelloKeyID is the key id a hello asks for.
+func kcpHelloKeyID(hello []byte) []byte { return hello[6+kcpKeySize : 6+kcpKeySize+kcpKeyIDSize] }
 
 func isKCPHello(data []byte) bool {
 	return len(data) == kcpHelloSize && data[4] == kcpHello && data[5] == kcpCryptoVersion
@@ -205,7 +220,7 @@ func newKCPClientHandshake(conv uint32, server *ecdh.PublicKey) (*kcpClientHands
 	if err != nil {
 		return nil, err
 	}
-	return &kcpClientHandshake{conv: conv, eph: eph, server: server, hello: kcpHelloDatagram(conv, eph.PublicKey().Bytes())}, nil
+	return &kcpClientHandshake{conv: conv, eph: eph, server: server, hello: kcpHelloDatagram(conv, eph.PublicKey().Bytes(), server)}, nil
 }
 
 // finish checks a welcome; nil means it was not a genuine welcome.

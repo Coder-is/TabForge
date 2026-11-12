@@ -566,3 +566,48 @@ func TestKCPHandshakeSurvivesDamage(t *testing.T) {
 		t.Fatalf("handshake after %d resets: %v", kcpHandshakeResets-1, err)
 	}
 }
+
+// TestKCPKeyRotation: while rotating, clients pinned to the new key and to
+// a previous one both connect; once the old key is gone its clients cannot.
+func TestKCPKeyRotation(t *testing.T) {
+	oldKey, newKey := newKCPKey(t), newKCPKey(t)
+	rotating := newFixture(t, testContract(t, nil), func(s *Server) {
+		registerGame(t, s)
+		s.KCPKey, s.KCPPreviousKeys = newKey, []*ecdh.PrivateKey{oldKey}
+	})
+	rotated := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s); s.KCPKey = newKey })
+	rotatingAddr, rotatedAddr := serveKCP(t, rotating), serveKCP(t, rotated)
+	for _, tc := range []struct {
+		name string
+		addr string
+		pin  *ecdh.PrivateKey
+		ok   bool
+	}{
+		{"new key while rotating", rotatingAddr, newKey, true},
+		{"old key while rotating", rotatingAddr, oldKey, true},
+		{"old key after rotation", rotatedAddr, oldKey, false},
+		{"new key after rotation", rotatedAddr, newKey, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := kcpClient(t, rotating, EncodingProto, "3", tc.addr)
+			c.KCPServerKey = tc.pin.PublicKey()
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			defer cancel()
+			err := c.Connect(ctx)
+			if tc.ok && err != nil {
+				t.Fatalf("Connect: %v", err)
+			}
+			if !tc.ok && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("connected with a removed key: %v", err)
+			}
+			if tc.ok {
+				if _, err := Call[*gamepb.LoginReply](context.Background(), c, "login", &gamepb.LoginRequest{Nickname: "x"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+	if err := (&Server{KCPPreviousKeys: []*ecdh.PrivateKey{oldKey}}).ServeKCP(nil); err == nil {
+		t.Fatal("ServeKCP accepted previous keys without a current one")
+	}
+}

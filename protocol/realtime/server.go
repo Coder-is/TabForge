@@ -102,6 +102,12 @@ type Server struct {
 	// its public key (Client.KCPServerKey); nil keeps KCP in clear text.
 	// Create one with ecdh.X25519().GenerateKey and keep it secret.
 	KCPKey *ecdh.PrivateKey
+	// KCPPreviousKeys are older keys ServeKCP still accepts while clients
+	// pinned to them are being replaced: release clients with the new
+	// public key, move the old KCPKey here, and remove it once no client
+	// uses it. Each hello names the key its client pinned; a client pinned
+	// to a key the server no longer has cannot connect.
+	KCPPreviousKeys []*ecdh.PrivateKey
 
 	codec      *payloadCodec
 	schemaHash string

@@ -49,7 +49,7 @@ func fixedX25519(t *testing.T, fill byte) *ecdh.PrivateKey {
 func TestKCPCryptoVectors(t *testing.T) {
 	const conv = 0x01020304
 	static, clientEph, serverEph := fixedX25519(t, 0x11), fixedX25519(t, 0x22), fixedX25519(t, 0x33)
-	h := &kcpClientHandshake{conv: conv, eph: clientEph, server: static.PublicKey(), hello: kcpHelloDatagram(conv, clientEph.PublicKey().Bytes())}
+	h := &kcpClientHandshake{conv: conv, eph: clientEph, server: static.PublicKey(), hello: kcpHelloDatagram(conv, clientEph.PublicKey().Bytes(), static.PublicKey())}
 	server, welcome, err := kcpAcceptWith(static, serverEph, conv, h.hello)
 	if err != nil {
 		t.Fatal(err)

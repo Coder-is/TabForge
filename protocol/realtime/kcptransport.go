@@ -406,10 +406,22 @@ func kcpResetDatagram(conv uint32) []byte {
 // payloads travel in clear text, unlike wss://. With it, ServeKCP accepts
 // only encrypted conversations. See doc/realtime.md.
 func (s *Server) ServeKCP(pc net.PacketConn) error {
-	if s.KCPKey != nil && s.KCPKey.Curve() != ecdh.X25519() {
-		return errKCPKeyCurve
+	l := &kcpListener{srv: s, pc: pc, conns: map[string]*kcpConn{}}
+	if s.KCPKey == nil && len(s.KCPPreviousKeys) > 0 {
+		return errors.New("realtime: KCPPreviousKeys needs KCPKey")
 	}
-	l := &kcpListener{srv: s, pc: pc, key: s.KCPKey, conns: map[string]*kcpConn{}}
+	for _, key := range append([]*ecdh.PrivateKey{s.KCPKey}, s.KCPPreviousKeys...) {
+		if key == nil {
+			continue
+		}
+		if key.Curve() != ecdh.X25519() {
+			return errKCPKeyCurve
+		}
+		if l.keys == nil {
+			l.keys = map[string]*ecdh.PrivateKey{}
+		}
+		l.keys[string(kcpKeyID(key.PublicKey()))] = key
+	}
 	buf := make([]byte, 64<<10)
 	failures := 0
 	for {
@@ -449,7 +461,7 @@ const MaxKCPConversations = 100000
 type kcpListener struct {
 	srv   *Server
 	pc    net.PacketConn
-	key   *ecdh.PrivateKey
+	keys  map[string]*ecdh.PrivateKey // by kcpKeyID; nil for clear text
 	mu    sync.Mutex
 	conns map[string]*kcpConn
 }
@@ -477,18 +489,19 @@ func (l *kcpListener) find(addr net.Addr, conv uint32, data []byte) *kcpConn {
 	switch {
 	case len(data) == 5 && (data[4] == kcpReset || data[4] == kcpPlainRefuse):
 		return nil
-	case l.key == nil && isOpenSegment(data):
-	case l.key != nil && isOpenSegment(data):
+	case l.keys == nil && isOpenSegment(data):
+	case l.keys != nil && isOpenSegment(data):
 		refuse := kcpResetDatagram(conv)
 		refuse[4] = kcpPlainRefuse
 		l.pc.WriteTo(refuse, addr)
 		return nil
-	case l.key != nil && isKCPHello(data):
-		if len(l.conns) >= MaxKCPConversations {
-			return nil
+	case l.keys != nil && isKCPHello(data):
+		key := l.keys[string(kcpHelloKeyID(data))]
+		if key == nil || len(l.conns) >= MaxKCPConversations {
+			return nil // A key this server does not have (any more).
 		}
 		var err error
-		if crypt, welcome, err = kcpAccept(l.key, conv, data); err != nil {
+		if crypt, welcome, err = kcpAccept(key, conv, data); err != nil {
 			return nil
 		}
 	default:

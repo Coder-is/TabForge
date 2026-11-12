@@ -15,7 +15,7 @@ namespace TabForge.Protocol
     {
         public const byte Hello = 0xFD, Welcome = 0xFC, Sealed = 0xFB, PlainRefuse = 0xFA, Reset = 0xFF, Keepalive = 0xFE;
         public const byte Version = 1;
-        public const int KeySize = 32, HelloSize = 64, WelcomeSize = 5 + KeySize + 16, SealedHeader = 5 + 8, SealOverhead = SealedHeader + 16;
+        public const int KeySize = 32, HelloSize = 64, KeyIdSize = 8, WelcomeSize = 5 + KeySize + 16, SealedHeader = 5 + 8, SealOverhead = SealedHeader + 16;
 
         private static readonly RandomNumberGenerator Random = RandomNumberGenerator.Create();
 
@@ -388,14 +388,27 @@ namespace TabForge.Protocol
             return Concat(t1, t2);
         }
 
-        public static byte[] HelloDatagram(uint conv, byte[] clientEphPublic)
+        /// <summary>conv | 0xFD | 1 | client ephemeral key | key id of the pinned server key | zero padding.</summary>
+        public static byte[] HelloDatagram(uint conv, byte[] clientEphPublic, byte[] serverPublic)
         {
             var b = new byte[HelloSize];
             PutLe32(b, 0, conv);
             b[4] = Hello;
             b[5] = Version;
             Buffer.BlockCopy(clientEphPublic, 0, b, 6, KeySize);
+            Buffer.BlockCopy(KeyId(serverPublic), 0, b, 6 + KeySize, KeyIdSize);
             return b;
+        }
+
+        /// <summary>First 8 bytes of SHA-256(server public key): lets a rotating server pick the key.</summary>
+        public static byte[] KeyId(byte[] serverPublic)
+        {
+            using (var sha = SHA256.Create())
+            {
+                var id = new byte[KeyIdSize];
+                Buffer.BlockCopy(sha.ComputeHash(serverPublic), 0, id, 0, KeyIdSize);
+                return id;
+            }
         }
 
         /// <summary>The client's half of the handshake, kept until a welcome arrives.</summary>
@@ -413,7 +426,7 @@ namespace TabForge.Protocol
                 server = serverPublic;
                 ephPrivate = ephemeralPrivate ?? RandomBytes(KeySize);
                 ephPublic = X25519Public(ephPrivate);
-                Hello = HelloDatagram(conv, ephPublic);
+                Hello = HelloDatagram(conv, ephPublic, server);
             }
 
             /// <summary>The ciphers if data is this conversation's genuine welcome, else null.</summary>
