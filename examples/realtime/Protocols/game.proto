@@ -1,0 +1,82 @@
+syntax = "proto3";
+package tabforge.game;
+option go_package = "github.com/Coder-is/TabForge/examples/realtime/Generated/schema/go;gamepb";
+
+import "google/protobuf/timestamp.proto";
+
+// Sent once after connecting; the bearer token travels in the hello frame.
+message LoginRequest { string nickname = 1; }
+message LoginReply {
+  uint64 player_id = 1;
+  string nickname = 2;
+  int64 gold = 3;
+}
+
+message JoinRoomRequest { string room = 1; }
+message RoomState {
+  string room = 1;
+  repeated Player players = 2;
+}
+
+message Player {
+  uint64 player_id = 1;
+  string nickname = 2;
+  Vec2 position = 3;
+}
+
+message Vec2 {
+  float x = 1;
+  float y = 2;
+}
+
+// Client to server, no reply. Sent many times per second.
+message Move {
+  Vec2 position = 1;
+  uint32 tick = 2;
+}
+
+message PlayerMoved {
+  uint64 player_id = 1;
+  Vec2 position = 2;
+  uint32 tick = 3;
+}
+
+message ChatSend { string text = 1; }
+message ChatAck { uint64 message_id = 1; }
+message ChatMessage {
+  uint64 message_id = 1;
+  uint64 from = 2;
+  string text = 3;
+  google.protobuf.Timestamp sent_at = 4;
+}
+
+// Purchases must run exactly once even when the network drops mid-request.
+message BuyRequest {
+  uint32 item_id = 1;
+  uint32 count = 2;
+}
+message BuyReply {
+  int64 gold = 1;
+  map<uint32, uint32> inventory = 2;
+}
+
+enum Notice {
+  NOTICE_UNSPECIFIED = 0;
+  NOTICE_MAINTENANCE = 1;
+  NOTICE_EVENT = 2;
+}
+message ServerNotice {
+  Notice kind = 1;
+  string text = 2;
+  oneof detail {
+    uint32 minutes_left = 3;
+    string event_name = 4;
+  }
+}
+
+service Game {
+  rpc Login(LoginRequest) returns (LoginReply);
+  rpc JoinRoom(JoinRoomRequest) returns (RoomState);
+  rpc Chat(ChatSend) returns (ChatAck);
+  rpc Buy(BuyRequest) returns (BuyReply);
+}

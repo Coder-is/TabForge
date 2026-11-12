@@ -144,7 +144,12 @@ func (c *Contract) Godot() ([]byte, error) {
 
 // RuntimeJSON is the language-neutral contract loaded by native SDKs.
 func (c *Contract) RuntimeJSON(indent string) ([]byte, error) {
-	return json.MarshalIndent(map[string]interface{}{"version": c.Manifest.Version, "schemaHash": c.Fingerprint(), "operations": c.operations(), "wireSchema": c.WireSchema()}, "", indent)
+	runtime := map[string]interface{}{"version": c.Manifest.Version, "schemaHash": c.Fingerprint(), "operations": c.operations(), "wireSchema": c.WireSchema()}
+	if len(c.Channels) != 0 {
+		runtime["channels"] = c.channelMetadata()
+		runtime["codecSchema"] = c.CodecSchema()
+	}
+	return json.MarshalIndent(runtime, "", indent)
 }
 
 type operation struct {

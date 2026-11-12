@@ -31,17 +31,19 @@ go run ./cmd/package-backend -out=outputs/releases/v3 # 构建四种语言的后
 | --- | --- | --- |
 | 游戏或应用配置 | Excel/CSV、索引表；可映射已有 Proto | V3 配置代码、JSON、Lua、专用二进制或 Protobuf，见下文导表教程 |
 | 前后端网络协议 | Proto RPC 与 `contract.json` 接口清单 | 七类协议产物、Go HTTP 服务和多平台 JSON/SSE 客户端，见 [前后端接入指南](doc/protocol-integration.md) |
+| 游戏实时长连接 | 同一份 Proto 与清单中的 `channels` | WebSocket 请求/推送/通知、断线自动恢复且请求不重复执行、二进制 Protobuf 帧；Go 服务端与 Go/TypeScript/微信/Unity/Godot 客户端，见 [实时长连接](doc/realtime.md) |
 
 统一协议模块包含字段验证、协议身份检查、全程超时/取消、大小限制、SSE 心跳和兼容性检查。普通请求返回 ProtoJSON，流式接口使用 SSE，可承载大模型文本、工具调用和用量事件。当前模型示例是固定数据，供应商适配需由业务后端实现。
 
 | 接入端 | SDK | 当前验证范围 |
 | --- | --- | --- |
 | Go 后端 | [HTTP/SSE 服务](doc/protocol-integration.md) | Go 竞态回归与跨语言 HTTP 联调 |
+| Go 实时服务 / TS、微信、Unity、Godot 与 Unreal 客户端 | [WebSocket 通道](doc/realtime.md) | 随机断线代理下的恰好一次与顺序校验、Go↔TS 编解码一致性、Linux 竞态；Unity C# 客户端（.NET 8）、Unity WebGL jslib 桥（Node 模拟堆）、Godot 客户端（4.5.1 headless）与 Unreal 客户端的 C++ 核心（ASan/UBSan，Go 桥接 WebSocket）通过同样的断线与编解码校验；浏览器/微信/引擎编辑器与真机长连接、Unreal 引擎编译待测；Lua 长连接客户端未实现 |
 | 网页 / Node | [TypeScript Fetch](sdk/typescript/README.md) | Node 24、Chromium Fetch/XHR |
 | 微信小程序 | [wx.request 分块](sdk/wechat/README.md) | 开发者工具真实网络 12 项；真机与小游戏构建待测 |
 | Cocos Creator 3.8 目标 | [Fetch/XHR/微信](sdk/cocos/README.md) | Web 网络后端通过；Creator/JSB/移动构建待测 |
 | Unity 2022.3 / Unity 6 原生目标 | [UPM C#](sdk/unity/README.md) | C# 核心与 Go 联调；编辑器/IL2CPP 待测，WebGL SSE 未实现 |
-| Unreal 5.5+ 目标 | [Runtime C++ 插件](sdk/unreal/README.md) | 独立 C++ 核心 sanitizer；引擎编译和原生 HTTP 待测 |
+| Unreal 5.5+ 目标 | [Runtime C++ 插件](sdk/unreal/README.md) | 独立 C++ 核心 sanitizer（HTTP/SSE 与实时通道）；引擎编译、原生 HTTP 与 WebSocket 待测 |
 | Godot 4.5.1+ 原生目标 | [GDScript](sdk/godot/README.md) | 4.5.1 macOS headless 与 Go 联调；Web 流与移动导出待测 |
 
 完整环境与用例见 [平台验收](doc/platform-validation.md)。代码实现与目标设备实测分开记录，不能从核心测试推断所有引擎构建均已兼容。
@@ -65,9 +67,10 @@ go run ./examples/protocol
 | `project/`、`clientbundle/`、`editors/` | 项目导出、引擎资产导入和四种编辑器插件 |
 | `examples/complete/`、`cmd/package/` | 完整模板和便携项目/插件 ZIP、VSIX 打包 |
 | `release.json`、`cmd/release/`、`cmd/package-backend/` | 统一交付版本、完整构建与安装验收、四种后端包打包 |
-| `protocol/` | 清单/描述文件校验、产物生成、兼容性检查和 Go HTTP/SSE 服务 |
+| `protocol/` | 清单/描述文件校验、产物生成、兼容性检查和 Go HTTP/SSE 服务；`protocol/realtime` 为 WebSocket 通道 |
 | `sdk/` | TypeScript、微信、Cocos、Unity、Unreal、Godot 客户端 |
 | `examples/protocol/` | 示例 Proto、清单、七类生成文件和固定响应服务 |
+| `examples/realtime/` | 实时游戏示例：Proto、通道清单、生成文件、Go 服务端与 TS 客户端 |
 | `examples/platforms/` | 平台验收服务、打包入口、编辑器工程、运行器和实测记录 |
 | `v3/` | Excel/CSV 导表、配置读取库和各语言配置示例 |
 | `doc/` | [文档导航](doc/README.md)、接入、架构、部署、验收与[开发维护](doc/development.md) |

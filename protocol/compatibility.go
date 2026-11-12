@@ -140,6 +140,44 @@ func breakingChanges(oldContract, newContract *Contract, transcoded bool) []Brea
 			}
 		}
 	}
+	// Channels: a request payload flows client to server like an HTTP request,
+	// responses and pushes flow to old clients. A new push is not breaking: every
+	// realtime client ignores unknown push ids. A new request/notify is unused by
+	// old clients.
+	for _, old := range oldContract.Channels {
+		next, found := newContract.Channel(old.ID)
+		if !found {
+			add("channel "+old.ID, "channel removed")
+			continue
+		}
+		if old.Path != next.Path || old.Auth != next.Auth {
+			add("channel "+old.ID, "path or auth changed")
+		}
+		for _, m := range old.Messages {
+			path := "channel " + old.ID + "." + m.Name
+			replacement, ok := next.Message(m.Name)
+			if !ok {
+				add(path, "message removed")
+				continue
+			}
+			if replacement.ID != m.ID || replacement.Kind != m.Kind || replacement.RPC != m.RPC || replacement.Type != m.Type || replacement.Volatile != m.Volatile {
+				add(path, "id, kind, rpc, type or delivery changed")
+				continue
+			}
+			if replacement.TimeoutMS < m.TimeoutMS {
+				add(path, "deadline shortened")
+			}
+			compare(m.Input, replacement.Input, m.Kind == KindPush)
+			if m.Output != nil {
+				compare(m.Output, replacement.Output, true)
+			}
+		}
+		for _, m := range next.Messages {
+			if previous, ok := old.MessageByID(m.ID); ok && previous.Name != m.Name {
+				add("channel "+old.ID+"."+m.Name, fmt.Sprintf("message id %d reused from %s", m.ID, previous.Name))
+			}
+		}
+	}
 	sort.Slice(changes, func(i, j int) bool {
 		if changes[i].Path == changes[j].Path {
 			return changes[i].Reason < changes[j].Reason

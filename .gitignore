@@ -35,6 +35,10 @@ sdk/godot/.godot/
 *.gd.uid
 sdk/unity/Tests/bin/
 sdk/unity/Tests/obj/
+sdk/unity/Tests/Realtime/bin/
+sdk/unity/Tests/Realtime/obj/
+sdk/unity/Tests/WebGL/bin/
+sdk/unity/Tests/WebGL/obj/
 sdk/unreal/Binaries/
 sdk/unreal/Intermediate/
 examples/platforms/dist/

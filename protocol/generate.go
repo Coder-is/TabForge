@@ -92,6 +92,14 @@ func (c *Contract) reachableTypes() ([]protoreflect.MessageDescriptor, []protore
 		visit(e.Input)
 		visit(e.Output)
 	}
+	for _, ch := range c.Channels {
+		for _, m := range ch.Messages {
+			visit(m.Input)
+			if m.Output != nil {
+				visit(m.Output)
+			}
+		}
+	}
 	sort.Slice(messages, func(i, j int) bool { return messages[i].FullName() < messages[j].FullName() })
 	sort.Slice(enums, func(i, j int) bool { return enums[i].FullName() < enums[j].FullName() })
 	return messages, enums
@@ -194,6 +202,9 @@ func (c *Contract) typeScript(withOperations bool) ([]byte, error) {
 		b.WriteString(strings.ReplaceAll(string(data), `"__proto__":`, `["__proto__"]:`))
 		b.WriteString(" as const;\n")
 		fmt.Fprintf(&b, "export const protocolVersion = %s;\n", quote(c.Manifest.Version))
+		if err := c.channelTypeScript(&b); err != nil {
+			return nil, err
+		}
 	}
 	fmt.Fprintf(&b, "export const schemaHash = %s;\n", quote(c.Fingerprint()))
 	schema, err := json.MarshalIndent(c.WireSchema(), "", "  ")
@@ -282,6 +293,7 @@ func (c *Contract) Markdown() string {
 			b.WriteString("\nA terminal event ends the stream. An EOF before a terminal event is a failure. Transport failures after headers use the reserved terminal `protocol.error` event with `error` instead of `payload`. Cancelling the client aborts the request; it does not imply provider-side work was cancelled. No automatic retries or replay are promised in v1.\n\n")
 		}
 	}
+	b.WriteString(c.channelMarkdown())
 	b.WriteString("## Errors\n\n`error` has `{ code: string, message: string, retryable: boolean }`. Business errors belong in declared Proto messages/events. Transport codes: `bad_request`, `request_too_large`, `not_found`, `method_not_allowed`, `unsupported_media_type`, `unauthorized`, `version_mismatch`, `schema_mismatch`, `timeout`, `internal`, `incomplete_stream`. Limits default to 1 MiB per request/response/frame. SSE comments provide keepalive without consuming event sequence. Go handlers must respect context cancellation. Deploy using `httptransport.HTTPServer` and an explicit CORS origin allowlist where needed.\n")
 	messages, enums := c.reachableTypes()
 	b.WriteString("\n## Message types\n\nFields may be omitted according to ProtoJSON presence/default rules. `oneof` members are mutually exclusive.\n")

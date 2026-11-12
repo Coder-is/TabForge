@@ -1,0 +1,72 @@
+{
+  "schema_version": "1",
+  "name": "TabForge realtime game example",
+  "version": "1.0.0",
+  "descriptor": "schema.pb",
+  "endpoints": null,
+  "channels": [
+    {
+      "id": "game",
+      "path": "/ws/game",
+      "auth": "bearer",
+      "heartbeat_ms": 5000,
+      "resume_window_ms": 60000,
+      "messages": [
+        {
+          "id": 1,
+          "name": "login",
+          "kind": "request",
+          "rpc": "tabforge.game.Game.Login",
+          "timeout_ms": 5000
+        },
+        {
+          "id": 2,
+          "name": "joinRoom",
+          "kind": "request",
+          "rpc": "tabforge.game.Game.JoinRoom",
+          "timeout_ms": 5000
+        },
+        {
+          "id": 3,
+          "name": "chat",
+          "kind": "request",
+          "rpc": "tabforge.game.Game.Chat",
+          "timeout_ms": 5000
+        },
+        {
+          "id": 4,
+          "name": "buy",
+          "kind": "request",
+          "rpc": "tabforge.game.Game.Buy",
+          "timeout_ms": 10000
+        },
+        {
+          "id": 100,
+          "name": "move",
+          "kind": "notify",
+          "type": "tabforge.game.Move",
+          "volatile": true
+        },
+        {
+          "id": 200,
+          "name": "playerMoved",
+          "kind": "push",
+          "type": "tabforge.game.PlayerMoved",
+          "volatile": true
+        },
+        {
+          "id": 201,
+          "name": "chatMessage",
+          "kind": "push",
+          "type": "tabforge.game.ChatMessage"
+        },
+        {
+          "id": 202,
+          "name": "notice",
+          "kind": "push",
+          "type": "tabforge.game.ServerNotice"
+        }
+      ]
+    }
+  ]
+}

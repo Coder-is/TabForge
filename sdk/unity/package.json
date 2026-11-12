@@ -2,7 +2,7 @@
   "name": "com.tabforge.protocol",
   "version": "0.2.0",
   "displayName": "TabForge Protocol",
-  "description": "ProtoJSON HTTP and native SSE client with generated contract validation.",
+  "description": "ProtoJSON HTTP, native SSE and realtime WebSocket channel client with generated contract validation.",
   "unity": "2022.3",
   "dependencies": { "com.unity.nuget.newtonsoft-json": "3.2.2" }
 }

@@ -28,11 +28,19 @@
     "./callback": {
       "types": "./dist/callback_transport.d.ts",
       "import": "./dist/callback_transport.js"
+    },
+    "./realtime": {
+      "types": "./dist/realtime.d.ts",
+      "import": "./dist/realtime.js"
+    },
+    "./protobuf": {
+      "types": "./dist/protobuf.d.ts",
+      "import": "./dist/protobuf.js"
     }
   },
   "scripts": {
     "pretest": "npm run build",
-    "test": "node --test runtime.test.mjs schema.test.mjs platform.test.mjs data.test.mjs node-bundle.test.mjs package.test.mjs",
+    "test": "node --test runtime.test.mjs schema.test.mjs platform.test.mjs data.test.mjs node-bundle.test.mjs package.test.mjs realtime.test.mjs",
     "check": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.release.json && node build.mjs",
     "prepack": "npm run build",

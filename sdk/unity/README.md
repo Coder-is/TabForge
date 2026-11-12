@@ -38,6 +38,10 @@ Completed 表示协议流已结束；`failed` 这类业务终止事件仍通过 
 | [SseParser.cs](Runtime/SseParser.cs) | SSE 增量分帧 |
 | [WireValidator.cs](Runtime/WireValidator.cs) | 字段与 Protobuf 内建类型校验 |
 | [TabForgeClient.cs](Runtime/TabForgeClient.cs) | UnityWebRequest、请求生命周期与主线程回调 |
+| [RealtimeCodec.cs](Runtime/RealtimeCodec.cs) | 长连接帧格式与二进制 Protobuf ↔ ProtoJSON 编解码 |
+| [RealtimeClient.cs](Runtime/RealtimeClient.cs) | 长连接会话：握手、序号确认、重连恢复、请求/推送/通知 |
+| [ClientWebSocketTransport.cs](Runtime/ClientWebSocketTransport.cs) | 基于 ClientWebSocket 的默认传输 |
+| [TabForgeRealtime.cs](Runtime/TabForgeRealtime.cs) | 在 Update 中驱动长连接的组件 |
 
 UPM 自动编译 Runtime 目录。手工集成源码时应复制完整 Runtime 目录；单独引用 `ProtocolCore.cs` 无法编译。独立 .NET 核心测试显式包含前四个文件，不包含 Unity 网络层。
 
@@ -56,3 +60,43 @@ PlayMode 用例覆盖 JSON/SSE、Unicode、uint64、实时事件、取消、超�
 本地联调启用 HTTP 代理时，将回环地址加入现有 `NO_PROXY` / `no_proxy`；环境配置与其他开发检查见[维护指南](../../doc/development.md)。
 
 API 依据：[DownloadHandlerScript](https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/networking/downloadhandlerscript)、[官方 Newtonsoft 包](https://docs.unity3d.com/Packages/com.unity.nuget.newtonsoft-json@3.2/manual/index.html)。
+
+## 实时长连接
+
+`RealtimeClient` 是 WebSocket 通道客户端，协议与可靠性语义见 [实时长连接](../../doc/realtime.md)：请求/推送/通知、断线自动重连并恢复会话、未确认帧重发且请求不会重复执行，默认使用二进制 Protobuf 帧（`ProtobufCodec` 依据 runtime.json 的 `codecSchema` 与 ProtoJSON `JObject` 互转）。
+
+```csharp
+using Newtonsoft.Json.Linq;
+using TabForge.Protocol;
+
+var host = new GameObject("Realtime");
+DontDestroyOnLoad(host); // 跨场景保持会话
+var client = host.AddComponent<TabForgeRealtime>().Configure(runtimeTextAsset.text, new RealtimeOptions
+{
+    Url = "wss://game.example.com/ws/game",
+    Channel = "game",
+    Token = () => loginToken, // 只在新会话时发送
+});
+client.StateChanged += (state, error) =>
+{
+    // Connected：新会话，重新拉取游戏状态；Resumed：原会话继续，没有丢失消息；
+    // Closed：被踢、顶号、鉴权失败等，不会再重连。
+};
+client.On("chatMessage", message => Debug.Log(message["text"]));
+client.Connect();
+
+var login = client.Request("login", new JObject { ["nickname"] = "勇者" });
+login.Completed += reply => Debug.Log(reply["playerId"]);
+login.Failed += error => Debug.LogWarning(error.Code); // session_lost 表示结果未知
+// 或者：var reply = await client.Request("login", ...).Task;
+client.Notify("move", new JObject { ["tick"] = 1 }); // volatile：掉线时返回 false
+```
+
+- `TabForgeRealtime` 在 `Update` 中调用 `Tick()`，所有回调（状态、推送、请求结果）都在主线程执行；GameObject 销毁或退出游戏时关闭会话。不使用组件时自行在一个线程上定期调用 `Tick()`。公开方法可以跨线程调用。
+- 消息是 ProtoJSON 形态的 `JObject`：64 位整数为十进制字符串，枚举为名称，时间戳为 RFC 3339 字符串。发送前按 runtime.json 校验并规范化，不合法的消息直接抛出 `invalid_message`。注意 `JObject.Parse` 默认会把时间戳字符串转成 `DateTime`，构造消息时请用 `Json.Parse` 或 `new JObject`。
+- 默认传输为 `ClientWebSocketTransport`（`System.Net.WebSockets.ClientWebSocket`），适用于 Standalone、Android、iOS；可通过 `ClientWebSocketTransport.Configure` 设置代理或证书。
+- **WebGL**：WebGL 播放器没有 ClientWebSocket，默认工厂自动改用 `WebGLWebSocketTransport`，经 `Runtime/Plugins/WebGL/TabForgeWebSocket.jslib` 桥接到浏览器 WebSocket，代码无需改动（`RealtimeOptions.Socket` 保持 null）。浏览器事件进入队列，仍在 `Tick` 中回调。浏览器 WebSocket 不能设置请求头，令牌照常放在 `hello` 中；跨域部署需在服务器 `OriginPatterns` 中允许页面来源。
+- `Encoding = RealtimeEncoding.Json` 使用 JSON 帧，便于抓包调试。
+
+验证：`go test ./protocol/realtime` 在设置 `DOTNET_BIN` 后构建 [RealtimeTests](Tests/Realtime/RealtimeTests.csproj)，运行模拟服务器单元测试、与 Go 对 2800 条随机消息的编解码一致性检查，以及在随机断线代理下连接 Go 服务端的压测（每个请求恰好执行一次、推送不丢不重不乱序、踢人在断线时也能送达），两种编码各一次。2026-11-09 在 Docker（Linux，.NET 8）中通过。这是普通 .NET 运行时，不是 Unity 引擎：编辑器 PlayMode、IL2CPP、Android/iOS 构建尚未实测。
+WebGL 桥的验证：`TestUnityWebGLBridgeUnderChaos`（需要 node）在 Node 中以模拟的 Emscripten 堆加载 jslib，代替 C# 侧调用它，让 TypeScript 客户端的全部帧经过该桥，在随机断线代理下跑与上面相同的恰好一次与顺序校验，两种编码；堆在每次调用后写入垃圾数据，桥若保留堆引用会立即失败。C# 路由（按 id 分发、关闭只通知一次、关闭后丢弃事件）由 `unit` 用伪造的 jslib 覆盖；`TestCSharpWebGLBranchCompiles` 以 `UNITY_WEBGL` 编译 P/Invoke 分支。真实 Unity WebGL 构建与浏览器运行尚未实测。
