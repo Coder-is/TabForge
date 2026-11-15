@@ -4,6 +4,7 @@
 package publish
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -83,6 +84,12 @@ func Dir(stage, out, marker string) (warning, err error) {
 	if err := Replaceable(out, marker); err != nil {
 		return nil, err
 	}
+	if same, err := keepUnchanged(stage, out); err != nil {
+		return nil, err
+	} else if same {
+		// Nothing changed: leave the installed output, and its timestamps, alone.
+		return nil, os.RemoveAll(stage)
+	}
 	backup := out + BackupSuffix
 	exists := false
 	if _, err := os.Lstat(out); err == nil {
@@ -107,4 +114,70 @@ func Dir(stage, out, marker string) (warning, err error) {
 		}
 	}
 	return nil, nil
+}
+
+// keepUnchanged gives every staged file whose bytes equal the installed file
+// at the same path that file's modification time, so engines that watch
+// timestamps (Unity, Godot, Unreal) only reimport what really changed. same
+// reports that stage and out hold exactly the same files and contents.
+// Comparison is best effort: a file that cannot be read counts as changed.
+func keepUnchanged(stage, out string) (same bool, err error) {
+	if info, err := os.Lstat(out); err != nil || !info.IsDir() {
+		return false, nil
+	}
+	same = true
+	staged := 0
+	err = filepath.WalkDir(stage, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		staged++
+		if !d.Type().IsRegular() {
+			same = false
+			return nil
+		}
+		rel, err := filepath.Rel(stage, path)
+		if err != nil {
+			return err
+		}
+		old := filepath.Join(out, rel)
+		info, err := os.Lstat(old)
+		if err != nil || !info.Mode().IsRegular() || !sameBytes(path, old, info.Size()) {
+			same = false
+			return nil
+		}
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			same = false
+		}
+		return nil
+	})
+	if err != nil || !same {
+		return false, err
+	}
+	installed := 0
+	walk := filepath.WalkDir(out, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			installed++
+		}
+		return nil
+	})
+	return walk == nil && installed == staged, nil
+}
+
+func sameBytes(a, b string, size int64) bool {
+	if info, err := os.Stat(a); err != nil || info.Size() != size {
+		return false
+	}
+	x, err := os.ReadFile(a)
+	if err != nil {
+		return false
+	}
+	y, err := os.ReadFile(b)
+	return err == nil && bytes.Equal(x, y)
 }

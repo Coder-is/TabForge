@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func output(t *testing.T, dir, name, content string) {
@@ -136,5 +137,82 @@ func TestDirRefusesUnmarkedOutput(t *testing.T) {
 	}
 	if read(t, filepath.Join(empty, "next")) != "next" {
 		t.Fatal("empty directory not replaced")
+	}
+}
+
+// Files whose bytes did not change keep their timestamp, so engines that
+// watch timestamps reimport only what changed.
+func TestDirKeepsTimestampsOfUnchangedFiles(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "Generated")
+	output(t, out, "kept", "same")
+	if err := os.WriteFile(filepath.Join(out, "changed"), []byte("before"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour).Truncate(time.Second)
+	for _, name := range []string{"export.json", "kept", "changed"} {
+		if err := os.Chtimes(filepath.Join(out, name), past, past); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stage := filepath.Join(dir, "stage")
+	output(t, stage, "kept", "same")
+	if err := os.WriteFile(filepath.Join(stage, "changed"), []byte("after"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Dir(stage, out, "export.json"); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(out, "changed")) != "after" {
+		t.Fatal("changed file not installed")
+	}
+	for name, keep := range map[string]bool{"kept": true, "export.json": true, "changed": false} {
+		info, err := os.Stat(filepath.Join(out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.ModTime().Equal(past) != keep {
+			t.Fatalf("%s: modified %v, kept=%v", name, info.ModTime(), keep)
+		}
+	}
+
+	// An identical stage leaves the installed directory untouched.
+	stage = filepath.Join(dir, "stage2")
+	output(t, stage, "kept", "same")
+	if err := os.WriteFile(filepath.Join(stage, "changed"), []byte("after"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Dir(stage, out, "export.json"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("identical output was swapped")
+	}
+	if _, err := os.Lstat(stage); !os.IsNotExist(err) {
+		t.Fatal("stage left behind")
+	}
+
+	// A file the new output no longer contains still makes it differ.
+	if err := os.WriteFile(filepath.Join(out, "stale"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	stage = filepath.Join(dir, "stage3")
+	output(t, stage, "kept", "same")
+	if err := os.WriteFile(filepath.Join(stage, "changed"), []byte("after"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Dir(stage, out, "export.json"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(out, "stale")); !os.IsNotExist(err) {
+		t.Fatal("stale file kept")
 	}
 }
