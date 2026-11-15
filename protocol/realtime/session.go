@@ -375,6 +375,9 @@ func (s *Session) endWithIf(e, client *Error, condition func() bool) {
 func (s *Session) writeLoop(c *connection) {
 	typ := messageType(s.encoding)
 	timeout := s.srv.writeTimeout()
+	// KCP can hold frames while more are queued and send them together.
+	batch, _ := c.ws.(batchWriter)
+	held := false
 	for {
 		select {
 		case <-c.wake:
@@ -405,15 +408,24 @@ func (s *Session) writeLoop(c *connection) {
 				f = &outFrame{kind: KindAck}
 			} else {
 				s.mu.Unlock()
+				if held {
+					batch.Flush()
+					held = false
+				}
 				break
 			}
+			more := len(c.queue) > 0
 			frame := Frame{Kind: f.kind, Seq: f.seq, Ack: s.received, Message: f.message, ReplyTo: f.replyTo, Payload: f.payload, Error: f.err, Welcome: f.welcome}
 			s.ackSent = s.received
 			s.mu.Unlock()
 			data, err := frame.Encode(s.encoding)
 			if err == nil {
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
-				err = c.ws.Write(ctx, typ, data)
+				if batch != nil && more {
+					err, held = batch.WriteBatched(ctx, typ, data), true
+				} else {
+					err, held = c.ws.Write(ctx, typ, data), false
+				}
 				cancel()
 			}
 			if err != nil {

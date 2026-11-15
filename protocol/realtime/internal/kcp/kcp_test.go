@@ -199,3 +199,27 @@ func TestDeadLink(t *testing.T) {
 		t.Fatal("link never declared dead")
 	}
 }
+
+// SendWithHeader queues exactly the segments Send queues for header+data.
+func TestSendWithHeaderMatchesSend(t *testing.T) {
+	a, b := New(1, func([]byte) {}), New(1, func([]byte) {})
+	mss := a.MSS()
+	for _, n := range []int{0, 1, mss - 2, mss - 1, mss, mss + 1, 5*mss + 3} {
+		data := make([]byte, n)
+		for i := range data {
+			data[i] = byte(i)
+		}
+		a.sndQueue, b.sndQueue = nil, nil
+		if !a.Send(append([]byte{0x85}, data...)) || !b.SendWithHeader(0x85, data) {
+			t.Fatalf("%d: refused", n)
+		}
+		if len(a.sndQueue) != len(b.sndQueue) {
+			t.Fatalf("%d: %d segments, want %d", n, len(b.sndQueue), len(a.sndQueue))
+		}
+		for i := range a.sndQueue {
+			if a.sndQueue[i].frg != b.sndQueue[i].frg || !bytes.Equal(a.sndQueue[i].data, b.sndQueue[i].data) {
+				t.Fatalf("%d: segment %d differs", n, i)
+			}
+		}
+	}
+}

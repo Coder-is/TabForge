@@ -657,7 +657,7 @@ func TestKCPInboxBoundedByBytes(t *testing.T) {
 	sent := make(chan error, 1)
 	go func() {
 		for i := 0; i < count; i++ {
-			if err := a.send(ctx, kcpBinary, bytes.Repeat([]byte{byte(i)}, size)); err != nil {
+			if err := a.send(ctx, kcpBinary, bytes.Repeat([]byte{byte(i)}, size), true); err != nil {
 				sent <- err
 				return
 			}
@@ -784,5 +784,32 @@ func TestKCPPendingPool(t *testing.T) {
 	time.Sleep(2 * kcpPendingTimeout)
 	if _, _, conns := counts(addr.Addr()); conns != 1 {
 		t.Fatal("established conversation expired like a pending one")
+	}
+}
+
+// Frames written with WriteBatched share datagrams until Flush.
+func TestKCPWriteBatchedSharesDatagrams(t *testing.T) {
+	ctx := context.Background()
+	msg := bytes.Repeat([]byte{1}, 64)
+	count := func(batched bool) int {
+		var datagrams atomic.Int64
+		c := newKCPConn(5, 1<<20, nil, func([]byte) { datagrams.Add(1) })
+		defer c.CloseNow()
+		for i := 0; i < 50; i++ {
+			write := c.Write
+			if batched && i < 49 {
+				write = c.WriteBatched
+			}
+			if err := write(ctx, websocket.MessageBinary, msg); err != nil {
+				t.Fatal(err)
+			}
+		}
+		c.Flush()
+		return int(datagrams.Load())
+	}
+	single, batched := count(false), count(true)
+	// About 4 MTU-sized datagrams; a KCP tick during the loop may add one or two.
+	if single < 50 || batched > 10 {
+		t.Fatalf("50 frames: %d datagrams one by one, %d batched", single, batched)
 	}
 }

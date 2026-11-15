@@ -215,6 +215,32 @@ func (k *KCP) Send(data []byte) bool {
 	return true
 }
 
+// SendWithHeader queues the message header followed by data, like
+// Send(append([]byte{header}, data...)) without building that copy.
+func (k *KCP) SendWithHeader(header byte, data []byte) bool {
+	total := 1 + len(data)
+	count := 1
+	if total > int(k.mss) {
+		count = (total + int(k.mss) - 1) / int(k.mss)
+	}
+	if count >= wndRcv {
+		return false
+	}
+	for i := 0; i < count; i++ {
+		size := min(total, int(k.mss))
+		buf := make([]byte, 0, size)
+		if i == 0 {
+			buf = append(buf, header)
+		}
+		n := size - len(buf)
+		buf = append(buf, data[:n]...)
+		k.sndQueue = append(k.sndQueue, &segment{data: buf, frg: uint8(count - i - 1)})
+		data = data[n:]
+		total -= size
+	}
+	return true
+}
+
 func (k *KCP) updateAck(rtt int32) {
 	if k.rxSrtt == 0 {
 		k.rxSrtt = rtt

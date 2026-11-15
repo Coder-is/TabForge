@@ -133,7 +133,8 @@ func (k *kcpCipher) seal(plain []byte) []byte {
 	return k.send.Seal(out, kcpNonce(counter), plain, out[:kcpSealedHeader])
 }
 
-// open authenticates and decrypts a sealed datagram.
+// open authenticates and decrypts a sealed datagram in place: data is
+// overwritten and the plaintext shares its memory.
 func (k *kcpCipher) open(data []byte) ([]byte, bool) {
 	if len(data) < kcpSealOverhead || data[4] != kcpSealed {
 		return nil, false
@@ -142,7 +143,8 @@ func (k *kcpCipher) open(data []byte) ([]byte, bool) {
 	if counter == 0 {
 		return nil, false // reserved for the welcome
 	}
-	plain, err := k.recv.Open(nil, kcpNonce(counter), data[kcpSealedHeader:], data[:kcpSealedHeader])
+	body := data[kcpSealedHeader:]
+	plain, err := k.recv.Open(body[:0], kcpNonce(counter), body, data[:kcpSealedHeader])
 	return plain, err == nil
 }
 

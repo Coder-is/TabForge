@@ -87,7 +87,7 @@ func TestKCPCryptoVectors(t *testing.T) {
 		{"server", server, client, []byte("first KCP datagram from the server"), 1},
 	} {
 		sealed := d.seal.seal(d.plain)
-		opened, ok := d.open.open(sealed)
+		opened, ok := d.open.open(append([]byte(nil), sealed...)) // open decrypts in place
 		if !ok || !bytes.Equal(opened, d.plain) {
 			t.Fatalf("%s datagram %d does not open", d.from, d.wantedCounter)
 		}

@@ -30,6 +30,13 @@ type wireConn interface {
 	CloseNow() error
 }
 
+// batchWriter is a wireConn that can hold writes until Flush; the session
+// write loop uses it while more frames are queued.
+type batchWriter interface {
+	WriteBatched(ctx context.Context, typ websocket.MessageType, p []byte) error
+	Flush()
+}
+
 // KCP transport, version 1. Every KCP message starts with a header byte:
 // the low 7 bits are the type, 0x80 means another chunk of the same
 // message follows. The client opens with "path\nsubprotocol"; the server
@@ -185,7 +192,7 @@ func (c *kcpConn) receive(data []byte) {
 			c.fail(ErrKCPEncryptionRequired)
 			return
 		}
-		c.input(append([]byte(nil), data...))
+		c.input(data) // KCP copies what it keeps.
 		return
 	}
 	if c.welcome != nil && bytes.Equal(data, c.hello) {
@@ -254,10 +261,17 @@ func (c *kcpConn) pumpLocked() error {
 			if c.partialOn && c.partialTyp != typ {
 				return errors.New("realtime: kcp message changed type mid-way")
 			}
-			c.partialOn, c.partialTyp = true, typ
 			if len(c.partial)+len(m)-1 > c.maxMessage {
 				return fmt.Errorf("realtime: kcp message exceeds %d bytes", c.maxMessage)
 			}
+			if !c.partialOn && !more {
+				// A single chunk: Recv returned a fresh buffer, keep it.
+				c.inbox = append(c.inbox, kcpMessage{typ: typ, data: m[1:]})
+				c.inboxBytes += len(m) - 1
+				signal(c.readable)
+				continue
+			}
+			c.partialOn, c.partialTyp = true, typ
 			c.partial = append(c.partial, m[1:]...)
 			if !more {
 				c.inbox = append(c.inbox, kcpMessage{typ: typ, data: c.partial})
@@ -293,13 +307,15 @@ func (c *kcpConn) closedErr() error {
 	return net.ErrClosed
 }
 
-// send queues one transport message, waiting while too much is unacknowledged.
-func (c *kcpConn) send(ctx context.Context, typ byte, p []byte) error {
+// send queues one transport message, waiting while too much is
+// unacknowledged; with flush it goes out now, else on Flush or the next tick.
+func (c *kcpConn) send(ctx context.Context, typ byte, p []byte, flush bool) error {
 	for {
 		c.mu.Lock()
 		if c.kcp.WaitSnd() < kcpSendLimit {
 			break
 		}
+		c.kcp.Flush() // Batched segments must go out before waiting on their acks.
 		c.mu.Unlock()
 		select {
 		case <-c.writable:
@@ -321,16 +337,23 @@ func (c *kcpConn) send(ctx context.Context, typ byte, p []byte) error {
 		if n < len(p) {
 			header |= kcpMore
 		}
-		chunk := make([]byte, 1+n)
-		chunk[0] = header
-		copy(chunk[1:], p[:n])
-		if !c.kcp.Send(chunk) {
+		if !c.kcp.SendWithHeader(header, p[:n]) {
 			return errors.New("realtime: kcp chunk too large")
 		}
 		p = p[n:]
 	}
-	c.kcp.Flush()
+	if flush {
+		c.kcp.Flush()
+	}
 	return nil
+}
+
+// Flush sends what WriteBatched queued; KCP's own tick would within one
+// interval otherwise.
+func (c *kcpConn) Flush() {
+	c.mu.Lock()
+	c.kcp.Flush()
+	c.mu.Unlock()
 }
 
 func (c *kcpConn) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
@@ -362,6 +385,16 @@ func (c *kcpConn) Read(ctx context.Context) (websocket.MessageType, []byte, erro
 }
 
 func (c *kcpConn) Write(ctx context.Context, typ websocket.MessageType, p []byte) error {
+	return c.write(ctx, typ, p, true)
+}
+
+// WriteBatched queues p without sending it yet, so frames written back to
+// back share datagrams (and seals and syscalls); Flush sends them.
+func (c *kcpConn) WriteBatched(ctx context.Context, typ websocket.MessageType, p []byte) error {
+	return c.write(ctx, typ, p, false)
+}
+
+func (c *kcpConn) write(ctx context.Context, typ websocket.MessageType, p []byte, flush bool) error {
 	if len(p) > c.maxMessage {
 		return fmt.Errorf("realtime: message of %d bytes exceeds %d", len(p), c.maxMessage)
 	}
@@ -369,14 +402,14 @@ func (c *kcpConn) Write(ctx context.Context, typ websocket.MessageType, p []byte
 	if typ == websocket.MessageText {
 		t = kcpText
 	}
-	return c.send(ctx, t, p)
+	return c.send(ctx, t, p, flush)
 }
 
 // Close sends the reason and waits briefly for it to be acknowledged.
 func (c *kcpConn) Close(_ websocket.StatusCode, reason string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), kcpCloseLinger)
 	defer cancel()
-	if err := c.send(ctx, kcpClose, []byte(reason)); err == nil {
+	if err := c.send(ctx, kcpClose, []byte(reason), true); err == nil {
 		for ctx.Err() == nil {
 			c.mu.Lock()
 			pending := c.kcp.WaitSnd()
@@ -726,7 +759,7 @@ func (s *Server) serveKCPConn(c *kcpConn) {
 		c.Close(websocket.StatusGoingAway, CodeServerShutdown)
 		return
 	}
-	if err := c.send(ctx, kcpOpen, []byte(subprotocol)); err != nil {
+	if err := c.send(ctx, kcpOpen, []byte(subprotocol), true); err != nil {
 		c.CloseNow()
 		return
 	}
@@ -791,7 +824,7 @@ func dialKCP(ctx context.Context, rawURL, subprotocol string, maxMessage int, se
 	if path == "" {
 		path = "/"
 	}
-	if err := c.send(ctx, kcpOpen, []byte(path+"\n"+subprotocol)); err != nil {
+	if err := c.send(ctx, kcpOpen, []byte(path+"\n"+subprotocol), true); err != nil {
 		c.CloseNow()
 		return nil, err
 	}

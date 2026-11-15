@@ -68,7 +68,7 @@ func BenchmarkKCPSealOpen(b *testing.B) {
 	b.SetBytes(int64(len(plain)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, ok := server.open(client.seal(plain)); !ok {
+		if _, ok := server.open(client.seal(plain)); !ok { // in place, like receive
 			b.Fatal("open failed")
 		}
 	}
@@ -110,7 +110,7 @@ func BenchmarkKCPLink(b *testing.B) {
 	}()
 	b.ResetTimer()
 	for i := 0; i < n; i++ {
-		if err := a.send(ctx, kcpBinary, msg); err != nil {
+		if err := a.send(ctx, kcpBinary, msg, true); err != nil {
 			b.Fatal(err)
 		}
 	}

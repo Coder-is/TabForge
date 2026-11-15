@@ -184,7 +184,8 @@ func (f *Frame) Encode(enc Encoding) ([]byte, error) {
 	if enc == EncodingJSON {
 		return f.encodeJSON()
 	}
-	var b []byte
+	// Five varint fields (at most 11 bytes each) and the payload tag and length.
+	b := make([]byte, 0, 64+len(f.Payload))
 	b = appendVarint(b, fieldKind, uint64(f.Kind))
 	b = appendVarint(b, fieldSeq, f.Seq)
 	b = appendVarint(b, fieldAck, f.Ack)
