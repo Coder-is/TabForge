@@ -174,6 +174,9 @@ func _receive(packet: PackedByteArray, now: int) -> void:
 			elif _handshake != null:
 				_send_hello(now)
 			return
+		if _handshake != null and _handshake.take_retry(packet):
+			_send_hello(now) # Repeat the hello at once, now with the cookie.
+			return
 		# Cheap checks here; the X25519 work runs on a worker. Welcomes that
 		# arrive meanwhile are dropped: the server repeats them.
 		if _handshake != null and _task < 0 and packet.size() == KcpCrypto.WELCOME_SIZE and packet[4] == KcpCrypto.WELCOME:

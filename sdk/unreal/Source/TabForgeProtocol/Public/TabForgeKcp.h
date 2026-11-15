@@ -457,6 +457,9 @@ namespace crypto {
 
 constexpr std::uint8_t kHello = 0xFD, kWelcome = 0xFC, kSealed = 0xFB, kPlainRefuse = 0xFA, kKeepalive = 0xFE, kReset = 0xFF;
 constexpr std::size_t kKeySize = 32, kHelloSize = 64, kKeyIdSize = 8, kWelcomeSize = 5 + kKeySize + 16, kSealedHeader = 5 + 8, kSealOverhead = kSealedHeader + 16;
+// Under a hello flood the server answers conv | 0xF9 | cookie; the hello is repeated with the cookie at kCookieOffset.
+constexpr std::uint8_t kRetry = 0xF9;
+constexpr std::size_t kCookieSize = 16, kCookieOffset = 6 + kKeySize + kKeyIdSize, kRetrySize = 5 + kCookieSize;
 
 using Key = std::array<std::uint8_t, 32>;
 
@@ -922,6 +925,13 @@ public:
 
     const Bytes& hello() const { return hello_; }
 
+    // If data is a retry for this conversation, puts its cookie into the hello.
+    bool take_retry(const std::uint8_t* data, std::size_t n) {
+        if (n != kRetrySize || data[4] != kRetry || le32(data) != conv_) return false;
+        std::memcpy(hello_.data() + kCookieOffset, data + 5, kCookieSize);
+        return true;
+    }
+
     // Builds the cipher into out if data is this conversation's genuine welcome.
     bool finish(const std::uint8_t* data, std::size_t n, std::unique_ptr<Cipher>& out) const {
         if (n != kWelcomeSize || data[4] != kWelcome || le32(data) != conv_) return false;
@@ -1015,6 +1025,10 @@ public:
                 // A plain server resets every hello; one or two may be damage or forgery.
                 if (++resets_ >= kHandshakeResets) refuse("The server does not offer encrypted KCP; clear the KCP server key or set Server.KCPKey");
                 else send_hello(now);
+                return;
+            }
+            if (handshake_->take_retry(data, n)) {
+                send_hello(now); // Repeat the hello at once, now with the cookie.
                 return;
             }
             if (handshake_->finish(data, n, cipher_)) {

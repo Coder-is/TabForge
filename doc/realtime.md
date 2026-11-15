@@ -231,8 +231,8 @@ kcpPublicKey, _ := ecdh.X25519().NewPublicKey(pub)
 - 两端配置不一致时客户端不重试，以 `protocol_error` 停止：明文客户端连加密服务器会收到 `conv + 0xFA`（`ErrKCPEncryptionRequired`），加密客户端连明文服务器，每个 hello 都会收到重置，连续 3 次后停止（`ErrKCPEncryptionUnsupported`；只收到一两次重置不会停止，以免损坏的数据报或伪造的重置让客户端放弃）。公钥配错时客户端认不出 welcome，表现为一直连不上（`connecting`/`disconnected`）。**换钥**：生成新密钥，发布带新公钥的客户端；服务器把新密钥设为 `KCPKey`、旧密钥放进 `KCPPreviousKeys`，按 hello 中的密钥标识选择，新旧客户端都能连接；确认没有客户端再用旧公钥后，从 `KCPPreviousKeys` 中删除。固定了已删除密钥的客户端连不上（服务器不回复，表现同公钥配错）。
 - 重置帧（`0xFF`）和拒绝帧（`0xFA`）不加密：失去会话的一方已没有密钥。能看到流量的攻击者可以伪造它们迫使客户端重连，但会话会通过恢复继续，请求也不会重复执行；这与直接丢弃数据报的效果相同。
 - 不设置 `KCPKey` 时**不加密**：令牌、恢复令牌和载荷都是明文，能看到流量的人可以冒用会话，只适合内网、VPN/专线或游戏加速器隧道。
-- 每个 `ServeKCP` 最多 `MaxKCPConversations`（100000）个会话。加密时，从 hello 到客户端第一个密封数据报成功解开（证明客户端在该地址收到了 welcome）之前，会话处于“待定”状态：待定会话另有名额，总数 `MaxKCPPending`（4096）、每个 IP `MaxKCPPendingPerIP`（64），5 秒内未完成即关闭。伪造源地址的 hello 洪泛只能占满待定名额，不会挤掉已建立的会话，但期间新玩家的握手会受影响。X25519 运算（每个 hello 3 次）不在收包协程中执行，并发数不超过 CPU 数，忙时丢弃 hello，由客户端每 250 ms 重发。握手阶段的回复都不比触发它的数据报大。
-- 明文 KCP 没有地址证明：伪造的 open 段会建立会话，服务器的回复会被 KCP 重传，可被用来向第三方反射约数倍的流量；并且在 `HandshakeTimeout` 内占用名额。生产环境请设置 `KCPKey`，并在网络层限速。彻底解决需要类似 QUIC Retry 的无状态地址验证，需要各端客户端一起修改，见 [开发优化计划](optimization-plan.md) 第五阶段。
+- 每个 `ServeKCP` 最多 `MaxKCPConversations`（100000）个会话。加密时，从 hello 到客户端第一个密封数据报成功解开（证明客户端在该地址收到了 welcome）之前，会话处于“待定”状态：待定会话另有名额，总数 `MaxKCPPending`（4096）、每个 IP `MaxKCPPendingPerIP`（64），5 秒内未完成即关闭。伪造源地址的 hello 洪泛只能占满待定名额，不会挤掉已建立的会话。待定会话达到总名额的四分之一（1024）时，服务器进入地址验证：不带有效 cookie 的 hello 只得到一个 21 字节的 retry（`conv + 0xF9 + cookie`），不分配状态、不做 X25519；客户端把 cookie 填入 hello 的第 46–61 字节立即重发，服务器确认地址后照常握手（多一个往返）。cookie 是绑定客户端地址、conv 与客户端临时公钥的 HMAC，有效 30–60 秒；伪造源地址的一方收不到 retry，也就无法完成握手。Go、Unity、Godot、Unreal 客户端都支持 retry；不支持的旧客户端只在服务器处于地址验证期间连不上。X25519 运算（每个 hello 3 次）不在收包协程中执行，并发数不超过 CPU 数，忙时丢弃 hello，由客户端每 250 ms 重发。握手阶段的回复都不比触发它的数据报大。
+- 明文 KCP 没有地址证明：伪造的 open 段会建立会话，服务器的回复会被 KCP 重传，可被用来向第三方反射约数倍的流量；并且在 `HandshakeTimeout` 内占用名额。生产环境请设置 `KCPKey`，并在网络层限速。上述地址验证只用于加密握手，明文 KCP 没有 hello，无法使用。
 - 支持 `kcp://` 的客户端：Go、Unity（`RealtimeOptions.KcpServerKey`，见 [Unity 长连接](../sdk/unity/README.md)；WebGL 除外）、Godot（`kcp_server_key` 选项，见 [Godot 长连接](../sdk/godot/README.md)；Web 导出除外）与 Unreal（`FTabForgeRealtimeOptions::KcpServerKey`，见 [Unreal 长连接](../sdk/unreal/README.md)；引擎层尚未实测）。TypeScript 客户端（浏览器无 UDP）仍使用 WebSocket。
 
 ## 5. TypeScript 客户端
@@ -290,6 +290,8 @@ Unreal（C++，UE 5.5+）使用 `FTabForgeRealtimeClient`（`TabForgeRealtime.h`
 | 同上（设置 `CXX_BIN`，KCP） | Unreal 客户端的 KCP 传输（`TabForgeKcp.h`，不含引擎），以 ASan/UBSan 构建：X25519（300 个）与 ChaCha20-Poly1305（200 个）对 Go 生成的用例逐字节一致、篡改即拒绝，固定密钥握手向量一致；两个 KCP 在 20% 丢包、重复、乱序的虚拟链路上按序送达 300 条消息；会话引擎经 `Conversation` 连接 Go `ServeKCP`（UDP socket 由 Go 测试桥接），经丢包、重复、乱序并随机换端口的 UDP 代理，明文与加密下校验恰好一次、推送顺序、volatile 与踢人，加密时另篡改 2% 的数据报并确认令牌不以明文出现；加密配置不一致时停止且不重连。2026-11-12 在本机（Windows，llvm-mingw clang 23）两组并行连续 6 次通过；`FSocket` 适配层的引擎编译尚未实测 |
 | `npm test`（sdk/typescript） | 模拟服务器下的握手、校验、重复帧、恢复与过期、协议错误、永久关闭、超时/取消/背压、volatile 丢弃、微信适配 |
 | `go test -race` | 2026-11-09 在 Docker `golang:1.26`（Linux）中通过；含压缩与跨实例交接的版本 2026-11-11 连续 3 轮通过 |
+
+地址验证（retry）：上述 Go、C#、Godot 与 Unreal C++ 的 KCP 联调都另有一组“服务器对每个 hello 都要求 cookie”的运行，同样在丢包、重复、乱序与随机换端口的代理下校验恰好一次与推送顺序；撤回客户端对 retry 的处理时该组失败。2026-11-15 在 Docker（Linux：.NET 8.0.427、Godot 4.5.1 headless、g++ 14 ASan/UBSan）中通过。
 
 本地记录不代表远程 CI 已通过。浏览器、微信开发者工具、Unity 编辑器与 WebGL 构建、Unreal 引擎编译和真机上的长连接尚未实测；正式环境需使用 `wss://`，并在负载均衡/网关上放开 WebSocket 升级与长连接超时。
 

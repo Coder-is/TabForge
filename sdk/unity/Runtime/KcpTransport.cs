@@ -213,6 +213,8 @@ namespace TabForge.Protocol
                             return "The server does not offer encrypted KCP; clear RealtimeOptions.KcpServerKey or set Server.KCPKey";
                         break;
                     }
+                    if (h.TakeRetry(buffer, n))
+                        break; // Repeat the hello at once, now with the cookie.
                     var cipher = h.Finish(buffer, n);
                     if (cipher != null)
                     {

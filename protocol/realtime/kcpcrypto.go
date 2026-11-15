@@ -17,7 +17,8 @@ import (
 // are configured with its public key (Server.KCPKey, Client.KCPServerKey),
 // which authenticates the server the way a pinned certificate would.
 //
-//	hello    conv | 0xFD | version 1 | client ephemeral key (32) | server key id (8) | zero padding to 64 bytes
+//	hello    conv | 0xFD | version 1 | client ephemeral key (32) | server key id (8) | cookie (16) | zero padding to 64 bytes
+//	retry    conv | 0xF9 | cookie (16)
 //	welcome  conv | 0xFC | server ephemeral key (32) | AEAD tag of nothing (16)
 //	sealed   conv | 0xFB | counter (8, little endian) | ChaCha20-Poly1305(KCP datagram)
 //
@@ -29,6 +30,15 @@ import (
 // Hellos are padded so a welcome is never larger than the hello that
 // caused it; the client repeats its hello until a welcome arrives and the
 // server answers repeats with the same welcome.
+//
+// Under a flood of hellos (spoofed source addresses filling the pending
+// handshakes, see MaxKCPPending) the server answers a hello whose cookie is
+// missing or stale with a retry instead of doing any work, and continues
+// only hellos carrying the cookie it gave that address: proof that the
+// client receives datagrams there. Clients copy the cookie into their hello
+// as is and repeat the hello at once; the cookie is zero otherwise, and
+// servers ignore it when not under pressure. A retry is smaller than the
+// hello that caused it.
 //
 // The key id is the first 8 bytes of SHA-256(server static public key):
 // a server accepting several keys while rotating (Server.KCPPreviousKeys)
@@ -50,11 +60,15 @@ const (
 	kcpWelcome     = 0xFC
 	kcpSealed      = 0xFB
 	kcpPlainRefuse = 0xFA // conv | 0xFA: this server only accepts encrypted KCP
+	kcpRetry       = 0xF9 // conv | 0xF9 | cookie: repeat the hello with this cookie
 
 	kcpCryptoVersion = 1
 	kcpKeySize       = 32
 	kcpHelloSize     = 64
 	kcpKeyIDSize     = 8
+	kcpCookieSize    = 16
+	kcpCookieOffset  = 6 + kcpKeySize + kcpKeyIDSize
+	kcpRetrySize     = 5 + kcpCookieSize
 	kcpWelcomeSize   = 5 + kcpKeySize + 16
 	kcpSealedHeader  = 5 + 8
 	kcpSealOverhead  = kcpSealedHeader + 16

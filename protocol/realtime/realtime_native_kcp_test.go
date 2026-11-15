@@ -47,8 +47,12 @@ func TestNativeKCPClient(t *testing.T) {
 		}
 		t.Log(strings.TrimSpace(string(out)))
 	})
-	for _, encrypted := range []bool{false, true} {
-		t.Run(map[bool]string{false: "plain", true: "encrypted"}[encrypted], func(t *testing.T) {
+	for _, mode := range []string{"plain", "encrypted", "retry"} {
+		encrypted := mode != "plain"
+		t.Run(mode, func(t *testing.T) {
+			if mode == "retry" {
+				forceKCPRetry(t) // Every hello needs a cookie.
+			}
 			var key *ecdh.PrivateKey
 			arg := "-"
 			if encrypted {

@@ -888,3 +888,105 @@ func TestKCPSchedulerDrivesConversations(t *testing.T) {
 	transfer(300, 20)
 	waitIdle()
 }
+
+// Under pressure a hello without its address's cookie gets a stateless
+// retry; the hello repeated with the cookie is answered with a welcome.
+func TestKCPRetryUnderPressure(t *testing.T) {
+	old := kcpRetryPending
+	kcpRetryPending = 0 // Always under pressure.
+	t.Cleanup(func() { kcpRetryPending = old })
+	key := newKCPKey(t)
+	f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s); s.KCPKey = key })
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pc.Close() })
+	l, err := newKCPListener(f.server, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.closeAll)
+	client, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	addr := client.LocalAddr().(*net.UDPAddr).AddrPort()
+	h, err := newKCPClientHandshake(31, key.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := kcpKey{addr, 31}
+	read := func() []byte {
+		t.Helper()
+		buf := make([]byte, 128)
+		client.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, _, err := client.ReadFrom(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return buf[:n]
+	}
+	conns := func() int {
+		l.mu.RLock()
+		defer l.mu.RUnlock()
+		return len(l.conns)
+	}
+	l.find(k, h.hello)
+	retry := read()
+	if len(retry) != kcpRetrySize || retry[4] != kcpRetry || binary.LittleEndian.Uint32(retry) != 31 || conns() != 0 {
+		t.Fatalf("no stateless retry: %x, %d conversations", retry, conns())
+	}
+	if len(retry) > len(h.hello) {
+		t.Fatal("retry larger than the hello")
+	}
+	// A wrong cookie, or one given to another port, is answered again.
+	forged := append([]byte(nil), h.hello...)
+	forged[kcpCookieOffset] ^= 1
+	elsewhere := kcpCookie(l.cookieSecret, netip.AddrPortFrom(addr.Addr(), addr.Port()+1), 31, h.hello, kcpCookieNow())
+	moved := append([]byte(nil), h.hello...)
+	copy(moved[kcpCookieOffset:], elsewhere)
+	for _, hello := range [][]byte{forged, moved} {
+		l.find(k, hello)
+		if got := read(); got[4] != kcpRetry || conns() != 0 {
+			t.Fatalf("bad cookie accepted: %x", got)
+		}
+	}
+	copy(h.hello[kcpCookieOffset:], retry[5:])
+	l.find(k, h.hello)
+	if h.finish(read()) == nil || conns() != 1 {
+		t.Fatal("hello with its cookie was not welcomed")
+	}
+	// Cookies live for the current and the previous epoch.
+	for epoch, ok := range map[int64]bool{kcpCookieNow() - 1: true, kcpCookieNow() - 2: false} {
+		hello := append([]byte(nil), h.hello...)
+		copy(hello[kcpCookieOffset:], kcpCookie(l.cookieSecret, addr, 31, hello, epoch))
+		if l.validCookie(k, hello) != ok {
+			t.Fatalf("cookie from epoch %d: valid=%v", epoch, !ok)
+		}
+	}
+}
+
+// A Go client connects normally while every hello needs a cookie.
+func TestKCPClientFollowsRetry(t *testing.T) {
+	old := kcpRetryPending
+	kcpRetryPending = 0
+	t.Cleanup(func() { kcpRetryPending = old })
+	key := newKCPKey(t)
+	f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s); s.KCPKey = key })
+	c := kcpClient(t, f, EncodingProto, "42", serveKCP(t, f))
+	connect(t, c)
+	reply, err := Call[*gamepb.LoginReply](context.Background(), c, "login", &gamepb.LoginRequest{Nickname: "retry"})
+	if err != nil || reply.GetPlayerId() != 42 {
+		t.Fatalf("login after retry: %v %v", reply, err)
+	}
+}
+
+// forceKCPRetry makes every listener ask for cookies until the test ends,
+// so clients must follow retries.
+func forceKCPRetry(t testing.TB) {
+	old := kcpRetryPending
+	kcpRetryPending = 0
+	t.Cleanup(func() { kcpRetryPending = old })
+}

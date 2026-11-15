@@ -18,6 +18,12 @@ const KEY_ID_SIZE := 8
 const WELCOME_SIZE := 5 + KEY_SIZE + 16
 const SEALED_HEADER := 5 + 8
 const SEAL_OVERHEAD := SEALED_HEADER + 16
+## Under a hello flood the server answers conv | 0xF9 | cookie; the hello is
+## repeated with the cookie at COOKIE_OFFSET.
+const RETRY := 0xF9
+const COOKIE_SIZE := 16
+const COOKIE_OFFSET := 6 + KEY_SIZE + KEY_ID_SIZE
+const RETRY_SIZE := 5 + COOKIE_SIZE
 const U32 := 0xFFFFFFFF
 
 static var _crypto := Crypto.new()
@@ -487,6 +493,15 @@ class ClientHandshake extends RefCounted:
 		_eph_private = ephemeral_private if not ephemeral_private.is_empty() else Crypto_.random_bytes(Crypto_.KEY_SIZE)
 		_eph_public = Crypto_.x25519_public(_eph_private)
 		hello = Crypto_.hello_datagram(conv, _eph_public, _server)
+
+	## If data is a retry for this conversation, puts its cookie into hello
+	## and returns true.
+	func take_retry(data: PackedByteArray) -> bool:
+		if data.size() != Crypto_.RETRY_SIZE or data[4] != Crypto_.RETRY or data.decode_u32(0) != conv:
+			return false
+		for i in Crypto_.COOKIE_SIZE:
+			hello[Crypto_.COOKIE_OFFSET + i] = data[5 + i]
+		return true
 
 	## [Cipher] if data is this conversation's genuine welcome, else [].
 	func finish(data: PackedByteArray) -> Array:

@@ -46,10 +46,14 @@ func TestGodotKCPClient(t *testing.T) {
 			}
 		}
 	})
-	for _, encrypted := range []bool{false, true} {
+	for _, mode := range []string{"plain", "encrypted", "retry"} {
 		for _, encoding := range []string{"proto", "json"} {
-			name := map[bool]string{false: "plain", true: "encrypted"}[encrypted] + "-" + encoding
+			encrypted := mode != "plain"
+			name := mode + "-" + encoding
 			t.Run(name, func(t *testing.T) {
+				if mode == "retry" {
+					forceKCPRetry(t) // Every hello needs a cookie.
+				}
 				var key *ecdh.PrivateKey
 				arg := "-"
 				if encrypted {

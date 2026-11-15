@@ -569,6 +569,10 @@ func newKCPListener(s *Server, pc net.PacketConn) (*kcpListener, error) {
 		}
 		l.keys[string(kcpKeyID(key.PublicKey()))] = key
 	}
+	l.cookieSecret = make([]byte, 32)
+	if _, err := rand.Read(l.cookieSecret); err != nil {
+		return nil, err
+	}
 	l.sched = newKCPScheduler()
 	return l, nil
 }
@@ -599,6 +603,7 @@ type kcpListener struct {
 	// accepts bounds concurrent X25519 handshakes, which run off the
 	// reader so a hello flood cannot stall established conversations.
 	accepts      chan struct{}
+	cookieSecret []byte // keys retry cookies; random per listener
 	sched        *kcpScheduler // drives every conversation's KCP clock
 	mu           sync.RWMutex
 	conns        map[kcpKey]*kcpConn
@@ -667,7 +672,12 @@ func (l *kcpListener) accept(key kcpKey, data []byte) {
 	}
 	l.mu.RLock()
 	full := l.fullLocked(key.addr.Addr().Unmap())
+	pressure := l.pendingTotal >= kcpRetryPending
 	l.mu.RUnlock()
+	if pressure && !l.validCookie(key, data) {
+		l.sendRetry(key, data) // No state and no X25519 until the address is proven.
+		return
+	}
 	if full {
 		return
 	}
@@ -947,6 +957,10 @@ func kcpHandshake(ctx context.Context, udp net.Conn, conv uint32, server *ecdh.P
 				return nil, err
 			}
 			data := buf[:n]
+			if n == kcpRetrySize && binary.LittleEndian.Uint32(data) == conv && data[4] == kcpRetry {
+				copy(h.hello[kcpCookieOffset:], data[5:])
+				break // Repeat the hello at once, with the cookie.
+			}
 			if n == 5 && binary.LittleEndian.Uint32(data) == conv && data[4] == kcpReset {
 				if resets++; resets >= kcpHandshakeResets {
 					return nil, ErrKCPEncryptionUnsupported

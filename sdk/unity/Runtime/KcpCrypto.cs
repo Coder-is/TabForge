@@ -13,9 +13,11 @@ namespace TabForge.Protocol
     /// </summary>
     internal static class KcpCrypto
     {
-        public const byte Hello = 0xFD, Welcome = 0xFC, Sealed = 0xFB, PlainRefuse = 0xFA, Reset = 0xFF, Keepalive = 0xFE;
+        public const byte Hello = 0xFD, Welcome = 0xFC, Sealed = 0xFB, PlainRefuse = 0xFA, Retry = 0xF9, Reset = 0xFF, Keepalive = 0xFE;
         public const byte Version = 1;
         public const int KeySize = 32, HelloSize = 64, KeyIdSize = 8, WelcomeSize = 5 + KeySize + 16, SealedHeader = 5 + 8, SealOverhead = SealedHeader + 16;
+        /// <summary>Under a hello flood the server answers conv | 0xF9 | cookie; the hello is repeated with the cookie at CookieOffset.</summary>
+        public const int CookieSize = 16, CookieOffset = 6 + KeySize + KeyIdSize, RetrySize = 5 + CookieSize;
 
 #pragma warning disable SYSLIB0023 // RNGCryptoServiceProvider: obsolete on .NET 6+, but a direct reference survives IL2CPP stripping, unlike RandomNumberGenerator.Create()
         private static readonly RandomNumberGenerator Random = new RNGCryptoServiceProvider();
@@ -484,6 +486,15 @@ namespace TabForge.Protocol
                 ephPrivate = ephemeralPrivate ?? RandomBytes(KeySize);
                 ephPublic = X25519Public(ephPrivate);
                 Hello = HelloDatagram(conv, ephPublic, server);
+            }
+
+            /// <summary>If data is a retry for this conversation, puts its cookie into Hello and returns true.</summary>
+            public bool TakeRetry(byte[] data, int length)
+            {
+                if (length != RetrySize || data[4] != Retry || Le32(data, 0) != Conv)
+                    return false;
+                Buffer.BlockCopy(data, 5, Hello, CookieOffset, CookieSize);
+                return true;
             }
 
             /// <summary>The ciphers if data is this conversation's genuine welcome, else null.</summary>
