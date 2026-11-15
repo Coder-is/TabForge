@@ -34,7 +34,7 @@
 | 3.2 | 每个 UDP 数据报用 `fmt.Sprintf` 拼查找键并持有全局互斥锁；X25519 握手（约 100 µs）在锁内执行；连接数上限全局共享，无单地址限制，握手超时 10 s | `kcptransport.go` `find`、`serveKCPConn` | 结构体键 + `ReadFromUDPAddrPort` + 读写锁；握手移出收包协程并限并发；加密会话设独立“待定”名额（总 4096、每 IP 64、5 秒过期）。Call kcp 分配 88→73 次；单客户端基准不体现锁竞争 | 完成 |
 | 3.3 | 每条消息单独 `Flush`，连续推送变成 N 个数据报、N 次加密与系统调用；发送路径复制 4 次、接收路径复制最多 5 次 | `session.go` `writeLoop`、`kcptransport.go`、`kcpcrypto.go`、`frame.go` | 写循环在还有排队帧时暂缓刷新、排空后统一发送；`kcp.SendWithHeader` 去掉分片拼接复制；明文不再预先复制、密文原地解密；单分片消息不再复制；编码缓冲预分配。加密输出缓冲未复用（需另加锁，收益小） | 完成 |
 | 3.4 | 每条入站消息加服务器全局读锁；按 ID 查消息为线性扫描并复制结构体 | `session.go` `process`、`protocol/channel.go` | 解析契约时为消息建名称/ID 索引（服务端、客户端、房间推送共用）；路由改为写时复制表，读取不加锁 | 完成 |
-| 3.5 | 每帧新建 `context.WithTimeout`；每次确认新建 `time.AfterFunc` | `session.go` | 复用计时器 | 待办 |
+| 3.5 | 每帧新建 `context.WithTimeout`；每次确认新建 `time.AfterFunc` | `session.go` | 读写循环各用一个长生命周期 context 加可重置计时器；确认计时器每会话复用。每次请求分配 ws 92→78、kcp 62→53 | 完成 |
 | 3.6 | 每个 KCP 会话一个 10 ms 定时器协程，10 万会话即每秒 1000 万次唤醒 | `kcptransport.go` | 统一调度器，空闲会话跳过 | 待办 |
 
 ## 第四阶段：导表性能

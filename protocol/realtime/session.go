@@ -126,6 +126,7 @@ type Session struct {
 	endErr    *Error
 	expiry    *time.Timer
 	ackTimer  *time.Timer
+	ackArmed  bool // ackTimer is pending
 	onEnd     []func(*Error)
 }
 
@@ -378,6 +379,8 @@ func (s *Session) writeLoop(c *connection) {
 	// KCP can hold frames while more are queued and send them together.
 	batch, _ := c.ws.(batchWriter)
 	held := false
+	wt := newOpTimer()
+	defer wt.close()
 	for {
 		select {
 		case <-c.wake:
@@ -420,13 +423,13 @@ func (s *Session) writeLoop(c *connection) {
 			s.mu.Unlock()
 			data, err := frame.Encode(s.encoding)
 			if err == nil {
-				ctx, cancel := context.WithTimeout(context.Background(), timeout)
+				ctx := wt.start(timeout)
 				if batch != nil && more {
 					err, held = batch.WriteBatched(ctx, typ, data), true
 				} else {
 					err, held = c.ws.Write(ctx, typ, data), false
 				}
-				cancel()
+				wt.stop()
 			}
 			if err != nil {
 				s.detach(c)
@@ -441,10 +444,11 @@ func (s *Session) readLoop(c *connection) {
 	typ := messageType(s.encoding)
 	limit := float64(s.srv.MaxFramesPerSecond)
 	c.tokens, c.last = 2*limit, time.Now()
+	rt := newOpTimer()
+	defer rt.close()
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), idle)
-		got, data, err := c.ws.Read(ctx)
-		cancel()
+		got, data, err := c.ws.Read(rt.start(idle))
+		rt.stop()
 		if err != nil {
 			s.detach(c)
 			return
@@ -554,7 +558,7 @@ func (s *Session) receive(c *connection, f *Frame) (stop bool, _ *Error) {
 }
 
 func (s *Session) armAckLocked() {
-	if s.ackTimer != nil {
+	if s.ackArmed {
 		return
 	}
 	delay := s.srv.AckDelay
@@ -564,9 +568,14 @@ func (s *Session) armAckLocked() {
 	if s.received == s.ackSent {
 		s.ackSent-- // Force one ACK for a duplicate even if nothing new arrived.
 	}
+	s.ackArmed = true
+	if s.ackTimer != nil {
+		s.ackTimer.Reset(delay) // One timer per session, not one per burst.
+		return
+	}
 	s.ackTimer = time.AfterFunc(delay, func() {
 		s.mu.Lock()
-		s.ackTimer = nil
+		s.ackArmed = false
 		if s.conn != nil && s.received > s.ackSent {
 			s.conn.signal()
 		}
@@ -741,4 +750,33 @@ func toError(err error) *Error {
 		return &Error{Code: CodeTimeout, Message: "request deadline exceeded"}
 	}
 	return &Error{Code: CodeInternal, Message: "request failed"}
+}
+
+// opTimer bounds one blocking call at a time with a context that lives as
+// long as the loop, instead of a new context and timer for every frame.
+// An overrun cancels the context for good, which ends the connection the
+// way an expired per-call context did.
+type opTimer struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	timer  *time.Timer
+}
+
+func newOpTimer() *opTimer {
+	ctx, cancel := context.WithCancel(context.Background())
+	t := time.AfterFunc(time.Hour, cancel)
+	t.Stop()
+	return &opTimer{ctx: ctx, cancel: cancel, timer: t}
+}
+
+func (o *opTimer) start(d time.Duration) context.Context {
+	o.timer.Reset(d)
+	return o.ctx
+}
+
+func (o *opTimer) stop() { o.timer.Stop() }
+
+func (o *opTimer) close() {
+	o.timer.Stop()
+	o.cancel()
 }
