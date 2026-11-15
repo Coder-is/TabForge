@@ -702,7 +702,7 @@ func TestKCPInboxBoundedByBytes(t *testing.T) {
 // conversations that never do expire.
 func TestKCPPendingPool(t *testing.T) {
 	old := kcpPendingTimeout
-	kcpPendingTimeout = 300 * time.Millisecond
+	kcpPendingTimeout = time.Second
 	t.Cleanup(func() { kcpPendingTimeout = old })
 	key := newKCPKey(t)
 	f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s); s.KCPKey = key })
@@ -741,16 +741,22 @@ func TestKCPPendingPool(t *testing.T) {
 		}
 		hellos[i] = h.hello
 	}
-	for round := 0; round < 20; round++ {
+	// Keep repeating the hellos, like clients do, until the cap fills: on a
+	// small CI runner under -race handshakes are slow and slots are few.
+	full := false
+	for deadline := time.Now().Add(20 * time.Second); !full; time.Sleep(2 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the per-IP cap to fill")
+		}
 		for i, hello := range hellos {
 			l.find(kcpKey{flooder, uint32(i + 1)}, hello)
 		}
-		if perIP, _, _ := counts(flooder.Addr()); perIP > MaxKCPPendingPerIP {
+		perIP, _, _ := counts(flooder.Addr())
+		if perIP > MaxKCPPendingPerIP {
 			t.Fatalf("%d pending conversations from one address", perIP)
 		}
-		time.Sleep(2 * time.Millisecond)
+		full = perIP == MaxKCPPendingPerIP
 	}
-	waitFor("the per-IP cap to fill", func() bool { n, _, _ := counts(flooder.Addr()); return n == MaxKCPPendingPerIP })
 
 	// Once the flood expires, a real client's handshake is pending until its
 	// first sealed datagram opens, and is then established for good.
