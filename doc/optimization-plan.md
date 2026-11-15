@@ -30,7 +30,7 @@
 
 | 步骤 | 问题 | 位置 | 处理 | 状态 |
 | --- | --- | --- | --- | --- |
-| 3.1 | 没有任何基准测试 | `protocol/realtime` | 增加帧编解码、KCP 加解密、KCP 环回收发基准 | 待办 |
+| 3.1 | 没有任何基准测试 | `protocol/realtime` | 增加帧编解码、KCP 加解密与握手、KCP 内存链路、端到端请求基准（结果见文末） | 完成 |
 | 3.2 | 每个 UDP 数据报用 `fmt.Sprintf` 拼查找键并持有全局互斥锁；X25519 握手（约 100 µs）在锁内执行；连接数上限全局共享，无单地址限制，握手超时 10 s | `kcptransport.go` `find`、`serveKCPConn` | 结构体键 + 读写锁；握手移出锁；限制单个 IP 的未完成握手数；缩短握手期限 | 待办 |
 | 3.3 | 每条消息单独 `Flush`，连续推送变成 N 个数据报、N 次加密与系统调用；发送路径复制 4 次、接收路径复制最多 5 次 | `session.go` `writeLoop`、`kcptransport.go`、`kcpcrypto.go`、`frame.go` | 写循环排空队列后统一刷新；预分配编码缓冲；加密复用缓冲区 | 待办 |
 | 3.4 | 每条入站消息加服务器全局读锁；按 ID 查消息为线性扫描并复制结构体 | `session.go` `process`、`protocol/channel.go` | 预建索引；路由在开始服务后冻结 | 待办 |
@@ -58,3 +58,19 @@
 ## 已确认无需处理
 
 长连接加密每方向独立密钥、nonce 不复用、客户端固定服务器公钥、不可降级为明文、会话令牌 256 位且常量时间比较；HTTP 鉴权默认拒绝、请求体与请求头有限额、CORS 为显式白名单；WebSocket 来源检查与解压后限额；Generated 包导入与 `tabforge.json` 路径防穿越和符号链接；编辑器插件不经过 shell 启动且遵守工作区信任；后端数据加载校验 SHA-256；CI 未使用 `pull_request_target`。
+
+## 实时长连接基准
+
+命令：`go test -run '^$' -bench . -benchmem -benchtime=2s ./protocol/realtime/`。环境：Windows，16 线程，Go 1.26.11。`Call` 为同一客户端多协程并发请求、回环地址。
+
+| 基准 | 优化前 | 优化后 |
+| --- | --- | --- |
+| FrameEncode proto | 88 ns，104 B，3 次分配 | |
+| FrameEncode json | 648 ns，272 B，4 次分配 | |
+| FrameDecode proto | 101 ns，160 B，2 次分配 | |
+| FrameDecode json | 8279 ns，4515 B，146 次分配 | |
+| KCPSealOpen 512 B | 970 ns，1120 B，4 次分配 | |
+| KCPAccept（一次加密握手） | 91 µs，2304 B，39 次分配 | |
+| KCPLink 256 B 消息 | 17.9 µs，2268 B，13 次分配 | |
+| Call ws | 21.8 µs，6853 B，97 次分配 | |
+| Call kcp | 30.5 µs，4233 B，88 次分配 | |
