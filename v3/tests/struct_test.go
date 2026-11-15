@@ -23,6 +23,7 @@ import (
 	"github.com/Coder-is/TabForge/v3/gen/pbdata"
 	"github.com/Coder-is/TabForge/v3/gen/pbsrc"
 	"github.com/Coder-is/TabForge/v3/helper"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // structTables is the example of doc/nested-struct-design.md, with a struct
@@ -254,16 +255,103 @@ func TestStructFieldsInSources(t *testing.T) {
 	}
 }
 
-// Formats that cannot write structs yet fail instead of dropping them.
-func TestStructFieldsRejectedByUnsupportedFormats(t *testing.T) {
+// Tables mapped onto an existing Proto do not take struct fields yet.
+func TestStructFieldsRejectedWithProtoMapping(t *testing.T) {
 	g := compiledStructExample(t).G
-	for name, generate := range map[string]gen.GenSingleFile{"binary": bindata.Generate, "protobuf": pbdata.Generate} {
+	g.ProtoDescriptorFile, g.ProtoMappingFile = "schema.pb", "mapping.json"
+	for name, generate := range map[string]gen.GenSingleFile{"protobuf": pbdata.Generate, "protojson": pbdata.GenerateJSON} {
 		if _, err := generate(g); err == nil || !strings.Contains(err.Error(), "StructFieldNotSupported") {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	g.GenBinary = true
-	if _, err := cssrc.Generate(g); err == nil || !strings.Contains(err.Error(), "StructFieldNotSupported") {
-		t.Fatalf("C# with binary: %v", err)
+}
+
+// The Protobuf export decodes with the generated .proto, structs included.
+func TestStructFieldsProtobufRoundTrip(t *testing.T) {
+	g := compiledStructExample(t).G
+	src, err := pbsrc.Generate(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := pbdata.Generate(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "table.proto"), src, 0644)
+	schema, err := protocol.CompileSchema(context.Background(), []string{dir}, []string{"table.proto"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := schema.DecodeBinary("main.Table", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want map[string]interface{}
+	json.Unmarshal(out, &got)
+	json.Unmarshal([]byte(`{"Item":[
+		{"ID":1,"Reward":{"ItemID":1001,"Count":5,"Tags":[1,2],"Extra":{"Rarity":"Rare"}},"Costs":[{"ItemID":2001,"Count":1},{"ItemID":2002,"Count":3}]},
+		{"ID":2,"Costs":[{"ItemID":2003}]}]}`), &want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decoded %s", out)
+	}
+}
+
+// The generated C# reads the binary export, nested structs included.
+// Runs where DOTNET_BIN is set (CI's C# job).
+func TestStructFieldsCSharpBinary(t *testing.T) {
+	dotnet := os.Getenv("DOTNET_BIN")
+	if dotnet == "" {
+		t.Skip("DOTNET_BIN is not set")
+	}
+	emu := compiledStructExample(t)
+	emu.G.GenBinary = true
+	src, err := cssrc.Generate(emu.G)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := bindata.Generate(emu.G)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := os.ReadFile(filepath.Join("..", "api", "csharp", "TableReader.cs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	files := map[string][]byte{
+		"Table.cs":       src,
+		"TableReader.cs": reader,
+		"table.bin":      data,
+		"check.csproj":   []byte(`<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>disable</Nullable></PropertyGroup></Project>`),
+		"Program.cs": []byte(`using System; using System.IO;
+class Program {
+	static void Main() {
+		using var stream = new FileStream("table.bin", FileMode.Open);
+		var tab = new main.Table();
+		tab.Deserialize(new tabtoy.TableReader(stream));
+		var r = tab.Item[0].Reward;
+		Console.WriteLine($"{r.ItemID} {r.Count} {string.Join(",", r.Tags)} {r.Extra.Rarity} {tab.Item[0].Costs.Count} {tab.Item[0].Costs[1].Count} {tab.Item[1].Costs.Count} {tab.Item[1].Costs[0].ItemID} {tab.Item[1].Reward.ItemID}");
+	}
+}
+`),
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command(dotnet, "run", "-nologo", "-v", "q")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasSuffix(got, "1001 5 1,2 Rare 2 3 1 2003 0") {
+		t.Fatalf("C# read %q", got)
 	}
 }

@@ -1,7 +1,6 @@
 package bindata
 
 import (
-	"github.com/Coder-is/TabForge/v3/gen"
 	"github.com/Coder-is/TabForge/v3/helper"
 	"github.com/Coder-is/TabForge/v3/model"
 	"path/filepath"
@@ -52,9 +51,6 @@ func exportTable(globals *model.Globals, writer *BinaryWriter, tab *model.DataTa
 }
 
 func Generate(globals *model.Globals) (data []byte, err error) {
-	if err := gen.RejectStructFields(globals, "binary"); err != nil {
-		return nil, err
-	}
 
 	totalWriter := NewBinaryWriter()
 
@@ -76,9 +72,6 @@ func Generate(globals *model.Globals) (data []byte, err error) {
 }
 
 func Output(globals *model.Globals, param string) (err error) {
-	if err := gen.RejectStructFields(globals, "binary_dir"); err != nil {
-		return err
-	}
 
 	for _, tab := range globals.Datas.AllTables() {
 

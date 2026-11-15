@@ -82,6 +82,11 @@ func tableValue2PbValue(globals *model.Globals, cellValue string, valueType *mod
 }
 
 func tableType2PbType(globals *model.Globals, def *model.TypeDefine, pbDesc *descriptorpb.FieldDescriptorProto) {
+	if globals.Types.IsStructField(def) {
+		pbDesc.Type = descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum()
+		pbDesc.TypeName = proto.String(globals.PackageName + "." + def.FieldType)
+		return
+	}
 	pbType := model.LanguagePrimitive(def.FieldType, "pb")
 
 	switch pbType {

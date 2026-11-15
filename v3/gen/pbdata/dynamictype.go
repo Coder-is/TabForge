@@ -16,11 +16,10 @@ func buildDynamicType(globals *model.Globals) (protoreflect.FileDescriptor, erro
 	file.Name = proto.String(globals.CombineStructName)
 	file.Package = proto.String(globals.PackageName)
 
-	for _, tab := range globals.Datas.AllTables() {
-
+	message := func(typeName string) *descriptorpb.DescriptorProto {
 		var desc descriptorpb.DescriptorProto
-		desc.Name = proto.String(tab.OriginalHeaderType)
-		for index, field := range globals.Types.AllFieldByName(tab.OriginalHeaderType) {
+		desc.Name = proto.String(typeName)
+		for index, field := range globals.Types.AllFieldByName(typeName) {
 			var fd descriptorpb.FieldDescriptorProto
 			fd.Name = proto.String(field.FieldName)
 			fd.Number = proto.Int32(int32(index + 1))
@@ -35,7 +34,22 @@ func buildDynamicType(globals *model.Globals) (protoreflect.FileDescriptor, erro
 			desc.Field = append(desc.Field, &fd)
 		}
 
-		file.MessageType = append(file.MessageType, &desc)
+		return &desc
+	}
+
+	// Table messages first: the combine message has one field per table.
+	tables := map[string]bool{}
+	var structTypes []string
+	for _, tab := range globals.Datas.AllTables() {
+		file.MessageType = append(file.MessageType, message(tab.OriginalHeaderType))
+		tables[tab.OriginalHeaderType] = true
+		structTypes = collectStructTypes(globals, tab.OriginalHeaderType, structTypes)
+	}
+	var structMessages []*descriptorpb.DescriptorProto
+	for _, name := range structTypes {
+		if !tables[name] {
+			structMessages = append(structMessages, message(name))
+		}
 	}
 
 	for _, enumName := range globals.Types.EnumNames() {
@@ -67,6 +81,25 @@ func buildDynamicType(globals *model.Globals) (protoreflect.FileDescriptor, erro
 	}
 
 	file.MessageType = append(file.MessageType, &combine)
+	file.MessageType = append(file.MessageType, structMessages...)
 
 	return protodesc.NewFile(&file, nil)
+}
+
+// collectStructTypes appends the struct types typeName's fields use, at
+// any depth, that are not in list yet.
+func collectStructTypes(globals *model.Globals, typeName string, list []string) []string {
+	for _, field := range globals.Types.AllFieldByName(typeName) {
+		if !globals.Types.IsStructField(field) {
+			continue
+		}
+		known := false
+		for _, name := range list {
+			known = known || name == field.FieldType
+		}
+		if !known {
+			list = collectStructTypes(globals, field.FieldType, append(list, field.FieldType))
+		}
+	}
+	return list
 }

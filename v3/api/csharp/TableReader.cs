@@ -232,6 +232,13 @@ namespace tabtoy
                         this.ReadDouble(ref dummy);
                     }
                     break;
+                case 11: // struct
+                    {
+                        UInt32 bound = 0;
+                        ReadUInt32(ref bound);
+                        ConsumeData(bound);
+                    }
+                    break;
                 case 111: // struct
                     {
                         UInt32 len = 0;

@@ -31,6 +31,8 @@ func MakeTag(globals *model.Globals, tf *model.TypeDefine, fieldIndex int) uint3
 		t = 10
 	case convertedType == "float64":
 		t = 12
+	case globals.Types.IsStructField(tf):
+		t = 11 // 结构体, 数组为111
 		// 注意, t = 11是结构体
 	default:
 		panic("unknown type:" + tf.FieldType)

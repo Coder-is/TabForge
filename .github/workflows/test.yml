@@ -152,4 +152,4 @@ jobs:
           DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
         # These packages launch dotnet. Serialize packages so first-use NuGet
         # migrations cannot race while creating the shared Unix mutex directory.
-        run: python scripts/run_ci_check.py go test -race -count=1 -p=1 ./internal/platformtest ./clientbundle ./protocol/realtime
+        run: python scripts/run_ci_check.py go test -race -count=1 -p=1 ./internal/platformtest ./clientbundle ./protocol/realtime ./v3/tests

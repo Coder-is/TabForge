@@ -75,6 +75,8 @@ func init() {
 		convertedType := model.LanguagePrimitive(tf.FieldType, "cs")
 
 		switch {
+		case globals.Types.IsStructField(tf):
+			ret = "Struct<" + tf.FieldType + ">" // ReadStruct<T>(ref T) or (ref List<T>)
 		case convertedType == "float":
 			ret = "Float"
 		case convertedType == "double":

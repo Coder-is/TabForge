@@ -30,23 +30,13 @@ func exportTable(globals *model.Globals, pbFile protoreflect.FileDescriptor, tab
 				continue
 			}
 
-			fd := md.Fields().ByName(protoreflect.Name(field.FieldName))
-
 			// 在单元格找到值
 			valueCell := tab.GetCell(row, col)
 			if valueCell == nil {
 				continue
 			}
 
-			if field.IsArray() {
-				list := rowMsg.NewField(fd).List()
-				tableValue2PbValueList(globals, valueCell, field, list)
-				rowMsg.Set(fd, protoreflect.ValueOfList(list))
-			} else {
-				pbValue := tableValue2PbValue(globals, valueCell.Value, field)
-				rowMsg.Set(fd, pbValue)
-			}
-
+			setField(globals, pbFile, rowMsg, field, valueCell)
 		}
 
 		list.Append(protoreflect.ValueOf(rowMsg))
@@ -56,10 +46,10 @@ func exportTable(globals *model.Globals, pbFile protoreflect.FileDescriptor, tab
 }
 
 func Generate(globals *model.Globals) (data []byte, err error) {
-	if err := gen.RejectStructFields(globals, "protobuf"); err != nil {
-		return nil, err
-	}
 	if globals.ProtoDescriptorFile != "" || globals.ProtoMappingFile != "" {
+		if err := gen.RejectStructFields(globals, "protobuf (Proto mapping)"); err != nil {
+			return nil, err
+		}
 		schema, err := loadExternalSchema(globals)
 		if err != nil {
 			return nil, err
@@ -92,10 +82,10 @@ func Generate(globals *model.Globals) (data []byte, err error) {
 }
 
 func Output(globals *model.Globals, param string) (err error) {
-	if err := gen.RejectStructFields(globals, "protobuf_dir"); err != nil {
-		return err
-	}
 	if globals.ProtoDescriptorFile != "" || globals.ProtoMappingFile != "" {
+		if err := gen.RejectStructFields(globals, "protobuf_dir (Proto mapping)"); err != nil {
+			return err
+		}
 		return outputExternal(globals, param)
 	}
 
@@ -128,4 +118,44 @@ func Output(globals *model.Globals, param string) (err error) {
 	}
 
 	return nil
+}
+
+// setField stores one cell in msg: scalars and arrays as before, nested
+// structs as messages (left unset when all their members are empty, like
+// an absent message), struct arrays as repeated messages.
+func setField(globals *model.Globals, pbFile protoreflect.FileDescriptor, msg *dynamicpb.Message, field *model.TypeDefine, cell *model.Cell) {
+	fd := msg.Descriptor().Fields().ByName(protoreflect.Name(field.FieldName))
+	switch {
+	case globals.Types.IsStructField(field):
+		md := pbFile.Messages().ByName(protoreflect.Name(field.FieldType))
+		if field.IsArray() {
+			if len(cell.Structs) == 0 {
+				return
+			}
+			list := msg.NewField(fd).List()
+			for _, v := range cell.Structs {
+				list.Append(protoreflect.ValueOfMessage(structMessage(globals, pbFile, md, v)))
+			}
+			msg.Set(fd, protoreflect.ValueOfList(list))
+		} else if cell.Struct != nil && !cell.Struct.Empty() {
+			msg.Set(fd, protoreflect.ValueOfMessage(structMessage(globals, pbFile, md, cell.Struct)))
+		}
+	case field.IsArray():
+		list := msg.NewField(fd).List()
+		tableValue2PbValueList(globals, cell, field, list)
+		msg.Set(fd, protoreflect.ValueOfList(list))
+	default:
+		msg.Set(fd, tableValue2PbValue(globals, cell.Value, field))
+	}
+}
+
+func structMessage(globals *model.Globals, pbFile protoreflect.FileDescriptor, md protoreflect.MessageDescriptor, v *model.StructValue) *dynamicpb.Message {
+	m := dynamicpb.NewMessage(md)
+	for i, member := range globals.Types.AllFieldByName(v.Type) {
+		if globals.CanDoAction(model.ActionNoGenFieldPbBinary, member) || i >= len(v.Cells) {
+			continue
+		}
+		setField(globals, pbFile, m, member, v.Cells[i])
+	}
+	return m
 }
