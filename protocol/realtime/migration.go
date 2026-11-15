@@ -255,9 +255,13 @@ func (s *Server) storeSession(ctx context.Context, session *Session) bool {
 		}
 		snap.App = app
 	}
+	name := storeKey(sessionKeyPrefix, session.id, session.resumeToken)
 	data, err := json.Marshal(snap)
 	if err == nil {
-		err = s.Store.Put(ctx, storeKey(sessionKeyPrefix, session.id, session.resumeToken), data, ttl)
+		data, err = s.sealSnapshot(name, data)
+	}
+	if err == nil {
+		err = s.Store.Put(ctx, name, data, ttl)
 	}
 	if err != nil {
 		s.observe(Event{Type: "handoff_failed", Channel: session.channel.ID, SessionID: session.id, UserID: session.identity.UserID, Reason: err.Error()})
@@ -276,7 +280,8 @@ func (s *Server) takeFromStore(ctx context.Context, ch *channelState, enc Encodi
 	expired := &Error{Code: CodeSessionExpired, Message: "session cannot be resumed; start a new session", Retryable: true}
 	ctx, cancel := context.WithTimeout(ctx, s.handshakeTimeout())
 	defer cancel()
-	data, err := s.Store.Take(ctx, storeKey(sessionKeyPrefix, sessionID, resumeToken))
+	name := storeKey(sessionKeyPrefix, sessionID, resumeToken)
+	data, err := s.Store.Take(ctx, name)
 	if err != nil {
 		s.observe(Event{Type: "restore_failed", Channel: ch.ID, SessionID: sessionID, Reason: err.Error()})
 		return nil, expired
@@ -292,7 +297,11 @@ func (s *Server) takeFromStore(ctx context.Context, ch *channelState, enc Encodi
 		}
 		return nil, nil
 	}
-	snap, err := decodeSnapshot(data)
+	data, err = s.openSnapshot(name, data)
+	var snap *snapshot
+	if err == nil {
+		snap, err = decodeSnapshot(data)
+	}
 	if err == nil && (snap.Channel != ch.ID || snap.Encoding != enc.Subprotocol() || snap.SchemaHash != s.schemaHash) {
 		err = errors.New("snapshot is for another channel, encoding or schema")
 	}

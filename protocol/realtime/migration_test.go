@@ -1,7 +1,9 @@
 package realtime
 
 import (
+	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"math/rand"
 	"sort"
@@ -566,5 +568,83 @@ func TestHandoffTimeoutSkipsGrace(t *testing.T) {
 	}
 	if c.SessionID() == session {
 		t.Fatal("session kept")
+	}
+}
+
+// With StoreKey, snapshots are sealed: the store sees no session content,
+// the next server opens them with the same key or, while rotating, with a
+// previous key.
+func TestSealedHandOffAcrossKeyRotation(t *testing.T) {
+	store := NewMemoryStore()
+	contract := testContract(t, nil)
+	oldKey, newKey := make([]byte, StoreKeySize), make([]byte, StoreKeySize)
+	cryptorand.Read(oldKey)
+	cryptorand.Read(newKey)
+	a := newFixture(t, contract, func(s *Server) { migratable(t, store, nil)(s); s.StoreKey = oldKey })
+	b := newFixture(t, contract, func(s *Server) {
+		migratable(t, store, nil)(s)
+		s.StoreKey, s.StorePreviousKeys = newKey, [][]byte{oldKey}
+	})
+	c := a.client(EncodingJSON, "7", false)
+	states := &stateLog{}
+	c.OnState = states.record
+	connect(t, c)
+	session := c.SessionID()
+	a.proxy.refuse.Store(true)
+	shutdown(t, a.server)
+	store.mu.Lock()
+	for name, e := range store.entries {
+		if strings.HasPrefix(name, sessionKeyPrefix) && (!bytes.HasPrefix(e.value, []byte(storeSealMagic)) || bytes.Contains(e.value, []byte("game"))) {
+			t.Errorf("snapshot not sealed: %q", e.value)
+		}
+	}
+	store.mu.Unlock()
+	a.proxy.retarget(addr(b))
+	a.proxy.refuse.Store(false)
+	eventually(t, "resume on b", func() bool { return states.last() == string(StateResumed) })
+	if c.SessionID() != session {
+		t.Fatal("session replaced")
+	}
+}
+
+func TestSnapshotSealing(t *testing.T) {
+	key, other := make([]byte, StoreKeySize), make([]byte, StoreKeySize)
+	cryptorand.Read(key)
+	cryptorand.Read(other)
+	plain := []byte(`{"v":1,"userId":"victim"}`)
+	sealer := &Server{StoreKey: key}
+	sealed, err := sealer.sealSnapshot("name", plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := sealer.openSnapshot("name", sealed); err != nil || !bytes.Equal(got, plain) {
+		t.Fatalf("round trip: %q %v", got, err)
+	}
+	tampered := append([]byte(nil), sealed...)
+	tampered[len(tampered)-1] ^= 1
+	for what, c := range map[string]struct {
+		server *Server
+		name   string
+		data   []byte
+	}{
+		"another session's name": {sealer, "other", sealed},
+		"tampered":               {sealer, "name", tampered},
+		"forged plain snapshot":  {sealer, "name", plain},
+		"another key":            {&Server{StoreKey: other}, "name", sealed},
+		"sealed, no key":         {&Server{}, "name", sealed},
+		"bad key length":         {&Server{StoreKey: key[:16]}, "name", sealed},
+	} {
+		if _, err := c.server.openSnapshot(c.name, c.data); err == nil {
+			t.Errorf("%s: opened", what)
+		}
+	}
+	if _, err := (&Server{StoreKey: key[:16]}).sealSnapshot("name", plain); err == nil {
+		t.Error("sealed with a short key")
+	}
+	if got, err := (&Server{StoreKey: other, StorePreviousKeys: [][]byte{key}}).openSnapshot("name", sealed); err != nil || !bytes.Equal(got, plain) {
+		t.Fatalf("previous key: %v", err)
+	}
+	if got, err := (&Server{}).openSnapshot("name", plain); err != nil || !bytes.Equal(got, plain) {
+		t.Fatalf("no key keeps plain snapshots: %v", err)
 	}
 }

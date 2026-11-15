@@ -91,6 +91,14 @@ type Server struct {
 	// load balancers without session affinity); see SessionStore. nil keeps
 	// sessions in this process only.
 	Store SessionStore
+	// StoreKey (StoreKeySize random bytes, the same on every server) seals
+	// session snapshots in Store, so that write access to the store cannot
+	// forge a session for any user and read access reveals nothing. Without
+	// it snapshots are plain JSON and the store must be trusted like the
+	// servers. With it, unsealed snapshots are refused. StorePreviousKeys
+	// still open snapshots while the key is rotated.
+	StoreKey          []byte
+	StorePreviousKeys [][]byte
 	// HandoffGrace covers rolling deploys where clients reach this server
 	// before the old one starts handing off (load balancers often switch
 	// traffic and signal the old server at the same time). For this long

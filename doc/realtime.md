@@ -153,6 +153,7 @@ server.Shutdown(ctx) // 通知所有客户端 server_shutdown 并等待处理函
 | `OnSessionStart` / `OnSessionEnd` / `Observe` | — | 会话生命周期和每条消息的结果（不含令牌和载荷），用于日志与指标 |
 | `Store` / `ExportSession` / `ImportSession` | 无 | 停机时把会话交给下一个实例，见下文“跨实例会话交接” |
 | `HandoffGrace` | 10 s（仅在设置 `Store` 时生效） | 新实例开始服务后的这段时间内，未知会话的恢复回复可重试的 `server_shutdown` 而非 `session_expired`，覆盖旧实例尚未开始交接的空窗 |
+| `StoreKey` / `StorePreviousKeys` | 无 | 32 字节随机密钥，所有实例相同。设置后存储中的会话快照经 XChaCha20-Poly1305 加密认证，并绑定存储键；未加密的快照被拒绝。换钥时把旧密钥放进 `StorePreviousKeys` |
 
 **消息压缩。** `server.Compression = realtime.CompressionContextTakeover`（或 `CompressionNoContextTakeover`）开启 permessage-deflate（RFC 7692），只对超过 `CompressionThreshold` 的消息生效。压缩由握手协商：客户端不支持时自动不压缩，开启后不会影响任何已有客户端。
 
@@ -188,6 +189,7 @@ func (r redisStore) Take(ctx context.Context, key string) ([]byte, error) {
 }
 ```
 
+- 不设置 `StoreKey` 时快照是明文 JSON，能写存储的人可以自选会话 id 与令牌、写入任意用户的快照并以该用户身份恢复，能读存储的人能看到载荷与 `ExportSession` 的状态；存储必须与服务器同等可信（内网、独立账号）。设置 `StoreKey` 后写存储无法伪造或挪用会话，读存储看不到内容。首次启用密钥的那次发布中，旧实例写出的明文快照会被新实例拒绝，这些客户端会新建会话。
 - `Take` 必须是原子的“取出并删除”，保证一个会话只会在一个实例上继续，请求不会被执行两次。存储的键由会话 id 和恢复令牌的 SHA-256 生成：没有令牌既读不到快照，也无法删除它。
 - 如果客户端在旧实例排空期间自己断线并先连上新实例，新实例会看到“交接中”标记，回复可重试的 `server_shutdown`，客户端退避后再恢复；标记带有固定截止时间（最长 30 秒，不超过 `Shutdown` 的 ctx），旧实例中途崩溃时也不会让客户端无限重试。
 - 负载均衡常常在通知旧实例停机的同时就把流量切到新实例（例如 Kubernetes 摘除端点与发送 SIGTERM 并发），这时断线的客户端可能先连上新实例，而旧实例还没开始交接。为此，设置了 `Store` 的实例在首次处理握手后的 `HandoffGrace`（默认 10 秒，负值关闭）内，遇到本机和存储中都没有的会话时回复可重试的 `server_shutdown`，客户端保留会话、退避重试，等旧实例写入快照后在新实例上恢复。旧实例交接失败（例如处理函数超过 `Shutdown` 的 ctx）时会在存储中记下会话已结束，新实例立即回复 `session_expired`，不会让客户端白等。代价是进程崩溃重启或存储整体不可用时，客户端要多等最长 `HandoffGrace` 才会得到 `session_expired` 并新建会话。
