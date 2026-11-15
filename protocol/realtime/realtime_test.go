@@ -638,3 +638,33 @@ func TestKickSurvivesLostCloseFrame(t *testing.T) {
 		t.Fatalf("kicked player started %d new sessions", n)
 	}
 }
+
+// A ping flood must not grow the send queue: at most one pong waits per connection.
+func TestPingFloodQueuesOnePong(t *testing.T) {
+	f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s) })
+	raw := dialRaw(t, f, EncodingProto)
+	w := raw.hello(f)
+	s, ok := f.server.Session(w.SessionID)
+	if !ok {
+		t.Fatal("session not found")
+	}
+	s.mu.Lock()
+	c := s.conn
+	s.mu.Unlock()
+	for i := 0; i < 10000; i++ {
+		if _, e := s.receive(c, &Frame{Kind: KindPing}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pongs := 0
+	for _, q := range c.queue {
+		if q.kind == KindPong {
+			pongs++
+		}
+	}
+	if pongs > 1 {
+		t.Fatalf("%d pongs queued", pongs)
+	}
+}

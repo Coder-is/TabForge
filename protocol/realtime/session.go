@@ -40,6 +40,7 @@ type connection struct {
 	ws       wireConn
 	queue    []*outFrame // guarded by Session.mu
 	volatile int         // queued volatile frames, guarded by Session.mu
+	pong     bool        // a pong is queued; pings never queue more than one, guarded by Session.mu
 	wake     chan struct{}
 	done     chan struct{}
 	once     sync.Once
@@ -393,6 +394,8 @@ func (s *Session) writeLoop(c *connection) {
 				c.queue = c.queue[1:]
 				if f.seq == 0 && (f.kind == KindPush || f.kind == KindNotify) {
 					c.volatile--
+				} else if f.kind == KindPong {
+					c.pong = false
 				}
 				if f.seq != 0 && f.seq <= s.peerAck {
 					s.mu.Unlock()
@@ -486,8 +489,12 @@ func (s *Session) receive(c *connection, f *Frame) (stop bool, _ *Error) {
 	}
 	switch f.Kind {
 	case KindPing:
-		c.queue = append(c.queue, &outFrame{kind: KindPong})
-		c.signal()
+		// A flood of pings must not grow the queue: one pending pong answers them all.
+		if !c.pong {
+			c.pong = true
+			c.queue = append(c.queue, &outFrame{kind: KindPong})
+			c.signal()
+		}
 	case KindPong, KindAck:
 	case KindRequest, KindNotify:
 		m, ok := s.channel.MessageByID(f.Message)
