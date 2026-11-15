@@ -115,7 +115,7 @@ go run . -project=examples/complete
 
 | 端 | 包入口 | 数据返回 | 最低目标 |
 | --- | --- | --- | --- |
-| Go | `github.com/Coder-is/TabForge/databundle` | 动态消息、生成消息；ProtoJSON / Protobuf | Go 1.26.6，项目工具链 1.26.8 |
+| Go | `github.com/Coder-is/TabForge/databundle` | 动态消息、生成消息；ProtoJSON / Protobuf | Go 1.26.6，项目工具链 1.26.11 |
 | Node.js / TS | `@tabforge/protocol-runtime/node` | ProtoJSON 对象，TS 可绑定 MessageTypes | Node 24+；仅 ESM |
 | Python | `tabforge-data` / `tabforge_data` | dict / list / 基础类型 | Python 3.9+；无运行时依赖 |
 | Java | `io.tabforge:tabforge-data:0.3.0` | Gson JsonElement / JsonObject | Java 17+；Gson 2.13.2 |

@@ -118,7 +118,7 @@ if(!store.snapshot)throw Error('lost snapshot');
             assert archive.testzip() is None
             archive.extractall(work)
         runtime = work / "tabforge-go"
-        (work / "go.mod").write_text('module example.com/backendconsumer\n\ngo 1.26.6\n\ntoolchain go1.26.8\n\nrequire github.com/Coder-is/TabForge v0.0.0\n\nreplace github.com/Coder-is/TabForge => ' + json.dumps(str(runtime).replace("\\", "/")) + '\n', encoding="utf-8")
+        (work / "go.mod").write_text('module example.com/backendconsumer\n\ngo 1.26.6\n\ntoolchain go1.26.11\n\nrequire github.com/Coder-is/TabForge v0.0.0\n\nreplace github.com/Coder-is/TabForge => ' + json.dumps(str(runtime).replace("\\", "/")) + '\n', encoding="utf-8")
         bootstrap = work / "bootstrap"
         bootstrap.mkdir()
         # Set this business module's go_package before generating its Go types.

@@ -77,7 +77,7 @@ go run ./examples/protocol
 
 ## 构建
 
-项目最低使用 Go 1.26.6，toolchain 和 CI 固定 Go 1.26.8，在 Linux、macOS 和 Windows 上验证 Go/TypeScript；另有 Godot 4.5.1 Linux 测试任务，以及 Linux/macOS C#、C++ 协议核心任务。建议使用已修复安全问题的 Go 补丁版本。
+项目最低使用 Go 1.26.6，toolchain 和 CI 固定 Go 1.26.11，在 Linux、macOS 和 Windows 上验证 Go/TypeScript；另有 Godot 4.5.1 Linux 测试任务，以及 Linux/macOS C#、C++ 协议核心任务。建议使用已修复安全问题的 Go 补丁版本。
 
 ```bash
 git clone https://github.com/Coder-is/TabForge.git
