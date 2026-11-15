@@ -35,7 +35,7 @@
 | 3.3 | 每条消息单独 `Flush`，连续推送变成 N 个数据报、N 次加密与系统调用；发送路径复制 4 次、接收路径复制最多 5 次 | `session.go` `writeLoop`、`kcptransport.go`、`kcpcrypto.go`、`frame.go` | 写循环在还有排队帧时暂缓刷新、排空后统一发送；`kcp.SendWithHeader` 去掉分片拼接复制；明文不再预先复制、密文原地解密；单分片消息不再复制；编码缓冲预分配。加密输出缓冲未复用（需另加锁，收益小） | 完成 |
 | 3.4 | 每条入站消息加服务器全局读锁；按 ID 查消息为线性扫描并复制结构体 | `session.go` `process`、`protocol/channel.go` | 解析契约时为消息建名称/ID 索引（服务端、客户端、房间推送共用）；路由改为写时复制表，读取不加锁 | 完成 |
 | 3.5 | 每帧新建 `context.WithTimeout`；每次确认新建 `time.AfterFunc` | `session.go` | 读写循环各用一个长生命周期 context 加可重置计时器；确认计时器每会话复用。每次请求分配 ws 92→78、kcp 62→53 | 完成 |
-| 3.6 | 每个 KCP 会话一个 10 ms 定时器协程，10 万会话即每秒 1000 万次唤醒 | `kcptransport.go` | 统一调度器，空闲会话跳过 | 待办 |
+| 3.6 | 每个 KCP 会话一个 10 ms 定时器协程，10 万会话即每秒 1000 万次唤醒 | `kcptransport.go` | 服务端每个 `ServeKCP` 一个调度器（每 CPU 一个协程），会话只在 KCP 有待发、待确认、待重传或窗口探测时被访问；收发与读取时唤醒并校准 KCP 时钟。客户端仍用自己的计时协程（负责保活） | 完成 |
 
 ## 第四阶段：导表性能
 
@@ -65,12 +65,14 @@
 
 | 基准 | 优化前 | 优化后 |
 | --- | --- | --- |
-| FrameEncode proto | 88 ns，104 B，3 次分配 | |
-| FrameEncode json | 648 ns，272 B，4 次分配 | |
-| FrameDecode proto | 101 ns，160 B，2 次分配 | |
-| FrameDecode json | 8279 ns，4515 B，146 次分配 | |
-| KCPSealOpen 512 B | 970 ns，1120 B，4 次分配 | |
-| KCPAccept（一次加密握手） | 91 µs，2304 B，39 次分配 | |
-| KCPLink 256 B 消息 | 17.9 µs，2268 B，13 次分配 | |
-| Call ws | 21.8 µs，6853 B，97 次分配 | |
-| Call kcp | 30.5 µs，4233 B，88 次分配 | |
+| FrameEncode proto | 88 ns，104 B，3 次分配 | 60 ns，128 B，1 次分配 |
+| FrameEncode json | 648 ns，272 B，4 次分配 | 651 ns，272 B，4 次分配（未改） |
+| FrameDecode proto | 101 ns，160 B，2 次分配 | 102 ns，160 B，2 次分配（未改） |
+| FrameDecode json | 8279 ns，4515 B，146 次分配 | 8491 ns，4515 B，146 次分配（未改，见下） |
+| KCPSealOpen 512 B | 970 ns，1120 B，4 次分配 | 804 ns，608 B，3 次分配 |
+| KCPAccept（一次加密握手） | 91 µs，2304 B，39 次分配 | 88 µs（已移出收包协程） |
+| KCPLink 256 B 消息 | 17.9 µs，2268 B，13 次分配 | 16.3 µs，1413 B，8 次分配 |
+| Call ws | 21.8 µs，6853 B，97 次分配 | 19.9 µs，5589 B，78 次分配 |
+| Call kcp | 30.5 µs，4233 B，88 次分配 | 24.8 µs，3222 B，53 次分配 |
+
+`Call` 的耗时在本机波动约 ±20%，以分配次数为准。JSON 帧解码（每帧 146 次分配）是剩下最重的路径，开销来自 `ValidateJSON`、`json.Decoder` 与十进制字段的正则；只影响选用 JSON 编码的连接，留作后续项。空闲 KCP 会话的开销无法用单连接基准体现：改造前每个会话一个协程、每 10 ms 唤醒一次；改造后服务端每个 CPU 一个调度协程，只访问 KCP 有待办的会话。

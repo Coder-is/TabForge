@@ -92,7 +92,7 @@ func BenchmarkKCPAccept(b *testing.B) {
 // BenchmarkKCPLink sends 256-byte messages through two in-memory
 // conversations and reads them on the other side.
 func BenchmarkKCPLink(b *testing.B) {
-	a, z := linkKCP(b, 1<<20)
+	a, z := linkKCP(b, 1<<20, 0, nil)
 	ctx := context.Background()
 	msg := make([]byte, 256)
 	b.SetBytes(int64(len(msg)))

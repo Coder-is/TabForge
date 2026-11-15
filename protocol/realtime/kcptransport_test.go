@@ -613,19 +613,28 @@ func TestKCPKeyRotation(t *testing.T) {
 	}
 }
 
-// linkKCP connects two conversations through in-memory queues.
-func linkKCP(t testing.TB, maxMessage int) (a, b *kcpConn) {
+// linkKCP connects two conversations through in-memory queues that drop
+// the given share of datagrams; with sched, it drives both clocks.
+func linkKCP(t testing.TB, maxMessage int, loss float64, sched *kcpScheduler) (a, b *kcpConn) {
 	toA, toB := make(chan []byte, 4096), make(chan []byte, 4096)
+	var mu sync.Mutex
+	r := rand.New(rand.NewSource(1))
 	deliver := func(ch chan []byte) func([]byte) {
 		return func(p []byte) {
+			mu.Lock()
+			drop := r.Float64() < loss
+			mu.Unlock()
+			if drop {
+				return
+			}
 			select {
 			case ch <- append([]byte(nil), p...):
 			default: // A full link drops like a full UDP buffer.
 			}
 		}
 	}
-	a = newKCPConn(7, maxMessage, nil, deliver(toB))
-	b = newKCPConn(7, maxMessage, nil, deliver(toA))
+	a = newKCPConn(7, maxMessage, nil, deliver(toB), sched)
+	b = newKCPConn(7, maxMessage, nil, deliver(toA), sched)
 	done := make(chan struct{})
 	pump := func(ch chan []byte, c *kcpConn) {
 		for {
@@ -651,7 +660,7 @@ func linkKCP(t testing.TB, maxMessage int) (a, b *kcpConn) {
 // not kcpInboxLimit full-size ones; reading drains the rest in order.
 func TestKCPInboxBoundedByBytes(t *testing.T) {
 	const maxMessage, size, count = 64 << 10, 60 << 10, 40
-	a, b := linkKCP(t, maxMessage)
+	a, b := linkKCP(t, maxMessage, 0, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	sent := make(chan error, 1)
@@ -793,7 +802,7 @@ func TestKCPWriteBatchedSharesDatagrams(t *testing.T) {
 	msg := bytes.Repeat([]byte{1}, 64)
 	count := func(batched bool) int {
 		var datagrams atomic.Int64
-		c := newKCPConn(5, 1<<20, nil, func([]byte) { datagrams.Add(1) })
+		c := newKCPConn(5, 1<<20, nil, func([]byte) { datagrams.Add(1) }, nil)
 		defer c.CloseNow()
 		for i := 0; i < 50; i++ {
 			write := c.Write
@@ -812,4 +821,64 @@ func TestKCPWriteBatchedSharesDatagrams(t *testing.T) {
 	if single < 50 || batched > 10 {
 		t.Fatalf("50 frames: %d datagrams one by one, %d batched", single, batched)
 	}
+}
+
+// Scheduled conversations repair losses, leave the scheduler once KCP has
+// nothing to do, and come back when there is traffic again.
+func TestKCPSchedulerDrivesConversations(t *testing.T) {
+	sched := newKCPScheduler()
+	defer sched.close()
+	a, b := linkKCP(t, 1<<20, 0.2, sched)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	transfer := func(from, count int) {
+		t.Helper()
+		sent := make(chan error, 1)
+		go func() {
+			for i := from; i < from+count; i++ {
+				msg := bytes.Repeat([]byte{byte(i)}, 1+(i*397)%3000)
+				if err := a.send(ctx, kcpBinary, msg, i%3 == 0); err != nil {
+					sent <- err
+					return
+				}
+			}
+			a.Flush()
+			sent <- nil
+		}()
+		for i := from; i < from+count; i++ {
+			_, data, err := b.Read(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(data) != 1+(i*397)%3000 || data[0] != byte(i) {
+				t.Fatalf("message %d: %d bytes starting %d", i, len(data), data[0])
+			}
+		}
+		if err := <-sent; err != nil {
+			t.Fatal(err)
+		}
+	}
+	idle := func() bool {
+		active := 0
+		for i := range sched.shards {
+			sh := &sched.shards[i]
+			sh.mu.Lock()
+			active += len(sh.active)
+			sh.mu.Unlock()
+		}
+		return active == 0
+	}
+	waitIdle := func() {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); !idle(); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("conversations stay scheduled after the transfer")
+			}
+		}
+	}
+	transfer(0, 300)
+	waitIdle()
+	time.Sleep(300 * time.Millisecond) // KCP's clock is not advanced while idle.
+	transfer(300, 20)
+	waitIdle()
 }

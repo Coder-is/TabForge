@@ -593,6 +593,19 @@ func (k *KCP) Update(current uint32) {
 	}
 }
 
+// Conv returns the conversation id.
+func (k *KCP) Conv() uint32 { return k.conv }
+
+// SetCurrent moves the clock without flushing, for a caller that stopped
+// calling Update while the KCP was Idle.
+func (k *KCP) SetCurrent(current uint32) { k.current = current }
+
+// Idle reports that nothing waits to be sent, acknowledged, resent or
+// probed: Update has nothing to do until Send, Input or Recv change that.
+func (k *KCP) Idle() bool {
+	return len(k.sndQueue) == 0 && len(k.sndBuf) == 0 && len(k.acklist) == 0 && k.probe == 0 && k.rmtWnd != 0
+}
+
 // Check returns when Update should next be called.
 func (k *KCP) Check(current uint32) uint32 {
 	if k.updated == 0 {

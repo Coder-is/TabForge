@@ -114,15 +114,20 @@ type kcpConn struct {
 	onEstablished func()
 	pending       bool
 	pendingIP     netip.Addr
+	// sched drives server conversations (nil: c.tick does); scheduled
+	// records membership in its active set (guarded by mu).
+	sched     *kcpScheduler
+	scheduled bool
 }
 
 // newKCPConn starts a conversation that sends datagrams with raw; with
 // crypt they are sealed first (and KCP segments shrink to fit the MTU).
-func newKCPConn(conv uint32, maxMessage int, crypt *kcpCipher, raw func([]byte)) *kcpConn {
+// With sched, the scheduler drives KCP's clock; without, a goroutine does.
+func newKCPConn(conv uint32, maxMessage int, crypt *kcpCipher, raw func([]byte), sched *kcpScheduler) *kcpConn {
 	c := &kcpConn{
 		start: time.Now(), maxMessage: maxMessage, opened: make(chan kcpMessage, 1),
 		readable: make(chan struct{}, 1), writable: make(chan struct{}, 1), closed: make(chan struct{}),
-		crypt: crypt, raw: raw,
+		crypt: crypt, raw: raw, sched: sched,
 	}
 	output, mtu := raw, kcpMTU
 	if crypt != nil {
@@ -134,8 +139,49 @@ func newKCPConn(conv uint32, maxMessage int, crypt *kcpCipher, raw func([]byte))
 	c.kcp.SetMTU(mtu)
 	c.kcp.SetDeadLink(40)
 	c.kcp.Update(0)
-	go c.tick()
+	if sched == nil {
+		go c.tick()
+	}
 	return c
+}
+
+// wakeLocked hands c to the scheduler once KCP has work again.
+func (c *kcpConn) wakeLocked() {
+	if c.sched != nil && !c.scheduled && !c.kcp.Idle() {
+		c.scheduled = true
+		c.sched.add(c)
+	}
+}
+
+// step is one scheduler visit, the counterpart of tick for servers.
+func (c *kcpConn) step() {
+	c.mu.Lock()
+	select {
+	case <-c.closed:
+		c.unscheduleLocked()
+		c.mu.Unlock()
+		return
+	default:
+	}
+	c.kcp.Update(c.now())
+	dead := c.kcp.Dead()
+	if c.kcp.WaitSnd() < kcpSendLimit {
+		signal(c.writable)
+	}
+	if c.kcp.Idle() {
+		c.unscheduleLocked()
+	}
+	c.mu.Unlock()
+	if dead {
+		c.fail(errors.New("realtime: kcp peer stopped acknowledging"))
+	}
+}
+
+func (c *kcpConn) unscheduleLocked() {
+	if c.scheduled {
+		c.scheduled = false
+		c.sched.remove(c)
+	}
 }
 
 func (c *kcpConn) now() uint32 { return uint32(time.Since(c.start).Milliseconds()) }
@@ -216,12 +262,14 @@ func (c *kcpConn) receive(data []byte) {
 func (c *kcpConn) input(data []byte) {
 	c.mu.Lock()
 	c.lastRecv = time.Now()
+	c.kcp.SetCurrent(c.now()) // The scheduler may not have ticked while idle.
 	ok := c.kcp.Input(data)
 	var err error
 	if ok {
 		err = c.pumpLocked()
 		c.kcp.Flush() // Acknowledge at once instead of on the next tick.
 	}
+	c.wakeLocked()
 	c.mu.Unlock()
 	if err != nil {
 		c.fail(err)
@@ -290,6 +338,7 @@ func (c *kcpConn) fail(err error) {
 	c.closeOnce.Do(func() {
 		c.mu.Lock()
 		c.err = err
+		c.unscheduleLocked()
 		c.mu.Unlock()
 		close(c.closed)
 		if c.onClose != nil {
@@ -326,6 +375,8 @@ func (c *kcpConn) send(ctx context.Context, typ byte, p []byte, flush bool) erro
 		}
 	}
 	defer c.mu.Unlock()
+	defer c.wakeLocked() // Runs first: still under c.mu.
+	c.kcp.SetCurrent(c.now())
 	select {
 	case <-c.closed:
 		return net.ErrClosed
@@ -353,6 +404,7 @@ func (c *kcpConn) send(ctx context.Context, typ byte, p []byte, flush bool) erro
 func (c *kcpConn) Flush() {
 	c.mu.Lock()
 	c.kcp.Flush()
+	c.wakeLocked()
 	c.mu.Unlock()
 }
 
@@ -364,6 +416,7 @@ func (c *kcpConn) Read(ctx context.Context) (websocket.MessageType, []byte, erro
 			c.inbox = c.inbox[1:]
 			c.inboxBytes -= len(m.data)
 			err := c.pumpLocked()
+			c.wakeLocked() // Recv may owe the peer a window update.
 			c.mu.Unlock()
 			if err != nil {
 				c.fail(err)
@@ -516,6 +569,7 @@ func newKCPListener(s *Server, pc net.PacketConn) (*kcpListener, error) {
 		}
 		l.keys[string(kcpKeyID(key.PublicKey()))] = key
 	}
+	l.sched = newKCPScheduler()
 	return l, nil
 }
 
@@ -545,6 +599,7 @@ type kcpListener struct {
 	// accepts bounds concurrent X25519 handshakes, which run off the
 	// reader so a hello flood cannot stall established conversations.
 	accepts      chan struct{}
+	sched        *kcpScheduler // drives every conversation's KCP clock
 	mu           sync.RWMutex
 	conns        map[kcpKey]*kcpConn
 	pending      map[netip.Addr]int // pending conversations by client IP
@@ -666,7 +721,7 @@ func (l *kcpListener) add(key kcpKey, crypt *kcpCipher, welcome, hello []byte) *
 	if limit <= 0 {
 		limit = 1 << 20
 	}
-	c := newKCPConn(key.conv, limit, crypt, func(b []byte) { l.write(b, key.addr) })
+	c := newKCPConn(key.conv, limit, crypt, func(b []byte) { l.write(b, key.addr) }, l.sched)
 	if crypt != nil {
 		// receive answers repeats of this hello with the welcome.
 		c.hello, c.welcome = hello, welcome
@@ -719,6 +774,7 @@ func (l *kcpListener) closeAll() {
 	for _, c := range conns {
 		c.CloseNow()
 	}
+	l.sched.close()
 }
 
 func (s *Server) serveKCPConn(c *kcpConn) {
@@ -796,7 +852,7 @@ func dialKCP(ctx context.Context, rawURL, subprotocol string, maxMessage int, se
 			return nil, err
 		}
 	}
-	c := newKCPConn(conv, maxMessage, crypt, func(p []byte) { udp.Write(p) })
+	c := newKCPConn(conv, maxMessage, crypt, func(p []byte) { udp.Write(p) }, nil)
 	alive := kcpResetDatagram(conv)
 	alive[4] = kcpKeepalive
 	keepalive := func() { udp.Write(alive) }
