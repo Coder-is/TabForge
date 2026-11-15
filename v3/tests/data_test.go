@@ -159,8 +159,6 @@ func TestRepeatCheck(t *testing.T) {
 	emu.MustGotError("TableError.DuplicateValueInMakingIndex 创建索引时发现重复值 | '1' @TestData|(A3)")
 }
 
-// TODO KV表测试
-
 // 单元格中有切割符时, 重复列的拆分符需要单独设置
 func TestArraySpliter(t *testing.T) {
 
@@ -190,31 +188,23 @@ func TestArraySpliter(t *testing.T) {
 `)
 }
 
-//// 单元格类型与期望类型不匹配时
-//func TestMissMatchingType(t *testing.T) {
-//
-//	emu := NewTableEmulator(t)
-//	indexSheet := emu.CreateCSVFile("Index")
-//
-//	helper.WriteIndexTableHeader(indexSheet)
-//	helper.WriteRowValues(indexSheet, "类型表", "", "Type")
-//	helper.WriteRowValues(indexSheet, "数据表", "", "TestData")
-//
-//	typeSheet := emu.CreateCSVFile("Type")
-//	helper.WriteTypeTableHeader(typeSheet)
-//	helper.WriteRowValues(typeSheet, "表头", "TestData", "ID", "ID", "int", "", "", "true")
-//
-//	dataSheet := emu.CreateCSVFile("TestData")
-//	helper.WriteRowValues(dataSheet, "ID")
-//	helper.WriteRowValues(dataSheet, "中文")
-//
-//	emu.VerifyData(`
-//{
-//	"@Tool": "github.com/Coder-is/TabForge",
-//        	"@Version": "testver",
-//        	"TestData":[
-//        		{ "Week": ["1|2|3", "4|5|6"] }
-//        	]
-//        }
-//`)
-//}
+// 单元格类型与期望类型不匹配时
+func TestMissMatchingType(t *testing.T) {
+
+	emu := NewTableEmulator(t)
+	indexSheet := emu.CreateCSVFile("Index")
+
+	helper.WriteIndexTableHeader(indexSheet)
+	helper.WriteRowValues(indexSheet, "类型表", "", "Type")
+	helper.WriteRowValues(indexSheet, "数据表", "", "TestData")
+
+	typeSheet := emu.CreateCSVFile("Type")
+	helper.WriteTypeTableHeader(typeSheet)
+	helper.WriteRowValues(typeSheet, "表头", "TestData", "ID", "ID", "int", "", "", "true")
+
+	dataSheet := emu.CreateCSVFile("TestData")
+	helper.WriteRowValues(dataSheet, "ID")
+	helper.WriteRowValues(dataSheet, "中文")
+
+	emu.MustGotError("TableError.DataMissMatchTypeDefine 数据与定义类型不匹配 | int '中文' @TestData|(A2)")
+}
