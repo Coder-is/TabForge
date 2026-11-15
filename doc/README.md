@@ -18,6 +18,7 @@
 | 构建平台验收资产、执行测试 | [验收工程入口](../examples/platforms/README.md)、[平台验收矩阵与步骤](platform-validation.md) |
 | 定位源码、扩展导出器、运行开发检查 | [开发维护指南](development.md) |
 | 查看本次整理范围、行为修复与验证结果 | [2026-10-04 代码重构记录](refactoring.md) |
+| 安全、性能与功能的待办和进度 | [2026-11 开发优化计划](optimization-plan.md) |
 
 客户端文档：[TypeScript](../sdk/typescript/README.md)、[微信](../sdk/wechat/README.md)、[Cocos](../sdk/cocos/README.md)、[Unity](../sdk/unity/README.md)、[Unreal](../sdk/unreal/README.md)、[Godot](../sdk/godot/README.md)。
 
