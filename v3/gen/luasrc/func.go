@@ -12,6 +12,9 @@ import (
 var UsefulFunc = template.FuncMap{}
 
 func WrapValue(globals *model.Globals, cell *model.Cell, valueType *model.TypeDefine) string {
+	if globals.Types.IsStructField(valueType) {
+		return wrapStruct(globals, cell, valueType)
+	}
 	if valueType.IsArray() {
 
 		var sb strings.Builder
@@ -89,5 +92,50 @@ func luaRows(globals *model.Globals, tab *model.DataTable) string {
 		}
 		sb.WriteString("}, ")
 	}
+	return sb.String()
+}
+
+// wrapStruct writes a struct field as a Lua table (fields in definition
+// order, nogenfield_lua members left out) and a struct array as a table of
+// them. A missing struct is all default values; a missing array is empty.
+func wrapStruct(globals *model.Globals, cell *model.Cell, field *model.TypeDefine) string {
+	if !field.IsArray() {
+		var v *model.StructValue
+		if cell != nil {
+			v = cell.Struct
+		}
+		return structTable(globals, field.FieldType, v)
+	}
+	var sb strings.Builder
+	sb.WriteString("{")
+	if cell != nil {
+		for i, v := range cell.Structs {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString(structTable(globals, field.FieldType, v))
+		}
+	}
+	sb.WriteString("}")
+	return sb.String()
+}
+
+func structTable(globals *model.Globals, typeName string, v *model.StructValue) string {
+	var sb strings.Builder
+	sb.WriteString("{ ")
+	for i, member := range globals.Types.AllFieldByName(typeName) {
+		if globals.CanDoAction(model.ActionNoGennFieldLua, member) {
+			continue
+		}
+		var cell *model.Cell
+		if v != nil && i < len(v.Cells) {
+			cell = v.Cells[i]
+		}
+		sb.WriteString(member.FieldName)
+		sb.WriteString(" = ")
+		sb.WriteString(WrapValue(globals, cell, member))
+		sb.WriteString(", ")
+	}
+	sb.WriteString("}")
 	return sb.String()
 }

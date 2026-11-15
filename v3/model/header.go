@@ -8,6 +8,8 @@ import (
 type HeaderField struct {
 	Cell     *Cell       // 表头单元格内容
 	TypeInfo *TypeDefine // 在类型表中找到对应的类型信息
+	// 结构成员列(字段.成员)的完整路径; TypeInfo为路径末端的成员. 普通列为空
+	Path []PathStep
 }
 
 func (self *HeaderField) String() string {

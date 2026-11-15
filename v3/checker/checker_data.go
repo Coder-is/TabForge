@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-// 检查数据与定义类型是否匹配
+// 检查数据与定义类型是否匹配; 结构字段逐个检查成员单元格
 func checkDataType(globals *model.Globals) {
 
 	for _, tab := range globals.Datas.AllTables() {
@@ -21,35 +21,30 @@ func checkDataType(globals *model.Globals) {
 
 			for row := 1; row < len(tab.Rows); row++ {
 
-				inputCell := tab.GetCell(row, header.Cell.Col)
-
-				// 这行被注释，无效行
-				if inputCell == nil {
-					continue
-				}
-
-				if header.TypeInfo.IsArray() {
-					for _, value := range inputCell.ValueList {
-
-						err := checkSingleValue(header, value)
-						if err != nil {
-							report.ReportError("DataMissMatchTypeDefine", header.TypeInfo.FieldType, inputCell)
-						}
-					}
-				} else if inputCell.Value != "" {
-					err := checkSingleValue(header, inputCell.Value)
-					if err != nil {
-						report.ReportError("DataMissMatchTypeDefine", header.TypeInfo.FieldType, inputCell)
-					}
-				}
-
+				// 这行被注释，无效行(GetCell为nil)时VisitLeaves不调用
+				model.VisitLeaves(globals.Types, header.TypeInfo, tab.GetCell(row, header.Cell.Col), checkCellType)
 			}
 		}
 	}
 }
 
-func checkSingleValue(header *model.HeaderField, value string) error {
-	kind := model.LanguagePrimitive(header.TypeInfo.FieldType, "go")
+func checkCellType(field *model.TypeDefine, cell *model.Cell) {
+	if field.IsArray() {
+		for _, value := range cell.ValueList {
+			if checkSingleValue(field, value) != nil {
+				report.ReportError("DataMissMatchTypeDefine", field.FieldType, cell)
+			}
+		}
+	} else if cell.Value != "" {
+		if checkSingleValue(field, cell.Value) != nil {
+			report.ReportError("DataMissMatchTypeDefine", field.FieldType, cell)
+		}
+	}
+}
+
+
+func checkSingleValue(field *model.TypeDefine, value string) error {
+	kind := model.LanguagePrimitive(field.FieldType, "go")
 	// Empty numeric cells use defaults, except empty float32 array elements,
 	// which the existing table format rejects.
 	if value == "" && kind != "float32" {

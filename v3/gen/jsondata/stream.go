@@ -38,6 +38,22 @@ func (w *jsonWriter) marshal(v interface{}) {
 
 func (w *jsonWriter) value(v interface{}, depth int) {
 	switch v := v.(type) {
+	case *jsonStruct:
+		if len(v.keys) == 0 {
+			w.b = append(w.b, "{}"...)
+			return
+		}
+		w.b = append(w.b, '{')
+		for i := range v.keys {
+			if i > 0 {
+				w.b = append(w.b, ',')
+			}
+			w.newline(depth + 1)
+			w.b = append(w.b, v.keys[i]...)
+			w.value(v.values[i], depth+1)
+		}
+		w.newline(depth)
+		w.b = append(w.b, '}')
 	case []interface{}:
 		if len(v) == 0 {
 			w.b = append(w.b, "[]"...)
@@ -120,7 +136,12 @@ func (w *jsonWriter) rows(globals *model.Globals, tab *model.DataTable, action s
 			}
 			w.newline(depth + 2)
 			w.b = append(w.b, c.key...)
-			w.value(wrapValue(globals, tab.GetCell(row, c.col), c.field), depth+2)
+			value, err := wrapField(globals, tab.GetCell(row, c.col), c.field, action)
+			if err != nil {
+				w.err = err
+				return
+			}
+			w.value(value, depth+2)
 		}
 		w.newline(depth + 1)
 		w.b = append(w.b, '}')

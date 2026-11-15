@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Coder-is/TabForge/v3/gen"
 	"github.com/Coder-is/TabForge/v3/helper"
 	"github.com/Coder-is/TabForge/v3/model"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -319,6 +320,9 @@ func checkExternalOneof(message protoreflect.Message, field protoreflect.FieldDe
 
 // GenerateJSON exports ProtoJSON compatible with the supplied schema.
 func GenerateJSON(globals *model.Globals) ([]byte, error) {
+	if err := gen.RejectStructFields(globals, "protojson"); err != nil {
+		return nil, err
+	}
 	schema, err := loadExternalSchema(globals)
 	if err != nil {
 		return nil, err
@@ -343,6 +347,9 @@ func GenerateJSON(globals *model.Globals) ([]byte, error) {
 // OutputJSON writes one ProtoJSON file per mapped table into dir, each the
 // root message holding only that table, like Output does for Protobuf.
 func OutputJSON(globals *model.Globals, dir string) error {
+	if err := gen.RejectStructFields(globals, "protojson_dir"); err != nil {
+		return err
+	}
 	schema, err := loadExternalSchema(globals)
 	if err != nil {
 		return err

@@ -56,6 +56,9 @@ func exportTable(globals *model.Globals, pbFile protoreflect.FileDescriptor, tab
 }
 
 func Generate(globals *model.Globals) (data []byte, err error) {
+	if err := gen.RejectStructFields(globals, "protobuf"); err != nil {
+		return nil, err
+	}
 	if globals.ProtoDescriptorFile != "" || globals.ProtoMappingFile != "" {
 		schema, err := loadExternalSchema(globals)
 		if err != nil {
@@ -89,6 +92,9 @@ func Generate(globals *model.Globals) (data []byte, err error) {
 }
 
 func Output(globals *model.Globals, param string) (err error) {
+	if err := gen.RejectStructFields(globals, "protobuf_dir"); err != nil {
+		return err
+	}
 	if globals.ProtoDescriptorFile != "" || globals.ProtoMappingFile != "" {
 		return outputExternal(globals, param)
 	}

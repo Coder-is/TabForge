@@ -9,6 +9,9 @@ import (
 type Cell struct {
 	Value     string
 	ValueList []string // merge之后, 数组值保存在这里
+	// merge之后, 结构字段的值保存在Struct, 结构数组保存在Structs
+	Struct  *StructValue
+	Structs []*StructValue
 	Row       int      // base 0
 	Col       int      // base 0
 	Table     *DataTable

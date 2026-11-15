@@ -53,8 +53,8 @@
 | --- | --- |
 | JSON（合并/分表） | 结构为对象，结构数组为对象数组，键按字段名排序，与现有行对象一致 |
 | Lua | 结构为嵌套 table，结构数组为 table 数组 |
-| Go | 结构字段为值类型 `Reward Reward`，结构数组为 `[]*Reward` |
-| C# / Java | 结构字段 `public Reward Reward = new Reward();`，结构数组为 `List<Reward>` |
+| Go | 结构字段为值类型 `Reward Reward`，结构数组为 `[]Reward` |
+| C# / Java | 结构字段 `public Reward Reward = new Reward();`；结构数组 C# 为 `List<Reward>`，Java 为 `Reward[]` |
 | Proto 源码 | 结构字段为对应 message，结构数组为 `repeated` |
 | jsontype | 字段类型写结构名，并标记结构/结构数组 |
 | 专用二进制 | 使用格式中已预留的结构标签（类型 11，数组 111）：长度前缀的子结构；C# `TableReader.ReadStruct` 已支持读取 |
@@ -66,6 +66,6 @@
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| 1 | 类型检查（结构字段类型、递归、索引限制）；列头路径解析；合并与检查；JSON、Lua、Go/C#/Java/Proto 源码、jsontype；其余格式明确报错 | 待办 |
+| 1 | 类型检查（结构字段类型、递归、索引限制）；列头路径解析；合并与检查；JSON、Lua、Go/C#/Java/Proto 源码、jsontype；其余格式明确报错 | 完成：Go 生成代码可解码生成的 JSON（测试中实际编译运行），生成的 Proto 经 protocompile、Java 经 javac、C# 经 dotnet、Lua 经 luac 编译通过 |
 | 2 | 专用二进制（含 C#/Go 读取端与生成代码的反序列化）与 Protobuf 数据 | 待办 |
 | 3 | 单元格内联写法；KV 表中的结构字段；已有 Proto 映射表使用结构字段 | 待定 |

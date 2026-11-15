@@ -6,6 +6,12 @@ import (
 )
 
 func Generate(globals *model.Globals) ([]byte, error) {
+	if globals.GenBinary {
+		// The binary deserializer does not read nested structs yet.
+		if err := gen.RejectStructFields(globals, "csharp (binary)"); err != nil {
+			return nil, err
+		}
+	}
 	if err := gen.ValidateNames(globals, "csharp"); err != nil {
 		return nil, err
 	}

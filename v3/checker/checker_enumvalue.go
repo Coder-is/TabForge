@@ -5,7 +5,7 @@ import (
 	"github.com/Coder-is/TabForge/v3/report"
 )
 
-// 枚举值的解析是放在输出端处理的, 例如json中, 所以在这里提前检查
+// 枚举值的解析是放在输出端处理的, 例如json中, 所以在这里提前检查; 结构字段逐个检查成员
 func checkEnumValue(globals *model.Globals) {
 
 	for _, tab := range globals.Datas.AllTables() {
@@ -18,44 +18,35 @@ func checkEnumValue(globals *model.Globals) {
 				continue
 			}
 
-			if !globals.Types.IsEnumKind(header.TypeInfo.FieldType) {
-				continue
-			}
-
 			for row := 1; row < len(tab.Rows); row++ {
 
-				inputCell := tab.GetCell(row, header.Cell.Col)
-
-				// 这行被注释，无效行
-				if inputCell == nil {
-					continue
-				}
-
-				if header.TypeInfo.IsArray() {
-
-					for _, v := range inputCell.ValueList {
-						checkEnumFieldValue(globals, header, v, inputCell)
+				model.VisitLeaves(globals.Types, header.TypeInfo, tab.GetCell(row, header.Cell.Col), func(field *model.TypeDefine, cell *model.Cell) {
+					if !globals.Types.IsEnumKind(field.FieldType) {
+						return
 					}
-
-				} else {
-					checkEnumFieldValue(globals, header, inputCell.Value, inputCell)
-				}
-
+					if field.IsArray() {
+						for _, v := range cell.ValueList {
+							checkEnumFieldValue(globals, field, v, cell)
+						}
+					} else {
+						checkEnumFieldValue(globals, field, cell.Value, cell)
+					}
+				})
 			}
 		}
 	}
 }
 
 // 检查枚举值是否存在有效
-func checkEnumFieldValue(globals *model.Globals, header *model.HeaderField, value string, inputCell *model.Cell) {
+func checkEnumFieldValue(globals *model.Globals, field *model.TypeDefine, value string, inputCell *model.Cell) {
 
 	if value == "" {
 		return
 	}
 
-	enumValue := globals.Types.GetEnumValue(header.TypeInfo.FieldType, value)
+	enumValue := globals.Types.GetEnumValue(field.FieldType, value)
 	if enumValue == nil {
-		report.ReportError("UnknownEnumValue", header.TypeInfo.FieldType, inputCell)
+		report.ReportError("UnknownEnumValue", field.FieldType, inputCell)
 	}
 
 }

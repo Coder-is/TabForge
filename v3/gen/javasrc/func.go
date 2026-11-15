@@ -13,6 +13,8 @@ var UsefulFunc = template.FuncMap{}
 
 func wrapSingleValue(globals *model.Globals, valueType *model.TypeDefine, value string) string {
 	switch {
+	case globals.Types.IsStructKind(valueType.FieldType): // 结构字段
+		return "new " + valueType.FieldType + "()"
 	case valueType.FieldType == "string": // 字符串
 		return util.StringWrap(util.StringEscape(value))
 	case globals.Types.IsEnumKind(valueType.FieldType): // 枚举

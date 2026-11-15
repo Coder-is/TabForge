@@ -59,13 +59,13 @@ func MergeData(inputList, outputList *model.DataTableList, symbols *model.TypeTa
 		widths := map[string]int{}
 		for _, header := range inputTab.Headers {
 			if header.TypeInfo != nil {
-				widths[header.TypeInfo.FieldName]++
+				widths[header.Key()]++
 			}
 		}
 		for i, header := range inputTab.Headers {
 			if header.TypeInfo != nil {
-				outputHeaders[i] = outputTab.HeaderByName(header.TypeInfo.FieldName)
-				arrayCounts[i] = widths[header.TypeInfo.FieldName]
+				outputHeaders[i] = outputTab.HeaderByName(header.Top().FieldName)
+				arrayCounts[i] = widths[header.Key()]
 			}
 		}
 
@@ -103,6 +103,10 @@ func MergeData(inputList, outputList *model.DataTableList, symbols *model.TypeTa
 
 				// 取输出表的最后的一行和对应表头的列单元格
 				outputCell := outputTab.MustGetCell(outputRow, outputHeader.Cell.Col)
+				if len(inputHeader.Path) > 0 {
+					// 结构成员列: 写入结构(或结构数组元素)里对应的成员单元格
+					outputCell = model.LeafCell(symbols, outputCell, inputHeader.Path)
+				}
 
 				// 切记, V3不支持, 也不能支持默认值
 				// 默认值会导致多表中, 有默认值列才有默认值, 导出数据在不同功能表间会出现歧义
@@ -114,6 +118,14 @@ func MergeData(inputList, outputList *model.DataTableList, symbols *model.TypeTa
 
 				} else {
 					outputCell.CopyFrom(inputCell)
+				}
+			}
+			// 所有列都为空的结构数组元素不输出
+			for _, header := range outputTab.Headers {
+				if symbols.IsStructField(header.TypeInfo) {
+					if cell := outputTab.GetCell(outputRow, header.Cell.Col); cell != nil {
+						cell.DropEmptyElements()
+					}
 				}
 			}
 		}

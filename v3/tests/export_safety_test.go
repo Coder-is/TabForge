@@ -14,9 +14,10 @@ import (
 	"github.com/Coder-is/TabForge/v3/model"
 )
 
-// No exporter supports nested structs, so table struct types must not be field types.
-func TestStructFieldTypeRejected(t *testing.T) {
-	// Used by a data table header.
+// A struct field is filled through member columns (field.member); key-value
+// tables do not take struct fields yet.
+func TestStructFieldTypeRules(t *testing.T) {
+	// A plain header on a struct field.
 	emu := NewTableEmulator(t)
 	idx := emu.CreateCSVFile("Index")
 	helper.WriteIndexTableHeader(idx)
@@ -29,7 +30,7 @@ func TestStructFieldTypeRejected(t *testing.T) {
 	data := emu.CreateCSVFile("Data")
 	helper.WriteRowValues(data, "Ref")
 	helper.WriteRowValues(data, "1")
-	emu.MustGotError("TableError.UnknownFieldType 未知字段类型 | A 'Ref' @Data|(A1)")
+	emu.MustGotError("TableError.StructFieldNeedsMembers 结构字段需要按成员展开成列, 例如 奖励.物品 | 'Ref' @Data|(A1)")
 
 	// Defined in the type table without a data table.
 	emu = NewTableEmulator(t)
@@ -40,7 +41,9 @@ func TestStructFieldTypeRejected(t *testing.T) {
 	helper.WriteTypeTableHeader(types)
 	helper.WriteRowValues(types, "表头", "A", "ID", "ID", "int")
 	helper.WriteRowValues(types, "表头", "B", "Ref", "Ref", "A")
-	emu.MustGotError("TableError.UnknownFieldType 未知字段类型 | A 'A' @Type|(E3)")
+	if err := compiler.Compile(emu.G); err != nil {
+		t.Fatalf("struct field without a data table: %v", err)
+	}
 
 	// Key-value tables.
 	emu = NewTableEmulator(t)

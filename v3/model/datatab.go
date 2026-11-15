@@ -24,7 +24,7 @@ type DataTable struct {
 func (self *DataTable) ArrayFieldCount(field *HeaderField) (ret int) {
 
 	for _, hf := range self.Headers {
-		if hf.TypeInfo != nil && hf.TypeInfo.FieldName == field.TypeInfo.FieldName {
+		if hf.TypeInfo != nil && hf.Key() == field.Key() {
 
 			ret++
 		}

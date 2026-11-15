@@ -18,6 +18,8 @@ func CheckType(typeTab *model.TypeTable) {
 
 	checkFieldTypes(typeTab)
 
+	checkStructFields(typeTab)
+
 	checkEmptyEnumValues(typeTab)
 
 	checkEnumValueFormat(typeTab)
@@ -93,7 +95,7 @@ func checkFieldTypes(typeTab *model.TypeTable) {
 		if field.IsBuiltin || field.Kind != model.TypeUsage_HeaderStruct {
 			continue
 		}
-		if !model.PrimitiveExists(field.FieldType) && !typeTab.IsEnumKind(field.FieldType) {
+		if !model.PrimitiveExists(field.FieldType) && !typeTab.IsEnumKind(field.FieldType) && !typeTab.IsStructKind(field.FieldType) {
 			report.ReportError("UnknownFieldType", field.FieldType, typeCell(td, "字段类型"))
 		}
 	}

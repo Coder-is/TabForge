@@ -10,6 +10,7 @@ type Field struct {
 	MakeIndex     bool     `json:",omitempty"` // 是否生成索引
 	ArraySplitter string   `json:",omitempty"` // 数组切割符
 	Tags          []string `json:",omitempty"` // 自定义标记
+	IsStruct      bool     `json:",omitempty"` // 类型是结构(配合ArraySplitter为结构数组)
 }
 
 func (self *Field) EnumValue() int {
