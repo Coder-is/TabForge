@@ -63,42 +63,31 @@ func wrapSingleValue(globals *model.Globals, valueType *model.TypeDefine, value 
 }
 
 func init() {
-	UsefulFunc["WrapTabValue"] = func(globals *model.Globals, dataTable *model.DataTable, allHeaders []*model.TypeDefine, row, col int) (ret string) {
-		// 找到完整的表头（按完整表头遍历）
-		header := allHeaders[col]
+	UsefulFunc["LuaRows"] = luaRows
+}
 
-		
-		if header == nil {
-			return ""
-		}
-
-		// 在单元格找到值
-		valueCell := dataTable.GetCell(row, col)
-
-		if valueCell != nil {
-
-			return WrapValue(globals, valueCell, header)
-		} else {
-			// 这个表中没有这列数据
-			return WrapValue(globals, nil, header) 
-		}
+// luaRows writes every data row of tab as Lua table constructors: the text
+// the per-cell template range produced, without two reflective template
+// calls per cell. Fields and the nogenfield_lua filter are resolved once.
+func luaRows(globals *model.Globals, tab *model.DataTable) string {
+	headers := globals.Types.AllFieldByName(tab.OriginalHeaderType)
+	wrap := make([]bool, len(headers))
+	for col, header := range headers {
+		wrap[col] = header != nil && !globals.CanDoAction(model.ActionNoGennFieldLua, header)
 	}
-
-	UsefulFunc["IsWrapFieldName"] = func(globals *model.Globals, dataTable *model.DataTable, allHeaders []*model.TypeDefine, row, col int) (ret bool) {
-		// 找到完整的表头（按完整表头遍历）
-		header := allHeaders[col]
-
-		
-		if header == nil {
-			return false
+	var sb strings.Builder
+	for _, row := range tab.DataRowIndex() {
+		sb.WriteString("\n\t\t\t{ ")
+		for col, header := range headers {
+			if !wrap[col] {
+				continue
+			}
+			sb.WriteString(header.FieldName)
+			sb.WriteString(" = ")
+			sb.WriteString(WrapValue(globals, tab.GetCell(row, col), header))
+			sb.WriteString(", ")
 		}
-
-		if globals.CanDoAction(model.ActionNoGennFieldLua, header) {
-			return false
-		}
-
-		return true
+		sb.WriteString("}, ")
 	}
-
-
+	return sb.String()
 }
