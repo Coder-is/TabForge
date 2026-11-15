@@ -53,6 +53,22 @@ func MergeData(inputList, outputList *model.DataTableList, symbols *model.TypeTa
 			outputList.AddDataTable(outputTab)
 		}
 
+		// 每张输入表只解析一次: 每列对应的输出列, 以及同名重复列的个数
+		outputHeaders := make([]*model.HeaderField, len(inputTab.Headers))
+		arrayCounts := make([]int, len(inputTab.Headers))
+		widths := map[string]int{}
+		for _, header := range inputTab.Headers {
+			if header.TypeInfo != nil {
+				widths[header.TypeInfo.FieldName]++
+			}
+		}
+		for i, header := range inputTab.Headers {
+			if header.TypeInfo != nil {
+				outputHeaders[i] = outputTab.HeaderByName(header.TypeInfo.FieldName)
+				arrayCounts[i] = widths[header.TypeInfo.FieldName]
+			}
+		}
+
 		// 遍历输入表的每一行
 		for row := 1; row < len(inputTab.Rows); row++ {
 
@@ -63,7 +79,7 @@ func MergeData(inputList, outputList *model.DataTableList, symbols *model.TypeTa
 			outputRow := outputTab.AddRow()
 
 			// 遍历输入数据的每一列
-			for _, inputHeader := range inputTab.Headers {
+			for i, inputHeader := range inputTab.Headers {
 
 				// 输入的列头
 
@@ -79,7 +95,7 @@ func MergeData(inputList, outputList *model.DataTableList, symbols *model.TypeTa
 				}
 
 				// 用输入的表头名在输出的表头中找
-				outputHeader := outputTab.HeaderByName(inputHeader.TypeInfo.FieldName)
+				outputHeader := outputHeaders[i]
 
 				if outputHeader == nil {
 					panic("输入的列头名在输出表头中找不到:" + inputHeader.TypeInfo.FieldName)
@@ -94,7 +110,7 @@ func MergeData(inputList, outputList *model.DataTableList, symbols *model.TypeTa
 
 				if inputHeader.TypeInfo.IsArray() {
 
-					combineRepeatedCell(outputCell, inputCell, inputHeader, inputTab)
+					combineRepeatedCell(outputCell, inputCell, inputHeader, arrayCounts[i])
 
 				} else {
 					outputCell.CopyFrom(inputCell)
@@ -105,9 +121,9 @@ func MergeData(inputList, outputList *model.DataTableList, symbols *model.TypeTa
 	}
 }
 
-func combineRepeatedCell(outputCell, inputCell *model.Cell, header *model.HeaderField, tab *model.DataTable) {
+func combineRepeatedCell(outputCell, inputCell *model.Cell, header *model.HeaderField, columns int) {
 	// Repeated physical columns each contribute one element, including empty ones.
-	if tab.ArrayFieldCount(header) != 1 {
+	if columns != 1 {
 		outputCell.ValueList = append(outputCell.ValueList, inputCell.Value)
 		return
 	}
