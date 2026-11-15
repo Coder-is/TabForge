@@ -53,9 +53,19 @@ type ResolvedMessage struct {
 type ResolvedChannel struct {
 	Channel
 	Messages []ResolvedMessage
+	// Indexes into Messages, built when the contract is resolved; channels
+	// assembled by hand fall back to scanning.
+	byName map[string]int
+	byID   map[uint32]int
 }
 
 func (c ResolvedChannel) Message(name string) (ResolvedMessage, bool) {
+	if c.byName != nil {
+		if i, ok := c.byName[name]; ok {
+			return c.Messages[i], true
+		}
+		return ResolvedMessage{}, false
+	}
 	for _, m := range c.Messages {
 		if m.Name == name {
 			return m, true
@@ -65,6 +75,12 @@ func (c ResolvedChannel) Message(name string) (ResolvedMessage, bool) {
 }
 
 func (c ResolvedChannel) MessageByID(id uint32) (ResolvedMessage, bool) {
+	if c.byID != nil {
+		if i, ok := c.byID[id]; ok {
+			return c.Messages[i], true
+		}
+		return ResolvedMessage{}, false
+	}
 	for _, m := range c.Messages {
 		if m.ID == id {
 			return m, true
@@ -160,6 +176,10 @@ func (c *Contract) resolveChannels(paths map[string]bool) error {
 				}
 			}
 			resolved.Messages = append(resolved.Messages, r)
+		}
+		resolved.byName, resolved.byID = make(map[string]int, len(resolved.Messages)), make(map[uint32]int, len(resolved.Messages))
+		for i, m := range resolved.Messages {
+			resolved.byName[m.Name], resolved.byID[m.ID] = i, i
 		}
 		c.Channels = append(c.Channels, resolved)
 	}

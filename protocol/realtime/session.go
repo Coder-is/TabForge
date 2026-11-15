@@ -661,9 +661,8 @@ func (s *Session) process(in inbound) {
 		event.Duration = time.Since(started)
 		s.srv.observe(event)
 	}()
-	s.srv.mu.RLock()
-	request, notify := s.channel.requests[in.message.Name], s.channel.notifies[in.message.Name]
-	s.srv.mu.RUnlock()
+	routes := s.channel.routes.Load()
+	request, notify := routes.requests[in.message.Name], routes.notifies[in.message.Name]
 	if in.message.Kind == protocol.KindNotify {
 		if notify == nil {
 			event.Code = CodeNotImplemented

@@ -236,11 +236,12 @@ func TestSessionExpiryStartsNewSession(t *testing.T) {
 	// than the resume window: its outcome is unknown, so it fails.
 	started := make(chan struct{})
 	f.server.mu.Lock()
-	f.server.channels["game"].requests["joinRoom"] = &requestRoute{message: mustMessage(t, contract, "joinRoom"), newIn: func() proto.Message { return &gamepb.JoinRoomRequest{} }, handler: func(ctx context.Context, s *Session, m proto.Message) (proto.Message, error) {
+	game := f.server.channels["game"]
+	game.routes.Store(game.routes.Load().with("joinRoom", &requestRoute{message: mustMessage(t, contract, "joinRoom"), newIn: func() proto.Message { return &gamepb.JoinRoomRequest{} }, handler: func(ctx context.Context, s *Session, m proto.Message) (proto.Message, error) {
 		close(started)
 		<-ctx.Done()
 		return nil, ctx.Err()
-	}}
+	}}, nil))
 	f.server.mu.Unlock()
 	lost := make(chan error, 1)
 	go func() {

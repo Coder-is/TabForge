@@ -136,8 +136,32 @@ type Server struct {
 
 type channelState struct {
 	protocol.ResolvedChannel
+	// routes is replaced under Server.mu, never modified, so sessions read
+	// it on every message without locking.
+	routes atomic.Pointer[routeTable]
+}
+
+type routeTable struct {
 	requests map[string]*requestRoute
 	notifies map[string]*notifyRoute
+}
+
+// with returns a copy of t with one more route.
+func (t *routeTable) with(name string, request *requestRoute, notify *notifyRoute) *routeTable {
+	next := &routeTable{requests: make(map[string]*requestRoute, len(t.requests)+1), notifies: make(map[string]*notifyRoute, len(t.notifies)+1)}
+	for k, v := range t.requests {
+		next.requests[k] = v
+	}
+	for k, v := range t.notifies {
+		next.notifies[k] = v
+	}
+	if request != nil {
+		next.requests[name] = request
+	}
+	if notify != nil {
+		next.notifies[name] = notify
+	}
+	return next
 }
 
 type requestRoute struct {
@@ -171,7 +195,9 @@ func NewServer(c *protocol.Contract) *Server {
 		ended:             map[string]tombstone{},
 	}
 	for _, ch := range c.Channels {
-		s.channels[ch.ID] = &channelState{ResolvedChannel: ch, requests: map[string]*requestRoute{}, notifies: map[string]*notifyRoute{}}
+		state := &channelState{ResolvedChannel: ch}
+		state.routes.Store(&routeTable{})
+		s.channels[ch.ID] = state
 	}
 	return s
 }
@@ -244,10 +270,10 @@ func handleRequest[Req proto.Message](s *Server, channel, name string, handler R
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if handler == nil || ch.requests[name] != nil {
+	if handler == nil || ch.routes.Load().requests[name] != nil {
 		return fmt.Errorf("nil or duplicate handler for %s.%s", channel, name)
 	}
-	ch.requests[name] = &requestRoute{message: m, newIn: newIn, handler: handler}
+	ch.routes.Store(ch.routes.Load().with(name, &requestRoute{message: m, newIn: newIn, handler: handler}, nil))
 	return nil
 }
 
@@ -262,10 +288,10 @@ func handleNotify[T proto.Message](s *Server, channel, name string, handler Noti
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if handler == nil || ch.notifies[name] != nil {
+	if handler == nil || ch.routes.Load().notifies[name] != nil {
 		return fmt.Errorf("nil or duplicate handler for %s.%s", channel, name)
 	}
-	ch.notifies[name] = &notifyRoute{message: m, newIn: newIn, handler: handler}
+	ch.routes.Store(ch.routes.Load().with(name, nil, &notifyRoute{message: m, newIn: newIn, handler: handler}))
 	return nil
 }
 
