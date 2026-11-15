@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -99,6 +101,12 @@ type kcpConn struct {
 	// established is set once a sealed datagram from the peer opened: the
 	// handshake is complete and the hello can no longer be replaced.
 	established atomic.Bool
+	// Servers: onEstablished runs once when established is set; pending
+	// and pendingIP are the listener's pending-pool record (guarded by the
+	// listener's mu).
+	onEstablished func()
+	pending       bool
+	pendingIP     netip.Addr
 }
 
 // newKCPConn starts a conversation that sends datagrams with raw; with
@@ -188,7 +196,9 @@ func (c *kcpConn) receive(data []byte) {
 	if !ok {
 		return
 	}
-	c.established.Store(true)
+	if c.established.CompareAndSwap(false, true) && c.onEstablished != nil {
+		c.onEstablished()
+	}
 	if len(plain) == 0 { // Keepalive.
 		return
 	}
@@ -412,26 +422,14 @@ func kcpResetDatagram(conv uint32) []byte {
 // payloads travel in clear text, unlike wss://. With it, ServeKCP accepts
 // only encrypted conversations. See doc/realtime.md.
 func (s *Server) ServeKCP(pc net.PacketConn) error {
-	l := &kcpListener{srv: s, pc: pc, conns: map[string]*kcpConn{}}
-	if s.KCPKey == nil && len(s.KCPPreviousKeys) > 0 {
-		return errors.New("realtime: KCPPreviousKeys needs KCPKey")
-	}
-	for _, key := range append([]*ecdh.PrivateKey{s.KCPKey}, s.KCPPreviousKeys...) {
-		if key == nil {
-			continue
-		}
-		if key.Curve() != ecdh.X25519() {
-			return errKCPKeyCurve
-		}
-		if l.keys == nil {
-			l.keys = map[string]*ecdh.PrivateKey{}
-		}
-		l.keys[string(kcpKeyID(key.PublicKey()))] = key
+	l, err := newKCPListener(s, pc)
+	if err != nil {
+		return err
 	}
 	buf := make([]byte, 64<<10)
 	failures := 0
 	for {
-		n, addr, err := pc.ReadFrom(buf)
+		n, addr, err := l.read(buf)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				l.closeAll()
@@ -449,13 +447,13 @@ func (s *Server) ServeKCP(pc net.PacketConn) error {
 		}
 		failures = 0
 		data := buf[:n]
-		if n < 5 { // Shorter than a keepalive; a reset reply would amplify spoofed traffic.
+		if n < 5 || !addr.IsValid() { // Shorter than a keepalive; a reset reply would amplify spoofed traffic.
 			continue
 		}
 		// Not kcp.Conv: 5-byte keepalives must reach find, which resets
 		// conversations it does not know.
 		conv := binary.LittleEndian.Uint32(data)
-		if c := l.find(addr, conv, data); c != nil {
+		if c := l.find(kcpKey{addr, conv}, data); c != nil {
 			c.receive(data)
 		}
 	}
@@ -464,78 +462,218 @@ func (s *Server) ServeKCP(pc net.PacketConn) error {
 // MaxKCPConversations bounds concurrent KCP conversations per ServeKCP.
 const MaxKCPConversations = 100000
 
+func newKCPListener(s *Server, pc net.PacketConn) (*kcpListener, error) {
+	l := &kcpListener{
+		srv: s, pc: pc, conns: map[kcpKey]*kcpConn{}, pending: map[netip.Addr]int{},
+		accepts: make(chan struct{}, max(2, runtime.GOMAXPROCS(0))),
+	}
+	l.udp, _ = pc.(*net.UDPConn)
+	if s.KCPKey == nil && len(s.KCPPreviousKeys) > 0 {
+		return nil, errors.New("realtime: KCPPreviousKeys needs KCPKey")
+	}
+	for _, key := range append([]*ecdh.PrivateKey{s.KCPKey}, s.KCPPreviousKeys...) {
+		if key == nil {
+			continue
+		}
+		if key.Curve() != ecdh.X25519() {
+			return nil, errKCPKeyCurve
+		}
+		if l.keys == nil {
+			l.keys = map[string]*ecdh.PrivateKey{}
+		}
+		l.keys[string(kcpKeyID(key.PublicKey()))] = key
+	}
+	return l, nil
+}
+
+// An encrypted conversation is pending from the client's hello until the
+// first sealed datagram from the client opens, which proves the client got
+// the welcome at its address. Spoofed hellos can only fill this pool, never
+// push out established conversations, and they expire quickly. Plain-text
+// KCP has no such proof; see doc/realtime.md.
+const (
+	MaxKCPPending      = 4096
+	MaxKCPPendingPerIP = 64
+)
+
+// kcpPendingTimeout closes pending conversations; a variable for tests.
+var kcpPendingTimeout = 5 * time.Second
+
+type kcpKey struct {
+	addr netip.AddrPort
+	conv uint32
+}
+
 type kcpListener struct {
-	srv   *Server
-	pc    net.PacketConn
-	keys  map[string]*ecdh.PrivateKey // by kcpKeyID; nil for clear text
-	mu    sync.Mutex
-	conns map[string]*kcpConn
+	srv  *Server
+	pc   net.PacketConn
+	udp  *net.UDPConn                // pc, when it is one: reads and writes without allocating
+	keys map[string]*ecdh.PrivateKey // by kcpKeyID; nil for clear text
+	// accepts bounds concurrent X25519 handshakes, which run off the
+	// reader so a hello flood cannot stall established conversations.
+	accepts      chan struct{}
+	mu           sync.RWMutex
+	conns        map[kcpKey]*kcpConn
+	pending      map[netip.Addr]int // pending conversations by client IP
+	pendingTotal int
+}
+
+func (l *kcpListener) read(buf []byte) (int, netip.AddrPort, error) {
+	if l.udp != nil {
+		return l.udp.ReadFromUDPAddrPort(buf)
+	}
+	n, addr, err := l.pc.ReadFrom(buf)
+	if err != nil {
+		return n, netip.AddrPort{}, err
+	}
+	ap, _ := netip.ParseAddrPort(addr.String()) // Invalid for non-IP addresses: dropped.
+	return n, ap, nil
+}
+
+func (l *kcpListener) write(b []byte, addr netip.AddrPort) {
+	if l.udp != nil {
+		l.udp.WriteToUDPAddrPort(b, addr)
+		return
+	}
+	l.pc.WriteTo(b, net.UDPAddrFromAddrPort(addr))
 }
 
 // find returns the conversation a datagram belongs to, starting one for a
-// plain open segment (or a hello, when encrypted). It answers datagrams
-// for unknown conversations with a reset, or with a plain refusal when a
-// plain client meets an encrypting server, but never answers those two.
-func (l *kcpListener) find(addr net.Addr, conv uint32, data []byte) *kcpConn {
-	key := fmt.Sprintf("%s/%d", addr, conv)
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if c := l.conns[key]; c != nil {
-		// A different hello before the handshake completed: the first was
-		// damaged on the way, so the client cannot use its welcome and
-		// keeps repeating the real one. Start over with it.
-		if c.crypt == nil || c.established.Load() || !isKCPHello(data) || bytes.Equal(data, c.hello) {
-			return c
-		}
-		delete(l.conns, key)
-		go c.CloseNow() // Not here: onClose takes l.mu.
+// plain open segment; an encrypted hello starts the handshake in the
+// background (see accept). It answers datagrams for unknown conversations
+// with a reset, or with a plain refusal when a plain client meets an
+// encrypting server, but never answers those two.
+func (l *kcpListener) find(key kcpKey, data []byte) *kcpConn {
+	l.mu.RLock()
+	c := l.conns[key]
+	l.mu.RUnlock()
+	// A different hello before the handshake completed means the first was
+	// damaged on the way, so the client cannot use its welcome and keeps
+	// repeating the real one; accept starts over with it.
+	if c != nil && (c.crypt == nil || c.established.Load() || !isKCPHello(data) || bytes.Equal(data, c.hello)) {
+		return c
 	}
-	var crypt *kcpCipher
-	var welcome []byte
 	switch {
 	case len(data) == 5 && (data[4] == kcpReset || data[4] == kcpPlainRefuse):
-		return nil
 	case l.keys == nil && isOpenSegment(data):
+		return l.add(key, nil, nil, nil)
 	case l.keys != nil && isOpenSegment(data):
-		refuse := kcpResetDatagram(conv)
+		refuse := kcpResetDatagram(key.conv)
 		refuse[4] = kcpPlainRefuse
-		l.pc.WriteTo(refuse, addr)
-		return nil
+		l.write(refuse, key.addr)
 	case l.keys != nil && isKCPHello(data):
-		key := l.keys[string(kcpHelloKeyID(data))]
-		if key == nil || len(l.conns) >= MaxKCPConversations {
-			return nil // A key this server does not have (any more).
+		l.accept(key, data)
+	default:
+		l.write(kcpResetDatagram(key.conv), key.addr)
+	}
+	return nil
+}
+
+// accept runs the X25519 handshake for a hello off the reader goroutine.
+// When the pending pool is full or every handshake slot is busy the hello
+// is dropped; the client repeats it until a welcome arrives.
+func (l *kcpListener) accept(key kcpKey, data []byte) {
+	priv := l.keys[string(kcpHelloKeyID(data))]
+	if priv == nil {
+		return // A key this server does not have (any more).
+	}
+	l.mu.RLock()
+	full := l.fullLocked(key.addr.Addr().Unmap())
+	l.mu.RUnlock()
+	if full {
+		return
+	}
+	select {
+	case l.accepts <- struct{}{}:
+	default:
+		return
+	}
+	hello := append([]byte(nil), data...)
+	go func() {
+		defer func() { <-l.accepts }()
+		crypt, welcome, err := kcpAccept(priv, key.conv, hello)
+		if err != nil {
+			return
 		}
-		var err error
-		if crypt, welcome, err = kcpAccept(key, conv, data); err != nil {
+		if c := l.add(key, crypt, welcome, hello); c != nil {
+			c.raw(c.welcome)
+		}
+	}()
+}
+
+func (l *kcpListener) fullLocked(ip netip.Addr) bool {
+	return len(l.conns) >= MaxKCPConversations || l.pendingTotal >= MaxKCPPending || l.pending[ip] >= MaxKCPPendingPerIP
+}
+
+// add registers a new conversation; crypt is nil for clear text. For a
+// repeated hello whose handshake another goroutine finished first, it
+// answers with that conversation's welcome and returns nil.
+func (l *kcpListener) add(key kcpKey, crypt *kcpCipher, welcome, hello []byte) *kcpConn {
+	ip := key.addr.Addr().Unmap()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if old := l.conns[key]; old != nil {
+		switch {
+		case crypt == nil:
+			return old
+		case old.established.Load():
+			return nil
+		case bytes.Equal(old.hello, hello):
+			old.raw(old.welcome)
 			return nil
 		}
-	default:
-		l.pc.WriteTo(kcpResetDatagram(conv), addr)
-		return nil
+		delete(l.conns, key)
+		l.unpendLocked(old)
+		go old.CloseNow() // Not here: onClose takes l.mu.
 	}
-	if len(l.conns) >= MaxKCPConversations {
+	if len(l.conns) >= MaxKCPConversations || (crypt != nil && l.fullLocked(ip)) {
 		return nil
 	}
 	limit := l.srv.MaxFrameBytes
 	if limit <= 0 {
 		limit = 1 << 20
 	}
-	c := newKCPConn(conv, limit, crypt, func(b []byte) { l.pc.WriteTo(b, addr) })
+	c := newKCPConn(key.conv, limit, crypt, func(b []byte) { l.write(b, key.addr) })
 	if crypt != nil {
-		// receive answers this hello, and repeats of it, with the welcome.
-		c.hello, c.welcome = append([]byte(nil), data...), welcome
+		// receive answers repeats of this hello with the welcome.
+		c.hello, c.welcome = hello, welcome
+		c.pendingIP, c.pending = ip, true
+		l.pending[ip]++
+		l.pendingTotal++
+		c.onEstablished = func() {
+			l.mu.Lock()
+			l.unpendLocked(c)
+			l.mu.Unlock()
+		}
+		time.AfterFunc(kcpPendingTimeout, func() {
+			if !c.established.Load() {
+				c.CloseNow()
+			}
+		})
 	}
 	c.onClose = func() {
 		l.mu.Lock()
 		if l.conns[key] == c {
 			delete(l.conns, key)
 		}
+		l.unpendLocked(c)
 		l.mu.Unlock()
 	}
 	l.conns[key] = c
 	go l.srv.serveKCPConn(c)
 	return c
+}
+
+// unpendLocked takes c out of the pending pool, once.
+func (l *kcpListener) unpendLocked(c *kcpConn) {
+	if !c.pending {
+		return
+	}
+	c.pending = false
+	l.pendingTotal--
+	if l.pending[c.pendingIP]--; l.pending[c.pendingIP] <= 0 {
+		delete(l.pending, c.pendingIP)
+	}
 }
 
 func (l *kcpListener) closeAll() {

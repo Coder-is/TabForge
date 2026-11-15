@@ -229,7 +229,8 @@ kcpPublicKey, _ := ecdh.X25519().NewPublicKey(pub)
 - 两端配置不一致时客户端不重试，以 `protocol_error` 停止：明文客户端连加密服务器会收到 `conv + 0xFA`（`ErrKCPEncryptionRequired`），加密客户端连明文服务器，每个 hello 都会收到重置，连续 3 次后停止（`ErrKCPEncryptionUnsupported`；只收到一两次重置不会停止，以免损坏的数据报或伪造的重置让客户端放弃）。公钥配错时客户端认不出 welcome，表现为一直连不上（`connecting`/`disconnected`）。**换钥**：生成新密钥，发布带新公钥的客户端；服务器把新密钥设为 `KCPKey`、旧密钥放进 `KCPPreviousKeys`，按 hello 中的密钥标识选择，新旧客户端都能连接；确认没有客户端再用旧公钥后，从 `KCPPreviousKeys` 中删除。固定了已删除密钥的客户端连不上（服务器不回复，表现同公钥配错）。
 - 重置帧（`0xFF`）和拒绝帧（`0xFA`）不加密：失去会话的一方已没有密钥。能看到流量的攻击者可以伪造它们迫使客户端重连，但会话会通过恢复继续，请求也不会重复执行；这与直接丢弃数据报的效果相同。
 - 不设置 `KCPKey` 时**不加密**：令牌、恢复令牌和载荷都是明文，能看到流量的人可以冒用会话，只适合内网、VPN/专线或游戏加速器隧道。
-- 每个 `ServeKCP` 最多 `MaxKCPConversations`（100000）个会话。未认证的 open（或 hello）在 `HandshakeTimeout` 内占用一个名额，伪造源地址的洪泛可以占满它；加密时每个新 hello 还要在服务器上做 3 次 X25519 运算，需要在网络层限速。所有回复都不比触发它的数据报大，不会放大反射流量。
+- 每个 `ServeKCP` 最多 `MaxKCPConversations`（100000）个会话。加密时，从 hello 到客户端第一个密封数据报成功解开（证明客户端在该地址收到了 welcome）之前，会话处于“待定”状态：待定会话另有名额，总数 `MaxKCPPending`（4096）、每个 IP `MaxKCPPendingPerIP`（64），5 秒内未完成即关闭。伪造源地址的 hello 洪泛只能占满待定名额，不会挤掉已建立的会话，但期间新玩家的握手会受影响。X25519 运算（每个 hello 3 次）不在收包协程中执行，并发数不超过 CPU 数，忙时丢弃 hello，由客户端每 250 ms 重发。握手阶段的回复都不比触发它的数据报大。
+- 明文 KCP 没有地址证明：伪造的 open 段会建立会话，服务器的回复会被 KCP 重传，可被用来向第三方反射约数倍的流量；并且在 `HandshakeTimeout` 内占用名额。生产环境请设置 `KCPKey`，并在网络层限速。彻底解决需要类似 QUIC Retry 的无状态地址验证，需要各端客户端一起修改，见 [开发优化计划](optimization-plan.md) 第五阶段。
 - 支持 `kcp://` 的客户端：Go、Unity（`RealtimeOptions.KcpServerKey`，见 [Unity 长连接](../sdk/unity/README.md)；WebGL 除外）、Godot（`kcp_server_key` 选项，见 [Godot 长连接](../sdk/godot/README.md)；Web 导出除外）与 Unreal（`FTabForgeRealtimeOptions::KcpServerKey`，见 [Unreal 长连接](../sdk/unreal/README.md)；引擎层尚未实测）。TypeScript 客户端（浏览器无 UDP）仍使用 WebSocket。
 
 ## 5. TypeScript 客户端

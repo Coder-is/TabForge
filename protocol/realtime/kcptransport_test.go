@@ -9,6 +9,7 @@ import (
 	"errors"
 	"math/rand"
 	"net"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -684,5 +685,104 @@ func TestKCPInboxBoundedByBytes(t *testing.T) {
 	}
 	if err := <-sent; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Spoofed hellos only fill the pending pool: it is capped per IP, a
+// conversation leaves it once the client proves it got the welcome, and
+// conversations that never do expire.
+func TestKCPPendingPool(t *testing.T) {
+	old := kcpPendingTimeout
+	kcpPendingTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { kcpPendingTimeout = old })
+	key := newKCPKey(t)
+	f := newFixture(t, testContract(t, nil), func(s *Server) { registerGame(t, s); s.KCPKey = key })
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pc.Close() })
+	l, err := newKCPListener(f.server, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.closeAll)
+	counts := func(ip netip.Addr) (perIP, total, conns int) {
+		l.mu.RLock()
+		defer l.mu.RUnlock()
+		return l.pending[ip], l.pendingTotal, len(l.conns)
+	}
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); !ok(); time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+		}
+	}
+
+	// A flood of hellos from one address, repeated the way clients repeat
+	// them, never holds more than MaxKCPPendingPerIP conversations.
+	flooder := netip.MustParseAddrPort("127.0.0.1:40000")
+	hellos := make([][]byte, 3*MaxKCPPendingPerIP)
+	for i := range hellos {
+		h, err := newKCPClientHandshake(uint32(i+1), key.PublicKey())
+		if err != nil {
+			t.Fatal(err)
+		}
+		hellos[i] = h.hello
+	}
+	for round := 0; round < 20; round++ {
+		for i, hello := range hellos {
+			l.find(kcpKey{flooder, uint32(i + 1)}, hello)
+		}
+		if perIP, _, _ := counts(flooder.Addr()); perIP > MaxKCPPendingPerIP {
+			t.Fatalf("%d pending conversations from one address", perIP)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	waitFor("the per-IP cap to fill", func() bool { n, _, _ := counts(flooder.Addr()); return n == MaxKCPPendingPerIP })
+
+	// Once the flood expires, a real client's handshake is pending until its
+	// first sealed datagram opens, and is then established for good.
+	client, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	addr := client.LocalAddr().(*net.UDPAddr).AddrPort()
+	h, err := newKCPClientHandshake(77, key.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	real := kcpKey{addr, 77}
+	waitFor("the flood to expire", func() bool { _, total, conns := counts(flooder.Addr()); return total == 0 && conns == 0 })
+	var welcome []byte
+	buf := make([]byte, 128)
+	for welcome == nil {
+		l.find(real, h.hello)
+		client.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		if n, _, err := client.ReadFrom(buf); err == nil {
+			welcome = append([]byte(nil), buf[:n]...)
+		}
+	}
+	if perIP, _, _ := counts(addr.Addr()); perIP != 1 {
+		t.Fatalf("handshake not pending: %d", perIP)
+	}
+	cipher := h.finish(welcome)
+	if cipher == nil {
+		t.Fatal("bad welcome")
+	}
+	c := l.find(real, cipher.seal(nil))
+	if c == nil {
+		t.Fatal("conversation lost")
+	}
+	c.receive(cipher.seal(nil))
+	if perIP, total, _ := counts(addr.Addr()); perIP != 0 || total != 0 {
+		t.Fatalf("established conversation still pending: %d/%d", perIP, total)
+	}
+	time.Sleep(2 * kcpPendingTimeout)
+	if _, _, conns := counts(addr.Addr()); conns != 1 {
+		t.Fatal("established conversation expired like a pending one")
 	}
 }
