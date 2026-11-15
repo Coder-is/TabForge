@@ -10,11 +10,11 @@
 
 | 步骤 | 问题 | 位置 | 处理 | 状态 |
 | --- | --- | --- | --- | --- |
-| 1.1 | Go 1.26.8 标准库有 11 个可达漏洞（net/http、crypto/tls、crypto/x509、net/textproto），影响 WebSocket 与 HTTP 服务；`x/crypto` 有一个不可达公告 | `go.mod`、`.github/workflows/*.yml` | 工具链升到 1.26.11，升级 `x/crypto` | 待办 |
-| 1.2 | 表格字段别名允许 `\`，Java 编译器在词法分析前处理 `\u000a`，别名写在 `//` 注释里会提前换行并注入代码；改表的人可在构建 Java 的机器上执行任意代码 | `v3/checker/checker_type.go` `validFieldAlias`；`v3/gen/javasrc/text.go` | 别名拒绝 `\`，加回归测试 | 待办 |
-| 1.3 | 每个 ping 都向发送队列追加一个 pong，队列无上限；`MaxFramesPerSecond` 默认关闭，ping 洪泛可使服务器内存无限增长 | `protocol/realtime/session.go` | 同一连接最多保留一个待发 pong | 待办 |
-| 1.4 | KCP 收件箱只按条数（64）限制，每条最多 `MaxFrameBytes`（1 MiB），鉴权完成前单个会话可让服务器缓存约 64 MiB | `protocol/realtime/kcptransport.go` `pumpLocked` | 改为按字节限额 | 待办 |
-| 1.5 | 发布任务有仓库写权限，却安装未锁版本的 pip 包；checkout 保留令牌 | `.github/workflows/release.yml` | 锁定版本，`persist-credentials: false` | 待办 |
+| 1.1 | Go 1.26.8 标准库有 11 个可达漏洞（net/http、crypto/tls、crypto/x509、net/textproto），影响 WebSocket 与 HTTP 服务；`x/crypto` 有一个不可达公告 | `go.mod`、`.github/workflows/*.yml` | 工具链升到 1.26.11，升级 `x/crypto` | 完成 |
+| 1.2 | 表格字段别名允许 `\`，Java 编译器在词法分析前处理 `\u000a`，别名写在 `//` 注释里会提前换行并注入代码；改表的人可在构建 Java 的机器上执行任意代码 | `v3/checker/checker_type.go` `validFieldAlias`；`v3/gen/javasrc/text.go` | 别名拒绝 `\`，加回归测试 | 完成 |
+| 1.3 | 每个 ping 都向发送队列追加一个 pong，队列无上限；`MaxFramesPerSecond` 默认关闭，ping 洪泛可使服务器内存无限增长 | `protocol/realtime/session.go` | 同一连接最多保留一个待发 pong | 完成 |
+| 1.4 | KCP 收件箱只按条数（64）限制，每条最多 `MaxFrameBytes`（1 MiB），鉴权完成前单个会话可让服务器缓存约 64 MiB | `protocol/realtime/kcptransport.go` `pumpLocked` | 改为按字节限额 | 完成 |
+| 1.5 | 发布任务有仓库写权限，却安装未锁版本的 pip 包；checkout 保留令牌 | `.github/workflows/release.yml` | 锁定版本，`persist-credentials: false`（依赖哈希与 Action 固定 SHA 留待有 Python 锁文件工具时补） | 完成 |
 
 ## 第二阶段：导表体验
 

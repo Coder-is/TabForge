@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # gh uses GH_TOKEN below; no later step needs the token in .git/config.
+          persist-credentials: false
       - uses: actions/setup-go@v7
         with:
           go-version: '1.26.11'
@@ -35,7 +37,7 @@ jobs:
           python -c 'import json,os; assert os.environ["GITHUB_REF_NAME"] == "v" + json.load(open("release.json"))["version"]'
           go run ./cmd/release -check
       - run: npm ci --prefix sdk/typescript --ignore-scripts
-      - run: python -m pip install setuptools wheel twine
+      - run: python -m pip install setuptools==84.2.1 wheel==0.48.0 twine==7.0.0
       - run: npm --prefix sdk/typescript run check
       - run: npm --prefix sdk/typescript test
       - run: node --test editors/vscode/extension.test.cjs editors/cocos/runner.test.cjs
