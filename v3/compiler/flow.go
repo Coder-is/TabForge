@@ -30,6 +30,15 @@ func Compile(globals *model.Globals) (ret error) {
 		return err
 	}
 
+	// 项目导出提供可预加载的Getter: 一次并发解析索引列出的全部表文件
+	if preloader, ok := globals.TableGetter.(helper.Preloader); ok {
+		names := make([]string, 0, len(globals.IndexList))
+		for _, pragma := range globals.IndexList {
+			names = append(names, pragma.TableFileName)
+		}
+		preloader.Preload(names)
+	}
+
 	// 测试时, 这个Getter会被提前设置为MemFile, 普通导出时, 这个Getter为空
 	if globals.TableGetter == nil {
 		tabLoader := helper.NewFileLoader(!globals.ParaLoading, globals.CacheDir)

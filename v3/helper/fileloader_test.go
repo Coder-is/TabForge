@@ -116,3 +116,28 @@ func TestFileLoaderReadsCSV(t *testing.T) {
 		}
 	}
 }
+
+// A synchronous loader serves preloaded files from memory and still loads
+// files that were not preloaded.
+func TestFileLoaderPreloadKeepsSyncFallback(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	pre, late := write("pre.csv", "a,b\n1,2\n"), write("late.csv", "c\n3\n")
+	loader := NewFileLoader(true, "")
+	loader.Preload([]string{pre})
+	if err := os.Remove(pre); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := loader.GetFile(pre); err != nil || file == nil {
+		t.Fatalf("preloaded file not served from memory: %v", err)
+	}
+	if file, err := loader.GetFile(late); err != nil || file == nil {
+		t.Fatalf("file outside the preload not loaded: %v", err)
+	}
+}

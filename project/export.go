@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Coder-is/TabForge/databundle"
 	"github.com/Coder-is/TabForge/internal/filelock"
@@ -231,6 +232,22 @@ func (g rootedGetter) GetFile(name string) (helper.TableFile, error) {
 	return g.loader.GetFile(path)
 }
 
+// Preload parses every listed table file in parallel. Names that do not
+// resolve inside root are skipped here; GetFile reports them in order.
+func (g rootedGetter) Preload(names []string) {
+	preloader, ok := g.loader.(helper.Preloader)
+	if !ok {
+		return
+	}
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		if path, err := relativePath(g.root, name); err == nil {
+			paths = append(paths, path)
+		}
+	}
+	preloader.Preload(paths)
+}
+
 func (p *Project) exportTable(config TableConfig, stage string) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -278,22 +295,49 @@ func (p *Project) exportTable(config TableConfig, stage string) (err error) {
 		kinds = append(kinds, kind)
 	}
 	sort.Strings(kinds)
-	for _, kind := range kinds {
-		path, err := relativePath(stage, config.Outputs[kind])
-		if err != nil {
-			return err
+	// Exporters only read the compiled globals and write distinct paths, so
+	// they run together like the CLI's; errors are reported in kind order.
+	errs := make([]error, len(kinds))
+	panics := make([]any, len(kinds))
+	var tasks sync.WaitGroup
+	for i, kind := range kinds {
+		tasks.Add(1)
+		go func() {
+			defer tasks.Done()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					panics[i] = recovered
+				}
+			}()
+			errs[i] = writeOutput(g, kind, stage, config.Outputs[kind])
+		}()
+	}
+	tasks.Wait()
+	for i := range kinds {
+		if panics[i] != nil {
+			panic(panics[i]) // exportTable's recover turns table errors into errors.
 		}
-		if single, ok := singleOutputs[kind]; ok {
-			data, err := single(g)
-			if err != nil {
-				return fmt.Errorf("%s: %w", kind, err)
-			}
-			if err := helper.WriteFile(path, data); err != nil {
-				return err
-			}
-		} else if err := directoryOutputs[kind](g, path); err != nil {
+		if errs[i] != nil {
+			return errs[i]
+		}
+	}
+	return nil
+}
+
+func writeOutput(g *model.Globals, kind, stage, name string) error {
+	path, err := relativePath(stage, name)
+	if err != nil {
+		return err
+	}
+	if single, ok := singleOutputs[kind]; ok {
+		data, err := single(g)
+		if err != nil {
 			return fmt.Errorf("%s: %w", kind, err)
 		}
+		return helper.WriteFile(path, data)
+	}
+	if err := directoryOutputs[kind](g, path); err != nil {
+		return fmt.Errorf("%s: %w", kind, err)
 	}
 	return nil
 }

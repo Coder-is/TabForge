@@ -100,13 +100,27 @@ func loadFileByExt(filename string, cacheDir string) (file TableFile, err error)
 	return file, nil
 }
 
+// Preloader is a FileGetter that can load files ahead of use, in parallel.
+type Preloader interface {
+	Preload(filenames []string)
+}
+
+// Preload loads filenames in parallel; GetFile then returns them without
+// parsing again. A synchronous loader still loads anything not preloaded.
+func (self *FileLoader) Preload(filenames []string) {
+	for _, filename := range filenames {
+		self.AddFile(filename)
+	}
+	self.Commit()
+}
+
 func (self *FileLoader) GetFile(filename string) (TableFile, error) {
 	filename = filepath.Clean(filename)
 
-	if self.syncLoad {
+	result, ok := self.fileByName.Load(filename)
+	if !ok && self.syncLoad {
 		return loadFileByExt(filename, self.cacheDir)
 	}
-	result, ok := self.fileByName.Load(filename)
 	if !ok {
 		return nil, fmt.Errorf("file not loaded: %s", filename)
 	}
