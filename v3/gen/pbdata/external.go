@@ -340,6 +340,37 @@ func GenerateJSON(globals *model.Globals) ([]byte, error) {
 	return output.Bytes(), nil
 }
 
+// OutputJSON writes one ProtoJSON file per mapped table into dir, each the
+// root message holding only that table, like Output does for Protobuf.
+func OutputJSON(globals *model.Globals, dir string) error {
+	schema, err := loadExternalSchema(globals)
+	if err != nil {
+		return err
+	}
+	outputs := make(map[string][]byte)
+	for _, table := range schema.tables {
+		message, err := schema.export(globals, table.table.HeaderType)
+		if err != nil {
+			return err
+		}
+		data, err := protojson.MarshalOptions{Resolver: schema.types}.Marshal(message)
+		if err != nil {
+			return err
+		}
+		var output bytes.Buffer
+		if err := json.Indent(&output, data, "", "  "); err != nil {
+			return err
+		}
+		outputs[table.table.HeaderType] = output.Bytes()
+	}
+	for _, table := range schema.tables {
+		if err := helper.WriteFile(filepath.Join(dir, table.table.HeaderType+".json"), outputs[table.table.HeaderType]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func outputExternal(globals *model.Globals, dir string) error {
 	schema, err := loadExternalSchema(globals)
 	if err != nil {

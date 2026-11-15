@@ -256,8 +256,8 @@ func (p *Project) validate() error {
 			if !knownOutput(kind) {
 				return fmt.Errorf("%s: unknown output %q", source, kind)
 			}
-			if kind == "protojson" && tab.Mapping == "" {
-				return fmt.Errorf("%s: protojson requires mapping", source)
+			if (kind == "protojson" || kind == "protojson_dir") && tab.Mapping == "" {
+				return fmt.Errorf("%s: %s requires mapping", source, kind)
 			}
 			if kind == "proto" && tab.Mapping != "" {
 				return fmt.Errorf("%s: proto output conflicts with existing Proto mapping", source)

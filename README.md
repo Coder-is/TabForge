@@ -145,7 +145,7 @@ tabforge -index=Index.xlsx -json_out=table_gen.json
 | JSON 类型信息 | `-jsontype_out` | — | 查看表结构 |
 | Proto3 定义 | `-proto_out` | — | 用 `protoc` 生成语言代码 |
 | Protobuf 二进制 `.pbb` | `-pbbin_out` | `-pbbin_dir` | `proto.Unmarshal` 或对应语言的 Protobuf SDK |
-| 已有 Proto 的 ProtoJSON | `-pbjson_out` | — | `protojson.Unmarshal` 或对应 SDK |
+| 已有 Proto 的 ProtoJSON | `-pbjson_out` | `-pbjson_dir` | `protojson.Unmarshal` 或对应 SDK |
 
 `.bin` 和 `.pbb` 使用不同的格式。`-json_out` 是 TabForge 普通 JSON，`-pbjson_out` 是已有消息的 ProtoJSON。分表 JSON 仍包含表名作为顶层键；分表 `.pbb` 仍使用合并根消息，只填充对应表字段。
 
@@ -208,6 +208,7 @@ bash v3/example/existingproto/Make.sh
 | `-json_dir` / `-lua_dir` / `-binary_dir` / `-pbbin_dir` | 每个表各一个文件的输出目录 |
 | `-proto_desc` / `-proto_map` | 已有 Proto 的描述文件与 JSON 映射，必须同时提供 |
 | `-pbjson_out` | 已有 Proto 消息的 ProtoJSON 文件，要求 `-proto_desc` 和 `-proto_map` |
+| `-pbjson_dir` | 每张映射表一个 ProtoJSON 文件的目录，根消息只填充该表字段；要求 `-proto_desc` 和 `-proto_map` |
 | `-tag_action` | 标签动作，格式为 `action:tag1+tag2\|action2:tag3` |
 | `-para` | 并发加载，默认 `false` |
 | `-usecache` | 启用 XLSX 缓存，默认 `false` |

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Coder-is/TabForge/protocol"
+	"google.golang.org/protobuf/proto"
 )
 
 func copyFixture(t *testing.T) string {
@@ -346,5 +347,63 @@ func TestExportRefusesHandwrittenOutput(t *testing.T) {
 		if strings.HasPrefix(entry.Name(), ".tabforge-") || strings.HasSuffix(entry.Name(), ".tabforge-backup") {
 			t.Fatalf("left behind: %s", entry.Name())
 		}
+	}
+}
+
+// protojson_dir writes one ProtoJSON file per mapped table, each the same
+// message as the protobuf_dir file for that table, and lists them in the
+// data manifest.
+func TestProtoJSONDirectoryOutput(t *testing.T) {
+	root := copyFixture(t)
+	config := filepath.Join(root, "tabforge.json")
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(data), `"protobuf_dir": "data/by-table"`, `"protobuf_dir": "data/by-table", "protojson_dir": "data/by-table-json"`, 1)
+	if edited == string(data) {
+		t.Fatal("fixture changed: protobuf_dir output not found")
+	}
+	if err := os.WriteFile(config, []byte(edited), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := p.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := protocol.LoadSchema(filepath.Join(r.Output, "schema", "schema.pb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(r.Output, "data_manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"Item", "Settings"} {
+		fromJSON, err := schema.ReadFile("tabforge.demo.config.Tables", filepath.Join(r.Output, "data", "by-table-json", table+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fromBinary, err := schema.ReadFile("tabforge.demo.config.Tables", filepath.Join(r.Output, "data", "by-table", table+".pbb"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !proto.Equal(fromJSON, fromBinary) {
+			t.Fatalf("%s: ProtoJSON and Protobuf files differ", table)
+		}
+		if !strings.Contains(string(manifest), "data/by-table-json/"+table+".json") {
+			t.Fatalf("%s missing from the data manifest", table)
+		}
+	}
+	// Like protojson, the directory form needs a Proto mapping.
+	if err := os.WriteFile(config, []byte(strings.Replace(edited, `"json_dir": "basic/by-table",`, `"json_dir": "basic/by-table", "protojson_dir": "basic/pj",`, 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "protojson_dir requires mapping") {
+		t.Fatalf("protojson_dir without mapping: %v", err)
 	}
 }

@@ -51,7 +51,7 @@ VS Code 安装对应平台 `.vsix` 后，执行 **TabForge: 导出项目**。可
 | `tables[].package/root/tags` | 普通导表包名、合并根类型、标签动作；root 默认 `Table` |
 | `tables[].outputs` | 输出类型映射到相对于完整生成目录的路径 |
 
-输出类型：`json`、`go`、`csharp`、`java`、`lua`、`binary`、`proto`、`protobuf`、`protojson`、`jsontype`，以及 `json_dir`、`lua_dir`、`binary_dir`、`protobuf_dir`。`protojson` 要求 mapping；已有 Proto 映射不能再选 `proto` 生成另一套定义。
+输出类型：`json`、`go`、`csharp`、`java`、`lua`、`binary`、`proto`、`protobuf`、`protojson`、`jsontype`，以及 `json_dir`、`lua_dir`、`binary_dir`、`protobuf_dir`、`protojson_dir`。`protojson` 与 `protojson_dir` 要求 mapping，`protojson_dir` 每张映射表一个 ProtoJSON 文件，并写入数据清单；已有 Proto 映射不能再选 `proto` 生成另一套定义。
 
 路径使用 `/`，不使用绝对路径或越出项目的 `..`。输入目录与输出目录分离，索引放在 `Tables/` 中。拒绝符号链接和输出路径重叠。程序维护项目规则；策划只维护数据及文件清单。
 

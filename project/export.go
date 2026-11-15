@@ -170,6 +170,13 @@ func (p *Project) generate(ctx context.Context, publishOutput bool) (*Result, er
 					entries = append(entries, databundle.Entry{File: databundle.File{Path: filepath.ToSlash(filepath.Join(dir, table+".pbb"))}, Message: message, Encoding: "protobuf"})
 				}
 			}
+			if dir := config.Outputs["protojson_dir"]; dir != "" {
+				for table := range mapping.Tables {
+					name := filepath.ToSlash(filepath.Join(dir, table+".json"))
+					result.Data = append(result.Data, DataFile{Path: name, Message: message})
+					entries = append(entries, databundle.Entry{File: databundle.File{Path: name}, Message: message, Encoding: "protojson"})
+				}
+			}
 		}
 	}
 	if schema != nil {
@@ -349,7 +356,7 @@ var singleOutputs = map[string]gen.GenSingleFile{
 }
 var directoryOutputs = map[string]gen.GenCustom{
 	"json_dir": jsondata.Output, "lua_dir": luasrc.Output,
-	"binary_dir": bindata.Output, "protobuf_dir": pbdata.Output,
+	"binary_dir": bindata.Output, "protobuf_dir": pbdata.Output, "protojson_dir": pbdata.OutputJSON,
 }
 
 func knownOutput(kind string) bool {

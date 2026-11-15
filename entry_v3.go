@@ -37,6 +37,7 @@ var (
 	paramProtoDescriptor = flag.String("proto_desc", "", "existing Protobuf FileDescriptorSet, compiled with --include_imports")
 	paramProtoMapping    = flag.String("proto_map", "", "JSON mapping from tables/columns to existing Protobuf messages")
 	paramProtoJSONOut    = flag.String("pbjson_out", "", "output ProtoJSON using -proto_desc and -proto_map")
+	paramProtoJSONDir    = flag.String("pbjson_dir", "", "output one ProtoJSON file per table to dir, using -proto_desc and -proto_map")
 
 	v3GenList = []V3GenEntry{
 		{name: "gosrc", genSingleFile: gosrc.Generate, param: paramGoOut},
@@ -54,6 +55,7 @@ var (
 		{name: "luadir", genCustom: luasrc.Output, param: paramLuaDir},
 		{name: "binarydir", genCustom: bindata.Output, param: paramBinaryDir},
 		{name: "pbdatadir", genCustom: pbdata.Output, param: paramPbBinaryDir},
+		{name: "pbjsondir", genCustom: pbdata.OutputJSON, param: paramProtoJSONDir},
 	}
 )
 
@@ -175,6 +177,9 @@ func validateProtoOptions() error {
 	}
 	if *paramProtoJSONOut != "" && *paramProtoDescriptor == "" {
 		return fmt.Errorf("-pbjson_out requires -proto_desc and -proto_map")
+	}
+	if *paramProtoJSONDir != "" && *paramProtoDescriptor == "" {
+		return fmt.Errorf("-pbjson_dir requires -proto_desc and -proto_map")
 	}
 	return nil
 }

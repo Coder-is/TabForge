@@ -109,7 +109,7 @@ func TestV3ExampleExportConsistency(t *testing.T) {
 			}
 			var entries []V3GenEntry
 			for _, entry := range v3GenList {
-				if entry.name == "pbjson" {
+				if entry.name == "pbjson" || entry.name == "pbjsondir" {
 					continue // ProtoJSON requires an existing descriptor, tested separately.
 				}
 				output := filepath.Join(dir, mode, entry.name)
@@ -193,5 +193,12 @@ func TestValidateProtoOptions(t *testing.T) {
 		if err := validateProtoOptions(); (err == nil) != tc.valid {
 			t.Errorf("options %+v: %v", tc, err)
 		}
+	}
+	*paramProtoDescriptor, *paramProtoMapping, *paramProtoOut, *paramProtoJSONOut = "", "", "", ""
+	oldDir := *paramProtoJSONDir
+	defer func() { *paramProtoJSONDir = oldDir }()
+	*paramProtoJSONDir = "by-table"
+	if err := validateProtoOptions(); err == nil {
+		t.Error("-pbjson_dir accepted without -proto_desc")
 	}
 }
