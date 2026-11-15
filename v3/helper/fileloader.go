@@ -86,7 +86,9 @@ func loadFileByExt(filename string, cacheDir string) (file TableFile, err error)
 	}()
 
 	switch strings.ToLower(filepath.Ext(filename)) {
-	case ".xlsx", ".xls", ".xlsm":
+	case ".xls":
+		report.ReportError("UnsupportedXlsFile", filename)
+	case ".xlsx", ".xlsm":
 		file = NewXlsxFile(cacheDir)
 	case ".csv":
 		file = NewCSVFile()

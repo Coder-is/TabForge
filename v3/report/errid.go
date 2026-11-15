@@ -20,6 +20,7 @@ var (
 		"HeaderTypeNotFound":             {CHS: "表头类型找不到"},
 		"DuplicateValueInMakingIndex":    {CHS: "创建索引时发现重复值"},
 		"UnknownInputFileExtension":      {CHS: "未知的输入文件扩展名"},
+		"UnsupportedXlsFile":             {CHS: "不支持旧版 .xls 格式, 请在 Excel 中另存为 .xlsx"},
 		"DataMissMatchTypeDefine":        {CHS: "数据与定义类型不匹配"},
 		"ArrayMultiColumnDefineNotMatch": {CHS: "数组类型多列跨表定义不一致"},
 		"InvalidFieldName":               {CHS: "非法字段名"},

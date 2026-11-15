@@ -22,8 +22,8 @@
 | --- | --- | --- | --- | --- |
 | 2.1 | 每次导出整体替换输出目录，未变化的文件也获得新修改时间，Unity/Godot/Unreal 每次全部重新导入 | `internal/publish/publish.go` | 内容相同的暂存文件沿用旧文件的修改时间；整体相同时跳过替换 | 完成 |
 | 2.2 | 项目模式逐个读取表格文件，多种输出格式串行生成 | `project/export.go` | 并发预加载表格文件；输出格式并发生成（完整示例产物逐字节一致；大表提速尚未实测） | 完成 |
-| 2.3 | 导出器遇到未知类型直接 panic，用户只看到 `panic: …` | `v3/gen/bindata`、`v3/gen/pbdata`、`v3/compiler/merge.go`、`strtovalue.go` | 改为返回带表名/字段的错误 | 待办 |
-| 2.4 | `.xls` 被交给 xlsx 解析器，报出难懂的 zip 错误；自动发现又排除 `.xls`，两处不一致 | `v3/helper/fileloader.go` | 明确提示另存为 `.xlsx` | 待办 |
+| 2.3 | 导出器遇到未知类型直接 panic，用户只看到 `panic: …` | `v3/gen/bindata`、`v3/gen/pbdata`、`v3/compiler/merge.go`、`strtovalue.go` | 核实后不改：字段类型在检查阶段已限定为内建类型或枚举，输出表头来自同一类型定义，这些分支只是内部不变量，用户输入到不了 | 不需要 |
+| 2.4 | `.xls` 被交给 xlsx 解析器，报出难懂的 zip 错误；自动发现又排除 `.xls`，两处不一致 | `v3/helper/fileloader.go` | 明确提示另存为 `.xlsx` | 完成 |
 | 2.5 | 过时的 `// TODO KV表测试` 与注释掉的错误用例 | `v3/tests/data_test.go` | 删除 | 待办 |
 
 ## 第三阶段：实时长连接性能

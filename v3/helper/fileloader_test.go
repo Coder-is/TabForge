@@ -87,6 +87,14 @@ func TestFileLoaderReturnsInputErrors(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "UnknownInputFileExtension") {
 				t.Fatalf("expected structured input error: %v", err)
 			}
+			// Old binary Excel files get a hint instead of a zip error.
+			loader.AddFile("legacy.xls")
+			if !syncLoad {
+				loader.Commit()
+			}
+			if _, err := loader.GetFile("legacy.xls"); err == nil || !strings.Contains(err.Error(), "UnsupportedXlsFile") {
+				t.Fatalf("expected xls hint: %v", err)
+			}
 		})
 	}
 }
