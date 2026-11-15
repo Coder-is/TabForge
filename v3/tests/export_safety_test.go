@@ -108,7 +108,7 @@ func TestEmptyEnumUsesFirstMember(t *testing.T) {
 
 // 标识名 is written into comments and Go tags; line breaks would turn the rest into code.
 func TestFieldAliasRejected(t *testing.T) {
-	for _, name := range []string{"备注\nos.exit()", "a\rb", "tab\tname", "line\u2028sep", `quo"te`, "back`tick"} {
+	for _, name := range []string{"备注\nos.exit()", "a\rb", "tab\tname", "line\u2028sep", `quo"te`, "back`tick", `P\u000a static { System.exit(42); } //`, `back\slash`} {
 		emu := NewTableEmulator(t)
 		idx := emu.CreateCSVFile("Index")
 		helper.WriteIndexTableHeader(idx)
@@ -126,7 +126,7 @@ func TestFieldAliasRejected(t *testing.T) {
 	kv := emu.CreateCSVFile("KV")
 	helper.WriteRowValues(kv, "字段名", "字段类型", "标识名", "值")
 	helper.WriteRowValues(kv, "Name", "string", "名称\nend os.exit() --", "a")
-	emu.MustGotError("TableError.InvalidFieldAlias 非法标识名, 不能包含换行等控制字符、双引号或反引号 | '名称\nend os.exit() --' @KV|(C2)")
+	emu.MustGotError("TableError.InvalidFieldAlias 非法标识名, 不能包含换行等控制字符、双引号、反引号或反斜杠 | '名称\nend os.exit() --' @KV|(C2)")
 
 	// Accepted names are still escaped inside the Go struct tag.
 	tag := gosrc.UsefulFunc["GoTabTag"].(func(*model.TypeDefine) string)(&model.TypeDefine{Name: `路径\名称`})

@@ -117,10 +117,11 @@ func checkFieldAliases(typeTab *model.TypeTable) {
 	}
 }
 
-// validFieldAlias 拒绝控制字符(含CR/LF)、Unicode行分隔符、双引号和反引号
+// validFieldAlias 拒绝控制字符(含CR/LF)、Unicode行分隔符、双引号、反引号和反斜杠。
+// Java 在词法分析前把注释里的 \u000a 转成换行, 反斜杠会让别名逃出注释。
 func validFieldAlias(name string) bool {
 	for _, r := range name {
-		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || r == '"' || r == '`' {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || r == '"' || r == '`' || r == '\\' {
 			return false
 		}
 	}
