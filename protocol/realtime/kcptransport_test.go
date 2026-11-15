@@ -611,3 +611,78 @@ func TestKCPKeyRotation(t *testing.T) {
 		t.Fatal("ServeKCP accepted previous keys without a current one")
 	}
 }
+
+// linkKCP connects two conversations through in-memory queues.
+func linkKCP(t testing.TB, maxMessage int) (a, b *kcpConn) {
+	toA, toB := make(chan []byte, 4096), make(chan []byte, 4096)
+	deliver := func(ch chan []byte) func([]byte) {
+		return func(p []byte) {
+			select {
+			case ch <- append([]byte(nil), p...):
+			default: // A full link drops like a full UDP buffer.
+			}
+		}
+	}
+	a = newKCPConn(7, maxMessage, nil, deliver(toB))
+	b = newKCPConn(7, maxMessage, nil, deliver(toA))
+	done := make(chan struct{})
+	pump := func(ch chan []byte, c *kcpConn) {
+		for {
+			select {
+			case p := <-ch:
+				c.receive(p)
+			case <-done:
+				return
+			}
+		}
+	}
+	go pump(toA, a)
+	go pump(toB, b)
+	t.Cleanup(func() {
+		close(done)
+		a.fail(net.ErrClosed)
+		b.fail(net.ErrClosed)
+	})
+	return a, b
+}
+
+// An unread conversation buffers about one maxMessage of complete messages,
+// not kcpInboxLimit full-size ones; reading drains the rest in order.
+func TestKCPInboxBoundedByBytes(t *testing.T) {
+	const maxMessage, size, count = 64 << 10, 60 << 10, 40
+	a, b := linkKCP(t, maxMessage)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	sent := make(chan error, 1)
+	go func() {
+		for i := 0; i < count; i++ {
+			if err := a.send(ctx, kcpBinary, bytes.Repeat([]byte{byte(i)}, size)); err != nil {
+				sent <- err
+				return
+			}
+		}
+		sent <- nil
+	}()
+	time.Sleep(time.Second)
+	b.mu.Lock()
+	held, n := 0, len(b.inbox)
+	for _, m := range b.inbox {
+		held += len(m.data)
+	}
+	b.mu.Unlock()
+	if held > 2*maxMessage {
+		t.Fatalf("unread inbox holds %d bytes in %d messages", held, n)
+	}
+	for i := 0; i < count; i++ {
+		_, data, err := b.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) != size || data[0] != byte(i) {
+			t.Fatalf("message %d: %d bytes starting %d", i, len(data), data[0])
+		}
+	}
+	if err := <-sent; err != nil {
+		t.Fatal(err)
+	}
+}

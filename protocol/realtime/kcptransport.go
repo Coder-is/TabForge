@@ -72,6 +72,7 @@ type kcpConn struct {
 	start      time.Time
 	maxMessage int
 	inbox      []kcpMessage
+	inboxBytes int // payload bytes held in inbox
 	partial    []byte
 	partialTyp byte
 	partialOn  bool
@@ -212,8 +213,11 @@ func (c *kcpConn) input(data []byte) {
 
 // pumpLocked moves complete KCP messages into the inbox while it has room;
 // leaving the rest in KCP lets its receive window slow the sender down.
+// Room is counted in messages and in bytes: one maxMessage worth of
+// complete messages, so a peer that is not read (for example while it
+// authenticates) cannot park kcpInboxLimit full-size messages in memory.
 func (c *kcpConn) pumpLocked() error {
-	for len(c.inbox) < kcpInboxLimit {
+	for len(c.inbox) < kcpInboxLimit && c.inboxBytes < c.maxMessage {
 		m := c.kcp.Recv()
 		if m == nil {
 			return nil
@@ -247,6 +251,7 @@ func (c *kcpConn) pumpLocked() error {
 			c.partial = append(c.partial, m[1:]...)
 			if !more {
 				c.inbox = append(c.inbox, kcpMessage{typ: typ, data: c.partial})
+				c.inboxBytes += len(c.partial)
 				c.partial, c.partialOn = nil, false
 				signal(c.readable)
 			}
@@ -324,6 +329,7 @@ func (c *kcpConn) Read(ctx context.Context) (websocket.MessageType, []byte, erro
 		if len(c.inbox) > 0 {
 			m := c.inbox[0]
 			c.inbox = c.inbox[1:]
+			c.inboxBytes -= len(m.data)
 			err := c.pumpLocked()
 			c.mu.Unlock()
 			if err != nil {
