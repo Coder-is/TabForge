@@ -59,7 +59,7 @@
 | 5.2 | 会话交接存储中的快照未签名、未加密，能写存储者可伪造任意用户会话 | 新增 `Server.StoreKey` 与 `StorePreviousKeys`：快照经 XChaCha20-Poly1305 加密认证，存储键作为关联数据（不能挪给其他会话）；设置后拒绝明文快照。不设置时行为不变，文档写明存储须与服务器同等可信 | 完成 |
 | 5.3 | Go / Java / proto 源码不支持字段级标签过滤，生成的结构可能包含数据里不存在的字段 | 新增 `nogenfield_go`、`nogenfield_java`、`nogenfield_proto`；Go/Java 同时去掉以该字段为键的索引，proto 保持其余字段编号。未使用时完整示例产物逐字节不变；过滤后的 Go 经 `go vet`、Java 经 `javac`、proto 经 protocompile 编译通过 | 完成 |
 | 5.4 | ProtoJSON 没有分表目录导出 | 新增项目输出 `protojson_dir` 与 CLI `-pbjson_dir`（都要求映射）：每张映射表一个 ProtoJSON 文件，写入数据清单；与 `protobuf_dir` 同表文件解码结果相同。VS Code 配置补全同步 | 完成 |
-| 5.5 | 发布产物只有 SHA-256，没有来源证明 | 发布工作流增加构建来源证明 | 待办 |
+| 5.5 | 发布产物只有 SHA-256，没有来源证明 | 发布工作流用 `actions/attest@v4` 为每个交付文件生成 Sigstore 签名的 SLSA 来源证明，文档给出 `gh attestation verify` 核对方法。只在推送 tag 时运行，本地仅校验了 YAML | 完成（待首次发布验证） |
 | 5.6 | KCP 握手前没有地址验证：伪造源地址可占满待定名额；明文 KCP 可被用作流量放大 | 类似 QUIC Retry 的无状态 cookie 往返；需同时修改 Go、Unity C#、Godot、Unreal C++ 客户端 | 待办 |
 | 5.7 | 明文 reset 可被链路上的攻击者伪造；握手期间伪造 reset 会让客户端永久放弃重连 | reset 带会话密钥派生的令牌；握手期间的 reset 改为可重试。需改各端客户端 | 待办 |
 | 5.8 | 表格字段只支持基础类型与枚举 | 嵌套结构与结构数组，需要独立设计 | 待定 |

@@ -82,7 +82,7 @@ outputs/releases/0.5.0/
 python3 scripts/verify_release.py --out=/path/to/delivery --integrity-only
 ```
 
-该检查对比目录、SHA256SUMS 和发布清单，拒绝缺失、重复、额外或被修改的文件。校验值用于发现文件变化；分发渠道的身份与信任由维护者负责。
+该检查对比目录、SHA256SUMS 和发布清单，拒绝缺失、重复、额外或被修改的文件。校验值用于发现文件变化；GitHub 发布另附构建来源证明（见[发布流程](publishing.md)），可用 `gh attestation verify` 核对文件来自本仓库的工作流。
 
 按接入端选择包：
 

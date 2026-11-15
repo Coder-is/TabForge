@@ -13,6 +13,10 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+      # Signed build provenance for every delivered file (actions/attest).
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -56,6 +60,10 @@ jobs:
             outputs/delivery/
             outputs/publish-plan.json
           if-no-files-found: error
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: outputs/delivery/*
       - name: Publish GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}

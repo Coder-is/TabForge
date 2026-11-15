@@ -15,6 +15,8 @@ python3 scripts/prepare_publish.py --out=outputs/releases/0.5.0 --plan=outputs/r
 
 将同一提交标记为 `v0.5.0` 后推送，会触发 `.github/workflows/release.yml`。工作流核对 tag 与版本，运行自动化回归、构建 29 个安装包、独立消费验收、校验最终清单，并使用 GITHUB_TOKEN 创建 GitHub prerelease 和上传交付文件。只上传成功构建的产物；构建失败不会创建该版本 release。发布前提是仓库已启用 GitHub Actions，且允许该任务写入 contents。
 
+上传前工作流用 `actions/attest` 为每个交付文件生成经 Sigstore 签名的 SLSA 构建来源证明（需要 `id-token`、`attestations`、`artifact-metadata` 写权限，公开仓库可用）。下载者可以确认文件确实由本仓库该提交的工作流构建：`gh attestation verify tabforge-....zip --repo Coder-is/TabForge`。这一步只在推送 tag 时运行，本地无法演练。
+
 此流程不安装或启动引擎，不执行编辑器 UI 和目标设备实测。Unreal ZIP 是需要引擎构建的源码插件，不能作为已经编译并实测的引擎二进制承诺。当前版本使用 prerelease 标记，完整验收范围见报告及 release notes。
 
 ## npm
