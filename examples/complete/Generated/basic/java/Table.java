@@ -58,7 +58,7 @@ public class Table {
 	public class Actor { 	
 		public int ID = 0; // ID; 	
 		public String Name = ""; // 名称; 	
-		public Role Role = Role.None; // 职业; 	
+		public Role Role = Table.Role.None; // 职业; 	
 		public boolean Enabled = false; // 启用; 	
 		public int[] Skills = new int[]{}; // 技能; 	
 		public String[] Labels = new String[]{}; // 标签; 	

@@ -138,7 +138,7 @@ tabforge -index=Index.xlsx -json_out=table_gen.json
 | --- | --- | --- | --- |
 | Go 源码 | `-go_out` | — | 与 JSON 配合使用 |
 | C# 源码 | `-csharp_out` | — | 与专用 `.bin` 和 C# 读取库配合使用 |
-| Java 源码 | `-java_out` | — | 与 JSON 和 fastjson 配合使用；枚举按值反序列化，编译需要 fastjson |
+| Java 源码 | `-java_out` | — | 与 JSON 和 fastjson 配合使用；枚举按值反序列化；表中有枚举时生成的反序列化器引用 fastjson，编译需要 `com.alibaba:fastjson`（1.2.x，已用 1.2.83 验证） |
 | 普通 JSON | `-json_out` | `-json_dir` | 生成代码或应用自己的 JSON 读取流程 |
 | Lua | `-lua_out` | `-lua_dir` | `require("模块名").init(tab)` |
 | 专用二进制 `.bin` | `-binary_out` | `-binary_dir` | C# `tabtoy.TableReader` |
@@ -345,7 +345,7 @@ KV 字段直接定义在键值表中，索引表的模式使用“键值表”�
 | --- | --- |
 | Go | 单一包名；使用 Go 标识符；表名及数据字段须导出，不能与生成方法、索引、枚举辅助类型或变量重名 |
 | C# | 包名作为命名空间，可用点分隔；拒绝保留关键字、非法字符和成员与所在类型同名 |
-| Java | 支持点分包名；拒绝关键字、受限类型名，以及与模板依赖类型或辅助类型冲突的名称（含 `com`、`Object`、`Number`、`FastjsonDeserializer`） |
+| Java | 支持点分包名；拒绝关键字、受限类型名，以及与模板依赖类型或辅助类型冲突的名称（含 `com`、`Object`、`Number`、`FastjsonDeserializer`）；字段名不能与根类（`-combinename`，默认 `Table`）相同，枚举默认值以根类限定，字段与其枚举类型同名也能编译 |
 | Lua | 使用 ASCII 字母、数字和下划线，不能以数字开头或使用关键字；表、枚举和索引在输出根表中不得重名 |
 | Proto3 | 使用 ASCII 标识符；检查枚举值的包级作用域，以及去掉下划线、大小写与枚举前缀后产生的名称冲突 |
 

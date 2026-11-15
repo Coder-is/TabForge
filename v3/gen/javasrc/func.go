@@ -20,7 +20,9 @@ func wrapSingleValue(globals *model.Globals, valueType *model.TypeDefine, value 
 	case globals.Types.IsEnumKind(valueType.FieldType): // 枚举
 		t := globals.Types.ResolveEnum(valueType.FieldType, value)
 		if t != nil {
-			return t.Define.ObjectType + "." + t.Define.FieldName
+			// Qualified by the root class: a field named like its enum type would
+			// otherwise obscure the type in this expression (JLS 6.4.2).
+			return globals.CombineStructName + "." + t.Define.ObjectType + "." + t.Define.FieldName
 		}
 
 		return ""

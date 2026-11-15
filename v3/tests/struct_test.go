@@ -355,3 +355,40 @@ class Program {
 		t.Fatalf("C# read %q", got)
 	}
 }
+
+// A Java field named like its enum type must not obscure the type in its
+// default value, and C# only declares ITableSerializable with a reader.
+func TestGeneratedSourcesCompileEdgeCases(t *testing.T) {
+	g := compiledStructExample(t).G
+	java, err := javasrc.Generate(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(java), "public Rarity Rarity = Table.Rarity.Common;") {
+		t.Fatalf("Java enum default not qualified:\n%s", java)
+	}
+	for binary, want := range map[bool]bool{false: false, true: true} {
+		g.GenBinary = binary
+		cs, err := cssrc.Generate(g)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(cs), "ITableSerializable") != want {
+			t.Fatalf("C# binary=%v declares ITableSerializable=%v", binary, !want)
+		}
+	}
+	// The qualifier itself cannot be obscured: a field named like the root class is refused.
+	emu := NewTableEmulator(t)
+	idx := emu.CreateCSVFile("Index")
+	helper.WriteIndexTableHeader(idx)
+	helper.WriteRowValues(idx, "类型表", "", "Type")
+	types := emu.CreateCSVFile("Type")
+	helper.WriteTypeTableHeader(types)
+	helper.WriteRowValues(types, "表头", "Probe", "表", "Table", "int32")
+	if err := compiler.Compile(emu.G); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := javasrc.Generate(emu.G); err == nil || !strings.Contains(err.Error(), "root class") {
+		t.Fatalf("field named Table: %v", err)
+	}
+}

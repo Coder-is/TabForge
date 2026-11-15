@@ -103,6 +103,9 @@ func ValidateNames(globals *model.Globals, language string) error {
 		if language == "java" && field.Kind == model.TypeUsage_Enum && field.FieldName == field.ObjectType {
 			return fmt.Errorf("java enum value %q at %s conflicts with its generated value field", field.FieldName, where)
 		}
+		if language == "java" && field.Kind == model.TypeUsage_HeaderStruct && field.FieldName == globals.CombineStructName {
+			return fmt.Errorf("java field %q at %s conflicts with the root class that qualifies enum defaults", field.FieldName, where)
+		}
 		if language == "protobuf" {
 			scope, name := "fields:"+field.ObjectType, protoFieldKey(field.FieldName)
 			if field.Kind == model.TypeUsage_Enum {

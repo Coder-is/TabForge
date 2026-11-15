@@ -14,7 +14,7 @@ namespace {{.PackageName}}
 		{{$field.FieldName}} = {{$field.Value}}, // {{$field.Name}} {{end}}
 	}
 	{{end}}	{{range $sn, $objName := $.Types.StructNames}}
-	public partial class {{$objName}} : tabtoy.ITableSerializable
+	public partial class {{$objName}}{{if $.GenBinary}} : tabtoy.ITableSerializable{{end}}
 	{ 
 		{{range $fi,$field := $.Types.AllFieldByName $objName}}{{if IsWarpFieldName $ $field}}public {{CSType $field}} {{$field.FieldName}} = {{CSDefaultValue $ $field}};
 		{{end}}{{end}}
