@@ -375,6 +375,9 @@ tabforge -index=Index.xlsx -json_out=server.json \
 | `nogenfield_pbbin` | 类型表 | Protobuf 二进制不包含该字段；已有 Proto 模式下也作用于 ProtoJSON |
 | `nogenfield_lua` | 类型表 | Lua 不包含该字段 |
 | `nogenfield_csharp` | 类型表 | 生成的 C# 不包含该字段 |
+| `nogenfield_go` | 类型表 | 生成的 Go 结构不包含该字段，以该字段为键的索引一并去掉 |
+| `nogenfield_java` | 类型表 | 生成的 Java 类不包含该字段，以该字段为键的索引一并去掉 |
+| `nogenfield_proto` | 类型表 | 生成的 `.proto` 不包含该字段，其余字段编号不变；Protobuf 数据是否包含该字段由 `nogenfield_pbbin` 决定 |
 
 字段动作按输出格式分别生效，例如 `nogenfield_json` 不过滤分表 JSON，也不过滤 Go 源码。已有 Proto 映射引用的表须存在于编译结果中，经 `nogentab` 过滤后仍被映射引用的表会报错。
 

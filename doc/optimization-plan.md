@@ -57,7 +57,7 @@
 | --- | --- | --- | --- |
 | 5.1 | JSON 编码的实时连接每帧解码约 8.5 µs、146 次分配；`ValidateJSON` 为每个值取一次 token，HTTP 请求与数据包加载同样经过它 | `ValidateJSON` 先用 `json.Valid` 检查语法，再用轻量扫描检查深度与重复成员（转义和非法 UTF-8 的成员名按 `Token` 的方式解码后比较），出错时仍由原实现给出原来的错误信息；与原实现做差分模糊测试（580 万次输入无差异）。帧解码去掉多余的尾部检查和正则。8491 ns → 2967 ns，146 → 22 次分配 | 完成 |
 | 5.2 | 会话交接存储中的快照未签名、未加密，能写存储者可伪造任意用户会话 | 新增 `Server.StoreKey` 与 `StorePreviousKeys`：快照经 XChaCha20-Poly1305 加密认证，存储键作为关联数据（不能挪给其他会话）；设置后拒绝明文快照。不设置时行为不变，文档写明存储须与服务器同等可信 | 完成 |
-| 5.3 | Go / Java / proto 源码不支持字段级标签过滤，生成的结构可能包含数据里不存在的字段 | 增加对应的 `nogenfield_*` 动作 | 待办 |
+| 5.3 | Go / Java / proto 源码不支持字段级标签过滤，生成的结构可能包含数据里不存在的字段 | 新增 `nogenfield_go`、`nogenfield_java`、`nogenfield_proto`；Go/Java 同时去掉以该字段为键的索引，proto 保持其余字段编号。未使用时完整示例产物逐字节不变；过滤后的 Go 经 `go vet`、Java 经 `javac`、proto 经 protocompile 编译通过 | 完成 |
 | 5.4 | ProtoJSON 没有分表目录导出 | 增加 `protojson_dir` | 待办 |
 | 5.5 | 发布产物只有 SHA-256，没有来源证明 | 发布工作流增加构建来源证明 | 待办 |
 | 5.6 | KCP 握手前没有地址验证：伪造源地址可占满待定名额；明文 KCP 可被用作流量放大 | 类似 QUIC Retry 的无状态 cookie 往返；需同时修改 Go、Unity C#、Godot、Unreal C++ 客户端 | 待办 |

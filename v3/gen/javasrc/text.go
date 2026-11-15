@@ -52,15 +52,15 @@ public class {{.CombineStructName}} {	{{range $sn, $objName := $.Types.EnumNames
 	 }
 	{{end}}
 	{{range $sn, $objName := $.Types.StructNames}}
-	public class {{$objName}} { {{range $fi,$field := $.Types.AllFieldByName $objName}}	
-		public {{JavaType $field false}} {{$field.FieldName}} = {{JavaDefaultValue $ $field}}; // {{$field.Name}}; {{end}}
+	public class {{$objName}} { {{range $fi,$field := $.Types.AllFieldByName $objName}}{{if IsGenField $ $field}}	
+		public {{JavaType $field false}} {{$field.FieldName}} = {{JavaDefaultValue $ $field}}; // {{$field.Name}}; {{end}}{{end}}
 	}
 	{{end}}
 	{{range $ti, $tab := $.Datas.AllTables}}
 	public List<{{$tab.HeaderType}}> {{$tab.HeaderType}} = new ArrayList<>(); // table: {{$tab.HeaderType}} {{end}}
 
-	// Indices {{range $ii, $idx := GetIndices $}}
-	public Map<{{JavaType $idx.FieldInfo true}}, {{$idx.Table.HeaderType}}> {{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}} = new HashMap<{{JavaType $idx.FieldInfo true}}, {{$idx.Table.HeaderType}}>(); // table: {{$idx.Table.HeaderType}} {{end}}
+	// Indices {{range $ii, $idx := GetIndices $}}{{if IsGenField $ $idx.FieldInfo}}
+	public Map<{{JavaType $idx.FieldInfo true}}, {{$idx.Table.HeaderType}}> {{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}} = new HashMap<{{JavaType $idx.FieldInfo true}}, {{$idx.Table.HeaderType}}>(); // table: {{$idx.Table.HeaderType}} {{end}}{{end}}
 	{{if HasKeyValueTypes $}}
 	{{range $ti, $name := GetKeyValueTypeNames $}}// table: {{$name}}
 	public {{$name}} GetKeyValue_{{$name}}() {
@@ -87,16 +87,16 @@ public class {{.CombineStructName}} {	{{range $sn, $objName := $.Types.EnumNames
 		}
 		{{range $ti, $tab := $.Datas.AllTables}}
 		{{$tab.HeaderType}}.clear(); {{end}}
-		{{range $ii, $idx := GetIndices $}}
-		{{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}}.clear(); {{end}}	
+		{{range $ii, $idx := GetIndices $}}{{if IsGenField $ $idx.FieldInfo}}
+		{{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}}.clear(); {{end}}{{end}}	
 	}
 
 	// 构建索引, 需要捕获OnPostProcess可能抛出的异常
 	public void  BuildData()  {
-		{{range $ii, $idx := GetIndices $}}
+		{{range $ii, $idx := GetIndices $}}{{if IsGenField $ $idx.FieldInfo}}
 		for( {{$idx.Table.HeaderType}} v:{{$idx.Table.HeaderType}} ) {
 			{{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}}.put(v.{{$idx.FieldInfo.FieldName}}, v);
-		}{{end}}
+		}{{end}}{{end}}
 
 		for( TableEvent ev : eventHandlers){
 			ev.OnPostProcess();

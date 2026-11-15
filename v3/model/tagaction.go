@@ -12,6 +12,9 @@ const (
 	ActionNoGenFieldPbBinary = "nogenfield_pbbin"
 	ActionNoGennFieldLua     = "nogenfield_lua"
 	ActionNoGennFieldCsharp  = "nogenfield_csharp"
+	ActionNoGenFieldGo       = "nogenfield_go"
+	ActionNoGenFieldJava     = "nogenfield_java"
+	ActionNoGenFieldProto    = "nogenfield_proto"
 	ActionNoGenTable         = "nogentab"
 )
 

@@ -81,7 +81,7 @@ func ValidateNames(globals *model.Globals, language string) error {
 		} else if v.symbols[typeScope+"\x00"+field.ObjectType] != "type "+field.ObjectType {
 			return fmt.Errorf("%s type %q at %s conflicts with %s", language, field.ObjectType, where, v.symbols[typeScope+"\x00"+field.ObjectType])
 		}
-		if field.Kind == model.TypeUsage_HeaderStruct && (language == "csharp" && globals.CanDoAction(model.ActionNoGennFieldCsharp, field) || language == "lua" && globals.CanDoAction(model.ActionNoGennFieldLua, field)) {
+		if field.Kind == model.TypeUsage_HeaderStruct && sourceSkipsField(globals, language, field) {
 			continue
 		}
 		role := "field"
@@ -169,7 +169,7 @@ func ValidateNames(globals *model.Globals, language string) error {
 			continue // Protobuf doesn't emit runtime indices.
 		}
 		for _, index := range GetIndicesByTable(tab) {
-			if language == "csharp" && globals.CanDoAction(model.ActionNoGennFieldCsharp, index.FieldInfo) {
+			if language != "lua" && sourceSkipsField(globals, language, index.FieldInfo) { // Lua still emits the index.
 				continue
 			}
 			if err := v.identifier(index.FieldInfo.FieldName, "field", "index "+tab.HeaderType); err != nil {
@@ -309,4 +309,19 @@ func protoEnumKey(enum, name string) string {
 		}
 	}
 	return key.String()
+}
+
+// sourceFieldActions are the tag actions that leave a field (and its index)
+// out of one language's generated source. Protobuf is absent: its names are
+// also used by the Protobuf data exporters, which keep the field.
+var sourceFieldActions = map[string]string{
+	"csharp": model.ActionNoGennFieldCsharp,
+	"lua":    model.ActionNoGennFieldLua,
+	"go":     model.ActionNoGenFieldGo,
+	"java":   model.ActionNoGenFieldJava,
+}
+
+func sourceSkipsField(globals *model.Globals, language string, field *model.TypeDefine) bool {
+	action, ok := sourceFieldActions[language]
+	return ok && globals.CanDoAction(action, field)
 }

@@ -35,8 +35,8 @@ func (self {{$objName}}) String() string {
 {{end}}
 
 {{range $sn, $objName := $.Types.StructNames}}
-type {{$objName}} struct{ {{range $fi,$field := $.Types.AllFieldByName $objName}}
-	{{$field.FieldName}} {{GoType $field}} {{GoTabTag $field}} {{end}}
+type {{$objName}} struct{ {{range $fi,$field := $.Types.AllFieldByName $objName}}{{if IsGenField $ $field}}
+	{{$field.FieldName}} {{GoType $field}} {{GoTabTag $field}} {{end}}{{end}}
 }
 {{end}}
 
@@ -44,8 +44,8 @@ type {{$objName}} struct{ {{range $fi,$field := $.Types.AllFieldByName $objName}
 type {{.CombineStructName}} struct { {{range $ti, $tab := $.Datas.AllTables}}
 	{{$tab.HeaderType}} []*{{$tab.HeaderType}} // table: {{$tab.HeaderType}} {{end}}
 
-	// Indices {{range $ii, $idx := GetIndices $}}
-	{{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}} map[{{GoType $idx.FieldInfo}}]*{{$idx.Table.HeaderType}}	{{JsonTabOmit}} // table: {{$idx.Table.HeaderType}} {{end}}
+	// Indices {{range $ii, $idx := GetIndices $}}{{if IsGenField $ $idx.FieldInfo}}
+	{{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}} map[{{GoType $idx.FieldInfo}}]*{{$idx.Table.HeaderType}}	{{JsonTabOmit}} // table: {{$idx.Table.HeaderType}} {{end}}{{end}}
 
 	// Handlers
 	postHandlers []func(*{{.CombineStructName}}) error {{JsonTabOmit}}
@@ -175,10 +175,10 @@ func New{{.CombineStructName}}() *{{.CombineStructName}}{
 
 	{{range $ti, $tab := $.Datas.AllTables}}
 	self.indexHandler["{{$tab.HeaderType}}"] = func() {
-		{{range $ii, $idx := GetIndicesByTable $tab}}
+		{{range $ii, $idx := GetIndicesByTable $tab}}{{if IsGenField $ $idx.FieldInfo}}
 		for _, v := range self.{{$idx.Table.HeaderType}} {
 			self.{{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}}[v.{{$idx.FieldInfo.FieldName}}] = v
-		}{{end}}
+		}{{end}}{{end}}
 	}
 	{{end}}
 
@@ -186,8 +186,8 @@ func New{{.CombineStructName}}() *{{.CombineStructName}}{
 	{{range $ti, $tab := $.Datas.AllTables}}
 	self.resetHandler["{{$tab.HeaderType}}"] = func() {
 		self.{{$tab.HeaderType}} = nil
-		{{range $ii, $idx := GetIndicesByTable $tab}}
-		self.{{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}} = map[{{GoType $idx.FieldInfo}}]*{{$idx.Table.HeaderType}}{} {{end}}
+		{{range $ii, $idx := GetIndicesByTable $tab}}{{if IsGenField $ $idx.FieldInfo}}
+		self.{{$idx.Table.HeaderType}}By{{$idx.FieldInfo.FieldName}} = map[{{GoType $idx.FieldInfo}}]*{{$idx.Table.HeaderType}}{} {{end}}{{end}}
 	} {{end}}
 
 	self.ResetData()
