@@ -13,8 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"regexp"
 	"strconv"
 
 	"github.com/Coder-is/TabForge/protocol"
@@ -424,14 +422,19 @@ func decimal(v uint64) string {
 	return strconv.FormatUint(v, 10)
 }
 
-var canonicalDecimal = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
-
+// parseDecimal accepts "" (zero) and canonical decimals: 1 to 20 digits
+// without a leading zero.
 func parseDecimal(s string) (uint64, error) {
 	if s == "" {
 		return 0, nil
 	}
-	if !canonicalDecimal.MatchString(s) {
+	if len(s) > 20 || s[0] == '0' {
 		return 0, errMalformed
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, errMalformed
+		}
 	}
 	return strconv.ParseUint(s, 10, 64)
 }
@@ -454,9 +457,7 @@ func decodeJSON(data []byte) (*Frame, error) {
 	if err := d.Decode(&j); err != nil {
 		return nil, fmt.Errorf("%w: %v", errMalformed, err)
 	}
-	if _, err := d.Token(); err != io.EOF {
-		return nil, errMalformed
-	}
+	// ValidateJSON already ensured nothing follows the frame.
 	f := &Frame{Message: j.Message, Error: j.Error, Hello: j.Hello, Welcome: j.Welcome}
 	for kind, name := range kindNames {
 		if name == j.Kind {
